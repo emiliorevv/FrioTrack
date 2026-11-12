@@ -95,6 +95,7 @@ def construir_seed(
 
     sensores = []
     for camara_id, sensor_id in SENSORES.items():
+        # Hash-only: el token en claro solo existe en SENSOR_TOKENS (ver docs/modelo-datos.md).
         token = tokens[sensor_id]
         sensores.append(
             Sensor(

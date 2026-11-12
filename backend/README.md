@@ -29,9 +29,15 @@ Desde `backend/`:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements-dev.txt   # runtime + pytest y ruff
 cp .env.example .env   # pega aquí la URI de Supabase, ver abajo
 .venv/bin/uvicorn app.main:app --reload
+```
+
+En producción solo se instalan las dependencias de runtime:
+
+```bash
+pip install -r requirements.txt
 ```
 
 La API queda en <http://localhost:8000> y `GET /api/health` responde

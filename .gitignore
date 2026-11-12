@@ -6,6 +6,14 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# Bases de datos locales (red de seguridad: el backend usa solo Supabase)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+
 # Node
 node_modules/
 dist/
