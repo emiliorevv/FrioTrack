@@ -6,7 +6,9 @@ Contiene el simulador de sensores, la API FastAPI con la lógica que emula el ER
 
 ## Tareas
 - [ ] Esqueleto de FastAPI con `/api/health` desplegado en Render.
-- [ ] Tablas en Supabase: `camaras`, `lotes`, `lecturas`, `alertas`, `sensores`, `usuarios`, `logs_acceso`, con datos semilla (las 5 cámaras del README y unos lotes por cámara).
+- [ ] Tablas en Supabase según [docs/modelo-datos.md](../docs/modelo-datos.md), con los datos semilla que ahí se listan.
+- [ ] `ESCALA_TIEMPO` en las reglas y `GET /api/health` — ver [docs/modo-demo.md](../docs/modo-demo.md).
+- [ ] Rechazar con `403` las IPs de `ips_bloqueadas`.
 - [ ] `POST /api/telemetria` con token por sensor.
 - [ ] Reglas de negocio en `app/erp/`: estado de cámara, lotes en riesgo, merma, alerta de puerta.
 - [ ] Endpoints de consulta: cámaras, lecturas, lotes, alertas, KPIs.
@@ -14,7 +16,7 @@ Contiene el simulador de sensores, la API FastAPI con la lógica que emula el ER
 - [ ] Login con JWT y roles.
 - [ ] SMS con Twilio en segundo plano — ver ADR-0008.
 - [ ] Middleware que escribe el log de acceso en el formato del contrato.
-- [ ] Simulador con escenarios `normal`, `puerta_abierta` y `falla_compresor`.
+- [ ] Simulador con escenarios `normal`, `puerta_abierta`, `falla_compresor` y `recuperar` (ver modo-demo.md).
 - [ ] `POST /api/simulador/tick` y el Cloudflare Worker en `../cloudflare-cron/` — ver ADR-0009.
 - [ ] Pruebas con `pytest` de las reglas de negocio.
 
