@@ -5,6 +5,7 @@ Tema 3.4. Responsable: _por definir_.
 Dashboard web en React + Vite, pensado primero para celular, desplegado en Vercel. Solo habla con la API a través de [docs/contrato-api.md](../docs/contrato-api.md). Mientras el backend no esté listo, se puede trabajar con datos de ejemplo que sigan exactamente los JSON del contrato.
 
 ## Tareas
+
 - [ ] Proyecto React + Vite desplegado en Vercel.
 - [ ] Login (JWT) y guardar el token.
 - [ ] Vista general: una tarjeta por cámara con temperatura, puerta y color según estado (`en_rango`, `alerta`, `critica`).
@@ -18,4 +19,5 @@ Dashboard web en React + Vite, pensado primero para celular, desplegado en Verce
 - [ ] QR a la URL para la exposición.
 
 ## Variables de entorno
+
 `VITE_API_URL` con la URL de la API en Render.
