@@ -15,3 +15,4 @@ Plantilla: [0000-plantilla.md](0000-plantilla.md).
 | [0007](0007-reglas-siem-sigma.md) | Reglas SIEM en formato Sigma | Aceptado |
 | [0008](0008-notificaciones-sms.md) | Alertas por SMS con Twilio | Aceptado |
 | [0009](0009-cron-cloudflare-worker.md) | Flujo continuo con Cloudflare Worker | Aceptado |
+| [0010](0010-escala-tiempo-demo.md) | Escala de tiempo para la demo | Aceptado |

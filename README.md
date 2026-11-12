@@ -104,7 +104,7 @@ El restaurante tiene cinco equipos de frío. Cada uno guarda un tipo de producto
 3. Si sigue fuera de rango más del tiempo de **merma**, los lotes pasan a **merma** y se registra la pérdida en pesos en el inventario.
 4. Una puerta abierta más de **5 minutos** genera alerta aunque la temperatura siga en rango.
 
-Los rangos y tiempos se configuran por cámara en la base de datos.
+Los rangos y tiempos se configuran por cámara en la base de datos. Para la demo, la variable `ESCALA_TIEMPO` acelera los tiempos (ver [modo-demo.md](docs/modo-demo.md)). Las tablas están en [modelo-datos.md](docs/modelo-datos.md).
 
 ## Tiempo real y notificaciones
 
@@ -189,6 +189,8 @@ Una tarea está terminada cuando:
 | [01-problema.md](docs/01-problema.md) | El problema, a quién le duele y cuánto cuesta |
 | [02-barreras-y-valor.md](docs/02-barreras-y-valor.md) | Retos legacy y culturales, y el valor conectado |
 | [contrato-api.md](docs/contrato-api.md) | Endpoints, formatos y eventos en tiempo real |
+| [modelo-datos.md](docs/modelo-datos.md) | Tablas y columnas de la base, compartidas por backend y seguridad |
+| [modo-demo.md](docs/modo-demo.md) | Escala de tiempo para la demo, escenarios del simulador y guion de 6 minutos |
 | [ADR-0001](docs/adr/0001-paas-render.md) | PaaS (Render) en lugar de IaaS |
 | [ADR-0002](docs/adr/0002-fastapi-postgres.md) | FastAPI y Postgres gestionado |
 | [ADR-0003](docs/adr/0003-simulador-http.md) | Telemetría por HTTP con token en lugar de MQTT |
@@ -198,6 +200,7 @@ Una tarea está terminada cuando:
 | [ADR-0007](docs/adr/0007-reglas-siem-sigma.md) | Reglas SIEM en formato Sigma |
 | [ADR-0008](docs/adr/0008-notificaciones-sms.md) | Alertas por SMS (Twilio) en lugar de app nativa, Web Push o WhatsApp |
 | [ADR-0009](docs/adr/0009-cron-cloudflare-worker.md) | Flujo continuo con Cloudflare Worker en lugar de worker de Render |
+| [ADR-0010](docs/adr/0010-escala-tiempo-demo.md) | Escala de tiempo para que la demo quepa en 6 minutos |
 
 ## Equipo
 

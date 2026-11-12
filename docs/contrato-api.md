@@ -5,6 +5,7 @@ Este documento es lo único que comparten los tres módulos. El backend lo imple
 - URL base: `https://<servicio>.onrender.com/api`
 - Formato: JSON, fechas en ISO 8601 con zona horaria (`2026-11-18T19:05:00-06:00`), temperaturas en °C, dinero en pesos MXN.
 - Documentación interactiva: `/docs` (Swagger que genera FastAPI).
+- Tablas de la base: [modelo-datos.md](modelo-datos.md).
 
 ## Autenticación
 
@@ -44,7 +45,15 @@ Respuesta `202`:
 Errores: `401` token inválido, `403` el token no corresponde a ese `sensor_id` o a esa cámara, `422` datos fuera de lo físicamente posible (por ejemplo temperatura menor a −40 o mayor a 60).
 
 #### `POST /simulador/tick`
-Lo llama el Cloudflare Worker cada minuto. Genera una lectura por cámara con el escenario normal y la procesa igual que `POST /telemetria`. Respuesta `202` con `{ "lecturas": 5 }`.
+Lo llama el Cloudflare Worker cada minuto. Genera una lectura por cámara con el escenario normal y la procesa igual que `POST /telemetria`, con `sensor_id = "SIM-CRON"`. Se salta las cámaras que recibieron una lectura del simulador en los últimos 2 minutos, para no tapar una falla provocada en la demo. Respuesta `202` con `{ "lecturas": 4, "saltadas": [1] }`.
+
+#### `GET /health`
+Sin autenticación. Regresa `{ "ok": true, "escala_tiempo": 30 }`. Sirve para despertar Render antes de la demo y para que el dashboard muestre la etiqueta de modo demo.
+
+### Seguridad
+
+#### `GET /seguridad/alertas`
+Usuario con cualquier rol. Lista las últimas 20 filas de `alertas_seguridad` para mostrarlas en el dashboard durante la demo del SIEM.
 
 ### Consulta
 

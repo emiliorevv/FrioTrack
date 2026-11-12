@@ -2,7 +2,7 @@
 
 Tema 3.5. Responsable: _por definir_.
 
-Diseño de red IDMZ / Zero Trust y reglas SIEM sobre los logs de acceso de la API. El formato de los logs está en [docs/contrato-api.md](../docs/contrato-api.md#logs-de-acceso-para-el-módulo-de-seguridad).
+Diseño de red IDMZ / Zero Trust y reglas SIEM sobre los logs de acceso de la API. Las tablas que lee y escribe (`logs_acceso`, `lecturas`, `alertas_seguridad`, `ips_bloqueadas`) están en [docs/modelo-datos.md](../docs/modelo-datos.md#seguridad-soc). El formato de los logs está en [docs/contrato-api.md](../docs/contrato-api.md#logs-de-acceso-para-el-módulo-de-seguridad).
 
 ## Tareas
 - [ ] Diagrama de segmentación en draw.io (`diagramas/idmz.drawio` + PNG exportado) con las zonas, VLANs y flujos de puertos de ADR-0006.

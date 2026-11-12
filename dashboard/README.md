@@ -13,6 +13,8 @@ Dashboard web en React + Vite, pensado primero para celular, desplegado en Verce
 - [ ] Lista de alertas con botón "Atender" (rol `jefe_cocina`).
 - [ ] Conexión a `GET /api/stream` con `EventSource` para actualizar todo sin recargar — ver ADR-0004.
 - [ ] Probar en celular real (Android y iPhone) y en laptop.
+- [ ] Etiqueta "MODO DEMO ×N" cuando `GET /api/health` regrese `escala_tiempo` distinto de 1.
+- [ ] Lista corta de alertas de seguridad (`GET /api/seguridad/alertas`) para la demo del SIEM.
 - [ ] QR a la URL para la exposición.
 
 ## Variables de entorno
