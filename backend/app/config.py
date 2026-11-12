@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     jwt_expira_horas: int = 8
     cron_token: str = ""
     sensor_tokens: str = "{}"
+    # Contraseña de los usuarios semilla `jefe` y `gerente`.
+    seed_password: str = "friotrack-demo"
     cors_origins: str = "*"
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
