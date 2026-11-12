@@ -22,3 +22,24 @@ Contiene el simulador de sensores, la API FastAPI con la lógica que emula el ER
 
 ## Variables de entorno
 Ver `.env.example` (se crea con el esqueleto). Nunca subir `.env`.
+
+## Cómo correr en local
+
+Desde la raíz del repo:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+cd backend && cp .env.example .env
+../.venv/bin/uvicorn app.main:app --reload
+```
+
+La API queda en <http://localhost:8000> y `GET /api/health` responde
+`{"ok": true, "escala_tiempo": 1}` (o el valor de `ESCALA_TIEMPO`).
+
+Pruebas y lint, desde `backend/`:
+
+```bash
+../.venv/bin/ruff check .
+../.venv/bin/pytest -q
+```

@@ -1,0 +1,10 @@
+# Dependencias del backend (versiones fijas).
+fastapi==0.162.5
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.8
+pydantic-settings==2.16.2
+pyjwt==2.15.1
+httpx==0.28.1
+psycopg[binary]==3.3.9
+pytest==9.2.0
+ruff==0.17.5
