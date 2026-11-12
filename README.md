@@ -81,7 +81,6 @@ El repo está dividido para que cada módulo lo trabaje una persona distinta sin
 │   └── reporte/          # fuente y PDF final del reporte técnico
 ├── cloudflare-cron/      # Worker que llama a /api/simulador/tick cada minuto
 ├── .github/
-│   ├── CODEOWNERS
 │   └── pull_request_template.md
 └── README.md
 ```
@@ -152,7 +151,6 @@ npm install && npm run dev
 - `main` está protegida: nadie hace push directo, todo entra por PR.
 - Una rama por tarea con el prefijo del módulo: `backend/ingesta-telemetria`, `dashboard/tarjeta-camara`, `security/regla-puerta`, `docs/adr-0003`.
 - Cada PR necesita la aprobación de al menos una persona del equipo. Los cambios en `docs/contrato-api.md` necesitan la aprobación del dueño del backend y del dashboard.
-- `CODEOWNERS` asigna la revisión según la carpeta.
 - Los PRs son chicos: una tarea por PR. Si pasa de unas 400 líneas, se divide.
 
 ### Commits
