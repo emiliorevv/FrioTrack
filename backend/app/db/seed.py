@@ -64,6 +64,58 @@ def _tokens_de_entorno() -> dict[str, str]:
     return tokens if isinstance(tokens, dict) else {}
 
 
+def construir_seed(
+    sensor_tokens: dict[str, str] | None = None,
+    password: str | None = None,
+) -> tuple[list[Camara], list[Sensor], list[Lote], list[Usuario]]:
+    """Arma en memoria las filas del seed, sin tocar la base de datos.
+
+    Es determinista salvo `caducidad`, que se calcula desde hoy.
+    """
+    settings = get_settings()
+    tokens = sensor_tokens if sensor_tokens is not None else _tokens_de_entorno()
+    password = password if password is not None else settings.seed_password
+
+    # `estado` explícito: al no tocar la base, los defaults del modelo no se aplican.
+    camaras = [Camara(estado="en_rango", **datos) for datos in CAMARAS]
+
+    sensores = []
+    for camara_id, sensor_id in SENSORES.items():
+        # Fallback solo de desarrollo: si falta el token en SENSOR_TOKENS se usa uno
+        # predecible para que la demo local funcione sin configurar el .env.
+        token = tokens.get(sensor_id) or f"dev-token-{sensor_id}"
+        sensores.append(
+            Sensor(
+                id=sensor_id,
+                camara_id=camara_id,
+                token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                activo=True,
+            )
+        )
+
+    hoy = date.today()
+    lotes = [
+        Lote(
+            producto=producto,
+            camara_id=camara_id,
+            cantidad=cantidad,
+            unidad=unidad,
+            costo_total_mxn=costo,
+            caducidad=hoy + timedelta(days=dias),
+            estado="ok",
+        )
+        for producto, camara_id, cantidad, unidad, costo, dias in LOTES
+    ]
+
+    password_hash = hash_password(password)
+    usuarios = [
+        Usuario(usuario="jefe", password_hash=password_hash, rol="jefe_cocina"),
+        Usuario(usuario="gerente", password_hash=password_hash, rol="gerente"),
+    ]
+
+    return camaras, sensores, lotes, usuarios
+
+
 def cargar_seed(
     session: Session,
     sensor_tokens: dict[str, str] | None = None,
@@ -76,46 +128,11 @@ def cargar_seed(
     if session.scalar(select(Camara.id).limit(1)) is not None:
         return False
 
-    settings = get_settings()
-    tokens = sensor_tokens if sensor_tokens is not None else _tokens_de_entorno()
-    password = password if password is not None else settings.seed_password
-
-    session.add_all([Camara(**datos) for datos in CAMARAS])
+    camaras, sensores, lotes, usuarios = construir_seed(sensor_tokens, password)
+    session.add_all(camaras)
     session.flush()
-
-    for camara_id, sensor_id in SENSORES.items():
-        # Fallback solo de desarrollo: si falta el token en SENSOR_TOKENS se usa uno
-        # predecible para que la demo local funcione sin configurar el .env.
-        token = tokens.get(sensor_id) or f"dev-token-{sensor_id}"
-        session.add(
-            Sensor(
-                id=sensor_id,
-                camara_id=camara_id,
-                token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
-                activo=True,
-            )
-        )
-
-    hoy = date.today()
-    session.add_all(
-        Lote(
-            producto=producto,
-            camara_id=camara_id,
-            cantidad=cantidad,
-            unidad=unidad,
-            costo_total_mxn=costo,
-            caducidad=hoy + timedelta(days=dias),
-            estado="ok",
-        )
-        for producto, camara_id, cantidad, unidad, costo, dias in LOTES
-    )
-
-    password_hash = hash_password(password)
-    session.add_all(
-        [
-            Usuario(usuario="jefe", password_hash=password_hash, rol="jefe_cocina"),
-            Usuario(usuario="gerente", password_hash=password_hash, rol="gerente"),
-        ]
-    )
+    session.add_all(sensores)
+    session.add_all(lotes)
+    session.add_all(usuarios)
     session.commit()
     return True

@@ -12,8 +12,8 @@ class Settings(BaseSettings):
 
     app_name: str = "FríoTrack API"
     escala_tiempo: int = 1
-    # Desarrollo usa SQLite; producción la sobrescribe con el Postgres de Supabase.
-    database_url: str = "sqlite:///./friotrack.db"
+    # Sin default: el runtime exige la cadena de Supabase (ver app/db/session.py).
+    database_url: str = ""
     jwt_secret: str = "cambia-esto-en-produccion"
     jwt_expira_horas: int = 8
     cron_token: str = ""

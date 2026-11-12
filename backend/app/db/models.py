@@ -7,7 +7,6 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
-    JSON,
     BigInteger,
     Boolean,
     Date,
@@ -20,12 +19,10 @@ from sqlalchemy import (
     desc,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, utcnow
-
-# En SQLite una PK BIGINT no autoincrementa; la variante conserva bigint en Postgres.
-IdGrande = BigInteger().with_variant(Integer, "sqlite")
 
 
 class Camara(Base):
@@ -73,7 +70,7 @@ class Lectura(Base):
         Index("ix_lecturas_camara_id_recibida_en", "camara_id", desc("recibida_en")),
     )
 
-    id: Mapped[int] = mapped_column(IdGrande, primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     camara_id: Mapped[int] = mapped_column(ForeignKey("camaras.id"))
     # Sin ForeignKey a propósito: /simulador/tick manda "SIM-CRON", que no es una fila
     # de sensores; la API valida los demás sensor_id contra la tabla.
@@ -117,7 +114,6 @@ class Alerta(Base):
             "camara_id",
             "tipo",
             unique=True,
-            sqlite_where=text("cerrada_en IS NULL"),
             postgresql_where=text("cerrada_en IS NULL"),
         ),
     )
@@ -158,7 +154,7 @@ class LogAcceso(Base):
         Index("ix_logs_acceso_ip_origen_ts", "ip_origen", desc("ts")),
     )
 
-    id: Mapped[int] = mapped_column(IdGrande, primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     ip_origen: Mapped[str] = mapped_column(Text)
     metodo: Mapped[str] = mapped_column(Text)
@@ -181,7 +177,7 @@ class AlertaSeguridad(Base):
     severidad: Mapped[str] = mapped_column(Text)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     ip_origen: Mapped[str | None] = mapped_column(Text)
-    detalle: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    detalle: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     accion: Mapped[str] = mapped_column(Text)
 
 

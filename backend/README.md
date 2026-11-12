@@ -25,13 +25,13 @@ Ver `.env.example` (se crea con el esqueleto). Nunca subir `.env`.
 
 ## Cómo correr en local
 
-Desde la raíz del repo:
+Desde `backend/`:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r backend/requirements.txt
-cd backend && cp .env.example .env
-../.venv/bin/uvicorn app.main:app --reload
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env   # pega aquí la URI de Supabase, ver abajo
+.venv/bin/uvicorn app.main:app --reload
 ```
 
 La API queda en <http://localhost:8000> y `GET /api/health` responde
@@ -40,6 +40,34 @@ La API queda en <http://localhost:8000> y `GET /api/health` responde
 Pruebas y lint, desde `backend/`:
 
 ```bash
-../.venv/bin/ruff check .
-../.venv/bin/pytest -q
+.venv/bin/ruff check .
+.venv/bin/pytest -q
 ```
+
+Las pruebas no se conectan a ninguna base ni a la red: usan metadatos de
+SQLAlchemy y una sesión falsa.
+
+## Base de datos (Supabase)
+
+El runtime habla directo con el Postgres de Supabase; no hay base local.
+
+1. Crea el proyecto en <https://supabase.com>.
+2. En **Project Settings → Database** copia la URI **Session Pooler** y pégala en
+   `backend/.env`. SQLAlchemy necesita el driver `psycopg`, así que el esquema de la URL
+   debe ser `postgresql+psycopg://`:
+
+   ```bash
+   DATABASE_URL=postgresql+psycopg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+   ```
+
+3. Desde `backend/`, crea las tablas y carga los datos semilla:
+
+   ```bash
+   .venv/bin/python -m app.db.init_db
+   ```
+
+   Es idempotente: si la base ya tiene cámaras, no vuelve a insertar nada.
+
+Si `DATABASE_URL` falta o está vacía, `crear_engine()` falla con un `RuntimeError` que
+explica cómo crear `backend/.env`. La aplicación no se conecta a la base al importarse.
+
