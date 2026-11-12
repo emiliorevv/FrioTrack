@@ -28,7 +28,12 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - name: Instalar dependencias
-        run: pip install -r requirements.txt
+        run: |
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt
+          else
+            pip install -r requirements.txt
+          fi
       - name: Lint con Ruff
         run: ruff check .
       - name: Pruebas con pytest
