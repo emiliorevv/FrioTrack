@@ -1,6 +1,8 @@
 """Pruebas de POST /api/telemetria y del servicio de ingesta; sin base ni red."""
 
+import asyncio
 import hashlib
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -12,6 +14,7 @@ from app.config import limpiar_cache_settings
 from app.db.models import Alerta, Camara, Lectura, Lote, Sensor
 from app.db.session import get_db
 from app.main import create_app
+from app.realtime.bus import bus
 from app.routers import telemetria as router_telemetria
 from app.schemas.telemetria import TelemetriaIn
 from app.services import telemetria as servicio
@@ -451,3 +454,158 @@ def test_servicio_cierra_alertas_y_recupera_lotes_al_volver_al_rango(monkeypatch
     assert lote.estado == "ok"
     assert estado == "en_rango"
     assert sesion.commits == 1
+
+
+# --- Eventos publicados al bus ---------------------------------------------
+
+
+async def _eventos_de(accion: Callable[[], object]) -> list[tuple[str, dict[str, object]]]:
+    """Suscribe una cola, corre la ingesta y devuelve lo publicado al bus."""
+    cola = bus.suscribir()
+    try:
+        accion()
+        await asyncio.sleep(0)  # deja correr el `call_soon_threadsafe` del bus
+        eventos: list[tuple[str, dict[str, object]]] = []
+        while not cola.empty():
+            eventos.append(cola.get_nowait())
+        return eventos
+    finally:
+        bus.desuscribir(cola)
+
+
+def test_servicio_publica_la_lectura_procesada(monkeypatch):
+    monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
+    monkeypatch.setattr(servicio, "_cargar_lotes", lambda _s, _c: [_lote()])
+    monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
+    sesion = SesionFalsa(camara=_camara(), sensor=_sensor())
+
+    eventos = asyncio.run(
+        _eventos_de(
+            lambda: procesar_telemetria(sesion, _datos(temperatura_c=1.0), token=TOKEN)
+        )
+    )
+
+    assert [nombre for nombre, _ in eventos] == ["lectura"]
+    _, datos = eventos[0]
+    assert datos == {
+        "camara_id": 1,
+        "ts": "2026-11-18T13:05:00-06:00",
+        "temperatura_c": 1.0,
+        "humedad_pct": 88.0,
+        "puerta_abierta": False,
+        "estado_camara": "en_rango",
+    }
+
+
+def test_servicio_publica_alerta_abierta_y_lote_actualizado(monkeypatch):
+    monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
+    camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=20))
+    lote_ok = _lote("ok", lote_id=1)
+    lote_merma = _lote("merma", "Camarón", lote_id=2)
+    monkeypatch.setattr(servicio, "_cargar_lotes", lambda _s, _c: [lote_ok, lote_merma])
+    monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
+    sesion = SesionFalsa(camara=camara, sensor=_sensor())
+
+    eventos = asyncio.run(
+        _eventos_de(
+            lambda: procesar_telemetria(sesion, _datos(temperatura_c=3.0), token=TOKEN)
+        )
+    )
+
+    assert [nombre for nombre, _ in eventos] == [
+        "lectura",
+        "alerta_abierta",
+        "lote_actualizado",
+    ]
+    _, alerta = eventos[1]
+    assert alerta == {
+        "id": None,  # la sesión falsa no asigna id al insertar
+        "camara_id": 1,
+        "tipo": "temperatura",
+        "abierta_en": AHORA.isoformat(),
+        "cerrada_en": None,
+        "temperatura_max_c": 3.0,
+        "sms_enviados": 0,
+        "atendida_por": None,
+    }
+    _, lote = eventos[2]
+    assert lote == {
+        "id": 1,
+        "producto": "Robalo fresco",
+        "camara_id": 1,
+        "cantidad": 12.0,
+        "unidad": "kg",
+        "costo_total_mxn": 3240.0,
+        "caducidad": "2026-11-20",
+        "estado": "en_riesgo",
+    }
+
+
+def test_servicio_publica_alertas_cerradas_y_lote_recuperado(monkeypatch):
+    monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
+    camara = _camara(fuera_de_rango_desde=AHORA - timedelta(minutes=5))
+    alerta_temperatura = Alerta(
+        camara_id=1,
+        tipo="temperatura",
+        abierta_en=AHORA - timedelta(minutes=5),
+        temperatura_max_c=Decimal("3.1"),
+        sms_enviados=1,
+    )
+    alerta_puerta = Alerta(
+        camara_id=1,
+        tipo="puerta",
+        abierta_en=AHORA - timedelta(minutes=2),
+        sms_enviados=0,
+    )
+    lote = _lote("en_riesgo")
+    monkeypatch.setattr(servicio, "_cargar_lotes", lambda _s, _c: [lote])
+    monkeypatch.setattr(
+        servicio,
+        "_cargar_alertas_abiertas",
+        lambda _s, _c: [alerta_temperatura, alerta_puerta],
+    )
+    sesion = SesionFalsa(camara=camara, sensor=_sensor())
+
+    eventos = asyncio.run(
+        _eventos_de(
+            lambda: procesar_telemetria(sesion, _datos(temperatura_c=1.0), token=TOKEN)
+        )
+    )
+
+    assert [nombre for nombre, _ in eventos] == [
+        "lectura",
+        "alerta_cerrada",
+        "alerta_cerrada",
+        "lote_actualizado",
+    ]
+    _, cerrada_temp = eventos[1]
+    assert cerrada_temp["tipo"] == "temperatura"
+    assert cerrada_temp["cerrada_en"] == AHORA.isoformat()
+    _, cerrada_puerta = eventos[2]
+    assert cerrada_puerta["tipo"] == "puerta"
+    _, recuperado = eventos[3]
+    assert recuperado["estado"] == "ok"
+
+
+def test_no_publica_si_falla_el_commit(monkeypatch):
+    monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
+    monkeypatch.setattr(servicio, "_cargar_lotes", lambda _s, _c: [_lote()])
+    monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
+    sesion = SesionFalsa(camara=_camara(), sensor=_sensor())
+
+    def commit_roto() -> None:
+        raise RuntimeError("commit roto")
+
+    sesion.commit = commit_roto  # type: ignore[method-assign]
+
+    async def escenario() -> int:
+        cola = bus.suscribir()
+        try:
+            with pytest.raises(RuntimeError):
+                procesar_telemetria(sesion, _datos(temperatura_c=1.0), token=TOKEN)
+            await asyncio.sleep(0)
+            return cola.qsize()
+        finally:
+            bus.desuscribir(cola)
+
+    assert asyncio.run(escenario()) == 0

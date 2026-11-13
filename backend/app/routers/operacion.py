@@ -2,23 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import Select, func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
-from app.db.models import Alerta, AlertaSeguridad, Camara, Lectura, Lote, Usuario
+from app.db.models import Alerta, AlertaSeguridad, Usuario
 from app.db.session import get_db
-from app.erp.kpis import (
-    merma_en_periodo,
-    pct_en_rango,
-    promedio_respuesta_min,
-    valor_en_riesgo,
-)
+from app.services.kpis import calcular_kpis
 
 router = APIRouter(prefix="/api", tags=["operacion"])
 
@@ -66,11 +61,6 @@ class AlertaSeguridadSalida(BaseModel):
     ip_origen: str | None
     detalle: dict[str, Any]
     accion: str
-
-
-def _ahora() -> datetime:
-    """Reloj del proceso; las pruebas lo reemplazan para fijar fechas."""
-    return datetime.now(UTC)
 
 
 def _iso(instante: datetime) -> str:
@@ -162,58 +152,11 @@ def atender_alerta(
     return _alerta_salida(alerta)
 
 
-def _consulta_pct_en_rango(desde: datetime) -> Select[tuple[int, int]]:
-    """Cuenta lecturas totales y lecturas dentro de rango desde `desde`, en SQL.
-
-    `count(*) FILTER (...)` compila en Postgres y evita traer las lecturas a
-    Python; los extremos cuentan como dentro de rango, igual que antes.
-    """
-    dentro = func.count().filter(
-        Lectura.temperatura_c.between(Camara.rango_min_c, Camara.rango_max_c)
-    )
-    return (
-        select(func.count(), dentro)
-        .select_from(Lectura)
-        .join(Camara, Camara.id == Lectura.camara_id)
-        .where(Lectura.recibida_en >= desde)
-    )
-
-
 # Auth pendiente (fase posterior): este endpoint queda abierto en local.
 @router.get("/kpis", response_model=KpisSalida)
 def obtener_kpis(db: SesionDb) -> KpisSalida:
     """Calcula los KPIs del dashboard a partir de lecturas, alertas y lotes."""
-    ahora = _ahora()
-    desde = ahora - timedelta(hours=24)
-
-    total_lecturas, lecturas_en_rango = db.execute(_consulta_pct_en_rango(desde)).one()
-
-    alertas_activas = db.scalar(
-        select(func.count()).select_from(Alerta).where(Alerta.cerrada_en.is_(None))
-    )
-
-    atendidas = db.execute(
-        select(Alerta.abierta_en, Alerta.atendida_en).where(Alerta.atendida_en.is_not(None))
-    ).all()
-
-    costos_en_riesgo = db.scalars(
-        select(Lote.costo_total_mxn).where(Lote.estado == "en_riesgo")
-    ).all()
-
-    mermas = db.execute(
-        select(Lote.merma_en, Lote.costo_total_mxn).where(
-            Lote.estado == "merma", Lote.merma_en.is_not(None)
-        )
-    ).all()
-
-    return KpisSalida(
-        pct_tiempo_en_rango_24h=pct_en_rango(lecturas_en_rango, total_lecturas),
-        alertas_activas=alertas_activas or 0,
-        tiempo_respuesta_promedio_min=promedio_respuesta_min(atendidas),
-        valor_en_riesgo_mxn=valor_en_riesgo(costos_en_riesgo),
-        merma_hoy_mxn=merma_en_periodo(mermas, ahora, "dia"),
-        merma_mes_mxn=merma_en_periodo(mermas, ahora, "mes"),
-    )
+    return KpisSalida(**calcular_kpis(db))
 
 
 # Auth pendiente (fase posterior): este endpoint queda abierto en local.

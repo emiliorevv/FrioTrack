@@ -12,7 +12,7 @@ from app.db.models import Alerta, AlertaSeguridad, Usuario
 from app.db.session import get_db
 from app.erp.kpis import merma_en_periodo, pct_en_rango, promedio_respuesta_min, valor_en_riesgo
 from app.main import create_app
-from app.routers import operacion
+from app.services import kpis as kpis_servicio
 
 AHORA = datetime(2026, 11, 12, 18, 0, tzinfo=UTC)
 
@@ -273,7 +273,7 @@ def test_atender_alerta_sin_usuario_jefe_regresa_500_con_mensaje_claro():
 
 
 def test_kpis_con_datos_calculan_todo(monkeypatch):
-    monkeypatch.setattr(operacion, "_ahora", lambda: AHORA)
+    monkeypatch.setattr(kpis_servicio, "_ahora", lambda: AHORA)
 
     # (total de lecturas en 24 h, lecturas dentro de rango) — ya contados en SQL.
     conteo_lecturas = [(3, 2)]
@@ -309,7 +309,7 @@ def test_kpis_con_datos_calculan_todo(monkeypatch):
 
 
 def test_consulta_pct_en_rango_compila_para_postgres():
-    consulta = operacion._consulta_pct_en_rango(AHORA - timedelta(hours=24))
+    consulta = kpis_servicio._consulta_pct_en_rango(AHORA - timedelta(hours=24))
     sql = str(consulta.compile(dialect=postgresql.dialect()))
 
     assert "count(*)" in sql
@@ -319,7 +319,7 @@ def test_consulta_pct_en_rango_compila_para_postgres():
 
 
 def test_kpis_sin_datos_regresan_ceros(monkeypatch):
-    monkeypatch.setattr(operacion, "_ahora", lambda: AHORA)
+    monkeypatch.setattr(kpis_servicio, "_ahora", lambda: AHORA)
     sesion = SesionFalsa(ejecutar=[[(0, 0)], [], []], escalares=[[]], unicos=[0])
 
     with _cliente(sesion) as cliente:

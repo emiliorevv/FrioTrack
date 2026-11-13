@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.middleware.acceso import AccesoLogMiddleware
 from app.routers.camaras import router as camaras_router
 from app.routers.operacion import router as operacion_router
+from app.routers.stream import router as stream_router
 from app.routers.telemetria import router as telemetria_router
 
 
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
 
     app.include_router(camaras_router)
     app.include_router(operacion_router)
+    app.include_router(stream_router)
     app.include_router(telemetria_router)
 
     return app
