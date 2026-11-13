@@ -2,7 +2,6 @@
 
 import io
 import json
-import logging
 import threading
 from datetime import UTC, datetime, timedelta
 
@@ -63,26 +62,6 @@ def log_stdout():
         yield flujo
     finally:
         manejador.setStream(anterior)
-
-
-@pytest.fixture
-def avisos_logger():
-    """Captura los warnings del middleware sin depender de caplog/propagación."""
-    registros: list[logging.LogRecord] = []
-
-    class _Handler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            registros.append(record)
-
-    manejador = _Handler()
-    anterior = acceso.logger.level
-    acceso.logger.addHandler(manejador)
-    acceso.logger.setLevel(logging.WARNING)
-    try:
-        yield registros
-    finally:
-        acceso.logger.removeHandler(manejador)
-        acceso.logger.setLevel(anterior)
 
 
 def _activar_db(monkeypatch):
@@ -498,13 +477,15 @@ def test_fallo_de_base_no_bloquea_la_peticion(monkeypatch, log_stdout):
     assert salida["status"] == 200
 
 
-def test_avisar_fallo_loguea_y_rate_limita(avisos_logger):
-    error = RuntimeError("base caída")
+def test_avisar_fallo_loguea_y_rate_limita(monkeypatch):
+    llamadas: list[tuple] = []
+    monkeypatch.setattr(acceso.logger, "warning", lambda *args, **kwargs: llamadas.append(args))
 
+    error = RuntimeError("base caída")
     acceso._avisar_fallo("ips_bloqueadas", error)
     acceso._avisar_fallo("ips_bloqueadas", error)  # mismo minuto: no duplica
     acceso._avisar_fallo("logs_acceso", error)
 
-    assert len(avisos_logger) == 2
-    assert "ips_bloqueadas" in avisos_logger[0].getMessage()
-    assert "logs_acceso" in avisos_logger[1].getMessage()
+    assert len(llamadas) == 2
+    assert llamadas[0][1] == "ips_bloqueadas"
+    assert llamadas[1][1] == "logs_acceso"
