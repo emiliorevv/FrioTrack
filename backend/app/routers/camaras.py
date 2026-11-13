@@ -97,7 +97,11 @@ def listar_lecturas(
     desde: datetime | None = None,
     hasta: datetime | None = None,
 ) -> list[dict[str, Any]]:
-    """Lecturas de una cámara; sin rango, las últimas 2 horas por `recibida_en`."""
+    """Lecturas de una cámara; sin rango, las últimas 2 horas por `recibida_en`.
+
+    Se piden las más recientes (hasta `LIMITE_LECTURAS`) y se responden en orden
+    ascendente, que es como la gráfica las dibuja.
+    """
     if db.get(Camara, id) is None:
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
 
@@ -106,7 +110,7 @@ def listar_lecturas(
     if desde is None:
         desde = hasta - VENTANA_POR_DEFECTO
 
-    lecturas = (
+    filas = (
         db.execute(
             select(Lectura)
             .where(
@@ -114,12 +118,13 @@ def listar_lecturas(
                 Lectura.recibida_en >= desde,
                 Lectura.recibida_en <= hasta,
             )
-            .order_by(Lectura.recibida_en)
+            .order_by(Lectura.recibida_en.desc())
             .limit(LIMITE_LECTURAS)
         )
         .scalars()
         .all()
     )
+    lecturas = list(reversed(filas))
 
     return [
         {

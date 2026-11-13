@@ -13,6 +13,7 @@ from app.config import limpiar_cache_settings
 from app.db.models import Camara, Lectura, Lote
 from app.db.session import get_db
 from app.main import create_app
+from app.routers.camaras import LIMITE_LECTURAS
 
 
 class _Resultado:
@@ -47,6 +48,8 @@ class SesionFalsa:
         self.camaras = camaras or []
         self.lecturas = lecturas or []
         self.lotes = lotes or []
+        # Sentencias recibidas, para inspeccionar el SQL que arma el router.
+        self.consultas: list[Any] = []
 
     def get(self, modelo: type, ident: int) -> Any | None:
         filas = {
@@ -59,13 +62,16 @@ class SesionFalsa:
     def execute(self, stmt: Any) -> _Resultado:
         sql = str(stmt).lower()
         params = stmt.compile().params
+        self.consultas.append(stmt)
 
         if "group by" in sql:
             return _Resultado(self._sumas_en_riesgo(params))
         if "from lotes" in sql:
             return _Resultado(self._lotes(params))
         if "from lecturas" in sql:
-            return _Resultado(self._lecturas(sql, params))
+            # `_limit` es privado en SQLAlchemy, pero aquí alcanza para imitar el LIMIT.
+            limite = getattr(stmt, "_limit", None)
+            return _Resultado(self._lecturas(sql, params, limite))
         if "from camaras" in sql:
             return _Resultado(sorted(self.camaras, key=lambda camara: camara.id))
         raise AssertionError(f"Consulta no soportada por la sesión falsa:\n{stmt}")
@@ -88,7 +94,12 @@ class SesionFalsa:
             filas = [lote for lote in filas if lote.estado == params["estado_1"]]
         return sorted(filas, key=lambda lote: lote.id)
 
-    def _lecturas(self, sql: str, params: dict[str, Any]) -> list[Lectura]:
+    def _lecturas(
+        self,
+        sql: str,
+        params: dict[str, Any],
+        limite: int | None = None,
+    ) -> list[Lectura]:
         filas = list(self.lecturas)
         if "camara_id_1" in params:
             filas = [lectura for lectura in filas if lectura.camara_id == params["camara_id_1"]]
@@ -102,7 +113,8 @@ class SesionFalsa:
             filas = [lectura for lectura in filas if lectura.recibida_en <= cotas[-1]]
 
         descendente = " desc" in sql
-        return sorted(filas, key=lambda lectura: lectura.recibida_en, reverse=descendente)
+        filas = sorted(filas, key=lambda lectura: lectura.recibida_en, reverse=descendente)
+        return filas[:limite] if limite is not None else filas
 
 
 @pytest.fixture(autouse=True)
@@ -332,6 +344,31 @@ def test_lecturas_con_solo_hasta_usa_las_dos_horas_anteriores(mundo):
 
     assert respuesta.status_code == 200
     assert [lectura["id"] for lectura in respuesta.json()] == [102, 103]
+
+
+def test_lecturas_devuelve_las_mas_recientes_cuando_exceden_el_limite():
+    total = LIMITE_LECTURAS + 3
+    ahora = datetime.now(UTC)
+    camaras = [_camara(1, "Pescados y mariscos", "0.0", "2.0", 10, 60, "alerta", None)]
+    # La lectura con id más alto es la más reciente; todas caben en la ventana de 2 h.
+    lecturas = [
+        _lectura(id, 1, ahora - timedelta(seconds=total - id)) for id in range(1, total + 1)
+    ]
+    sesion = SesionFalsa(camaras=camaras, lecturas=lecturas)
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.get("/api/camaras/1/lecturas")
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    # Se descartan las 3 más viejas: con orden ascendente + LIMIT se perdían las recientes.
+    assert [lectura["id"] for lectura in cuerpo] == list(range(4, total + 1))
+    recibidas = [lectura["recibida_en"] for lectura in cuerpo]
+    assert recibidas == sorted(recibidas)
+
+    consulta = sesion.consultas[0]
+    assert "order by lecturas.recibida_en desc" in str(consulta).lower()
+    assert consulta._limit == LIMITE_LECTURAS
 
 
 def test_lotes_sin_filtros_devuelve_todos_en_orden(mundo):
