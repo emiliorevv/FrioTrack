@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
@@ -100,11 +100,17 @@ def _alerta_salida(alerta: Alerta) -> AlertaSalida:
 def listar_alertas(
     db: SesionDb,
     activas: bool = False,
+    limite: int = Query(50, ge=1, le=200),
 ) -> list[AlertaSalida]:
-    """Lista las alertas de la más reciente a la más antigua; `activas` filtra las abiertas."""
+    """Lista las alertas de la más reciente a la más antigua.
+
+    `activas` filtra las que siguen abiertas; `limite` acota cuántas se
+    devuelven y por defecto son 50 (máximo 200).
+    """
     consulta = select(Alerta).order_by(Alerta.abierta_en.desc(), Alerta.id.desc())
     if activas:
         consulta = consulta.where(Alerta.cerrada_en.is_(None))
+    consulta = consulta.limit(limite)
     return [_alerta_salida(alerta) for alerta in db.scalars(consulta).all()]
 
 
@@ -114,7 +120,12 @@ def atender_alerta(
     entrada: AtenderEntrada,
     db: SesionDb,
 ) -> AlertaSalida:
-    """Marca quién atendió la alerta y cuándo; no la cierra."""
+    """Marca quién atendió la alerta y cuándo; no la cierra.
+
+    Es idempotente: si la alerta ya estaba atendida conserva `atendida_en` y
+    `atendida_por` (para no empeorar el KPI de tiempo de respuesta) y solo
+    actualiza la nota cuando viene en el cuerpo.
+    """
     alerta = db.get(Alerta, alerta_id)
     if alerta is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alerta no encontrada")
@@ -122,6 +133,12 @@ def atender_alerta(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="La alerta ya está cerrada"
         )
+
+    if alerta.atendida_en is not None:
+        if entrada.nota is not None:
+            alerta.nota = entrada.nota
+            db.commit()
+        return _alerta_salida(alerta)
 
     # Auth pendiente (fase posterior): aquí irá el usuario del JWT. Mientras tanto
     # se atribuye al primer `jefe_cocina`, que en el seed es el usuario `jefe`.
@@ -145,6 +162,23 @@ def atender_alerta(
     return _alerta_salida(alerta)
 
 
+def _consulta_pct_en_rango(desde: datetime) -> Select[tuple[int, int]]:
+    """Cuenta lecturas totales y lecturas dentro de rango desde `desde`, en SQL.
+
+    `count(*) FILTER (...)` compila en Postgres y evita traer las lecturas a
+    Python; los extremos cuentan como dentro de rango, igual que antes.
+    """
+    dentro = func.count().filter(
+        Lectura.temperatura_c.between(Camara.rango_min_c, Camara.rango_max_c)
+    )
+    return (
+        select(func.count(), dentro)
+        .select_from(Lectura)
+        .join(Camara, Camara.id == Lectura.camara_id)
+        .where(Lectura.recibida_en >= desde)
+    )
+
+
 # Auth pendiente (fase posterior): este endpoint queda abierto en local.
 @router.get("/kpis", response_model=KpisSalida)
 def obtener_kpis(db: SesionDb) -> KpisSalida:
@@ -152,11 +186,7 @@ def obtener_kpis(db: SesionDb) -> KpisSalida:
     ahora = _ahora()
     desde = ahora - timedelta(hours=24)
 
-    lecturas = db.execute(
-        select(Lectura.temperatura_c, Camara.rango_min_c, Camara.rango_max_c)
-        .join(Camara, Camara.id == Lectura.camara_id)
-        .where(Lectura.recibida_en >= desde)
-    ).all()
+    total_lecturas, lecturas_en_rango = db.execute(_consulta_pct_en_rango(desde)).one()
 
     alertas_activas = db.scalar(
         select(func.count()).select_from(Alerta).where(Alerta.cerrada_en.is_(None))
@@ -177,7 +207,7 @@ def obtener_kpis(db: SesionDb) -> KpisSalida:
     ).all()
 
     return KpisSalida(
-        pct_tiempo_en_rango_24h=pct_en_rango(lecturas),
+        pct_tiempo_en_rango_24h=pct_en_rango(lecturas_en_rango, total_lecturas),
         alertas_activas=alertas_activas or 0,
         tiempo_respuesta_promedio_min=promedio_respuesta_min(atendidas),
         valor_en_riesgo_mxn=valor_en_riesgo(costos_en_riesgo),

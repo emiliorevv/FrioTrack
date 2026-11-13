@@ -1,7 +1,8 @@
 """Cálculos de los KPIs de operación como funciones puras, sin base de datos.
 
 Así las pruebas pueden fijar fechas y datos sin levantar Postgres ni mockear
-sesiones. El router solo consulta filas y se las pasa a estas funciones.
+sesiones. El router agrega en SQL lo que conviene (por ejemplo el conteo de
+lecturas en rango) y le pasa a estas funciones solo filas o conteos.
 """
 
 from __future__ import annotations
@@ -26,20 +27,12 @@ def _con_zona(instante: datetime) -> datetime:
     return instante.replace(tzinfo=UTC) if instante.tzinfo is None else instante
 
 
-def pct_en_rango(
-    lecturas: Iterable[tuple[Decimal | float, Decimal | float, Decimal | float]],
-) -> float:
+def pct_en_rango(dentro: int, total: int) -> float:
     """Porcentaje de lecturas dentro de su rango, redondeado a 1 decimal.
 
-    Cada fila es `(temperatura, rango_min, rango_max)`; los extremos cuentan
-    como dentro de rango. Sin lecturas regresa `0.0`.
+    El router cuenta en SQL (`dentro` con `FILTER`, `total` con `count(*)`);
+    aquí solo queda la aritmética. Sin lecturas regresa `0.0`.
     """
-    total = 0
-    dentro = 0
-    for temperatura, minimo, maximo in lecturas:
-        total += 1
-        if _decimal(minimo) <= _decimal(temperatura) <= _decimal(maximo):
-            dentro += 1
     if total == 0:
         return 0.0
     return round(100.0 * dentro / total, 1)

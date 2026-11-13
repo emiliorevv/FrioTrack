@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.dialects import postgresql
 
 from app.config import limpiar_cache_settings
 from app.db.models import Alerta, AlertaSeguridad, Usuario
@@ -32,6 +33,9 @@ class ResultadoFalso:
 
     def all(self) -> list[object]:
         return list(self._filas)
+
+    def one(self) -> object:
+        return self._filas[0]
 
 
 class SesionFalsa:
@@ -98,7 +102,7 @@ def _alerta(**cambios: object) -> Alerta:
 # --- GET /api/alertas -------------------------------------------------------
 
 
-def test_get_alertas_sin_filtro_lista_todas_ordenadas():
+def test_get_alertas_sin_filtro_ordena_y_aplica_limite_por_defecto():
     cerrada = _alerta(
         id=30,
         camara_id=2,
@@ -132,6 +136,10 @@ def test_get_alertas_sin_filtro_lista_todas_ordenadas():
     consulta = str(sesion.sentencias[0])
     assert "ORDER BY alertas.abierta_en DESC" in consulta
     assert "cerrada_en IS NULL" not in consulta
+    # Sin `limite` explícito se aplica el default de 50.
+    assert sesion.sentencias[0].compile(compile_kwargs={"literal_binds": True}).string.endswith(
+        "LIMIT 50"
+    )
 
 
 def test_get_alertas_activas_solo_pide_las_abiertas():
@@ -142,6 +150,28 @@ def test_get_alertas_activas_solo_pide_las_abiertas():
 
     assert respuesta.status_code == 200
     assert "cerrada_en IS NULL" in str(sesion.sentencias[0])
+
+
+def test_get_alertas_respeta_el_limite_pedido():
+    sesion = SesionFalsa(escalares=[[_alerta()]])
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.get("/api/alertas", params={"limite": 5})
+
+    assert respuesta.status_code == 200
+    sentencia = sesion.sentencias[0]
+    assert sentencia.compile(compile_kwargs={"literal_binds": True}).string.endswith("LIMIT 5")
+
+
+@pytest.mark.parametrize("limite", [0, 201])
+def test_get_alertas_rechaza_limite_fuera_de_rango(limite):
+    sesion = SesionFalsa(escalares=[[]])
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.get("/api/alertas", params={"limite": limite})
+
+    assert respuesta.status_code == 422
+    assert sesion.sentencias == []
 
 
 # --- POST /api/alertas/{id}/atender ----------------------------------------
@@ -180,6 +210,29 @@ def test_atender_alerta_sin_nota_la_deja_intacta():
 
     assert respuesta.status_code == 200
     assert alerta.nota is None
+
+
+def test_atender_alerta_ya_atendida_conserva_la_fecha_y_actualiza_la_nota():
+    atendida_en = datetime(2026, 11, 12, 18, 10, tzinfo=UTC)
+    alerta = _alerta(
+        atendida_por=1,
+        atendida_en=atendida_en,
+        nota="Primera nota",
+    )
+    # Sin `unicos`: un segundo atender no debe volver a buscar al jefe.
+    sesion = SesionFalsa(obtener=[alerta])
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.post(
+            "/api/alertas/31/atender", json={"nota": "Nota corregida"}
+        )
+
+    assert respuesta.status_code == 200
+    assert alerta.atendida_en == atendida_en
+    assert alerta.atendida_por == 1
+    assert alerta.nota == "Nota corregida"
+    assert sesion.commits == 1
+    assert sesion.sentencias == [(Alerta, 31)]
 
 
 def test_atender_alerta_inexistente_regresa_404():
@@ -222,11 +275,8 @@ def test_atender_alerta_sin_usuario_jefe_regresa_500_con_mensaje_claro():
 def test_kpis_con_datos_calculan_todo(monkeypatch):
     monkeypatch.setattr(operacion, "_ahora", lambda: AHORA)
 
-    lecturas = [
-        (Decimal("1.0"), Decimal("0.0"), Decimal("2.0")),
-        (Decimal("3.0"), Decimal("0.0"), Decimal("2.0")),
-        (Decimal("5.0"), Decimal("4.0"), Decimal("8.0")),
-    ]
+    # (total de lecturas en 24 h, lecturas dentro de rango) — ya contados en SQL.
+    conteo_lecturas = [(3, 2)]
     atendidas = [
         (AHORA - timedelta(minutes=20), AHORA - timedelta(minutes=15)),
         (AHORA - timedelta(minutes=30), AHORA - timedelta(minutes=20)),
@@ -238,8 +288,8 @@ def test_kpis_con_datos_calculan_todo(monkeypatch):
         (datetime(2026, 10, 31, 18, 0, tzinfo=UTC), Decimal("25.00")),
         (datetime(2026, 11, 12, 17, 0), Decimal("20.00")),
     ]
-    sesion = SesionFalsa(ejecutar=[lecturas, atendidas, mermas], escalares=[costos_en_riesgo],
-                         unicos=[2])
+    sesion = SesionFalsa(ejecutar=[conteo_lecturas, atendidas, mermas],
+                         escalares=[costos_en_riesgo], unicos=[2])
 
     with _cliente(sesion) as cliente:
         respuesta = cliente.get("/api/kpis")
@@ -255,11 +305,22 @@ def test_kpis_con_datos_calculan_todo(monkeypatch):
     }
     consulta_lecturas = str(sesion.sentencias[0])
     assert "lecturas.recibida_en >=" in consulta_lecturas
+    assert "FILTER (WHERE" in consulta_lecturas
+
+
+def test_consulta_pct_en_rango_compila_para_postgres():
+    consulta = operacion._consulta_pct_en_rango(AHORA - timedelta(hours=24))
+    sql = str(consulta.compile(dialect=postgresql.dialect()))
+
+    assert "count(*)" in sql
+    assert "FILTER (WHERE" in sql
+    assert "BETWEEN camaras.rango_min_c AND camaras.rango_max_c" in sql
+    assert "JOIN camaras ON camaras.id = lecturas.camara_id" in sql
 
 
 def test_kpis_sin_datos_regresan_ceros(monkeypatch):
     monkeypatch.setattr(operacion, "_ahora", lambda: AHORA)
-    sesion = SesionFalsa(ejecutar=[[], [], []], escalares=[[]], unicos=[0])
+    sesion = SesionFalsa(ejecutar=[[(0, 0)], [], []], escalares=[[]], unicos=[0])
 
     with _cliente(sesion) as cliente:
         respuesta = cliente.get("/api/kpis")
@@ -326,15 +387,11 @@ def test_seguridad_alertas_regresa_ultimas_veinte():
 # --- Funciones puras de KPIs ------------------------------------------------
 
 
-def test_pct_en_rango_cuenta_extremos_y_redondea():
-    lecturas = [
-        (Decimal("0.0"), Decimal("0.0"), Decimal("2.0")),
-        (Decimal("2.0"), Decimal("0.0"), Decimal("2.0")),
-        (Decimal("2.1"), Decimal("0.0"), Decimal("2.0")),
-    ]
-
-    assert pct_en_rango(lecturas) == 66.7
-    assert pct_en_rango([]) == 0.0
+def test_pct_en_rango_calcula_y_redondea():
+    assert pct_en_rango(2, 3) == 66.7
+    assert pct_en_rango(3, 3) == 100.0
+    assert pct_en_rango(0, 4) == 0.0
+    assert pct_en_rango(0, 0) == 0.0
 
 
 def test_promedio_respuesta_min_promedia_y_redondea():
