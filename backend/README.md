@@ -21,7 +21,17 @@ Contiene el simulador de sensores, la API FastAPI con la lógica que emula el ER
 - [ ] Pruebas con `pytest` de las reglas de negocio.
 
 ## Variables de entorno
-Ver `.env.example` (se crea con el esqueleto). Nunca subir `.env`.
+Ver `.env.example`. Nunca subir `.env`.
+
+En local `ENTORNO=local` relaja las validaciones. En producción `ENTORNO` debe ser
+`produccion` y la API no arranca si falta o es inseguro alguno de estos valores:
+`JWT_SECRET` propio de 32 caracteres o más, `CRON_TOKEN`, `SEED_PASSWORD` distinta
+de la de demo y un token no vacío por cada sensor en `SENSOR_TOKENS`.
+
+Render define `RENDER=true` por su cuenta, así que también se detecta producción
+cuando `ENTORNO` se queda en `local` u olvida definirse: si el despliegue corre en
+Render con los valores de demo, la API falla al arrancar en lugar de quedar
+expuesta. Ver `app/config.py`.
 
 ## Cómo correr en local
 
@@ -29,9 +39,15 @@ Desde `backend/`:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements-dev.txt   # runtime + pytest y ruff
 cp .env.example .env   # pega aquí la URI de Supabase, ver abajo
 .venv/bin/uvicorn app.main:app --reload
+```
+
+En producción solo se instalan las dependencias de runtime:
+
+```bash
+pip install -r requirements.txt
 ```
 
 La API queda en <http://localhost:8000> y `GET /api/health` responde

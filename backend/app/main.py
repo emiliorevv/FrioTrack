@@ -9,6 +9,8 @@ from app.config import get_settings
 def create_app() -> FastAPI:
     """Arma la aplicación con CORS y el endpoint de salud."""
     settings = get_settings()
+    # Corta el arranque antes de exponer la API con un secreto de demo.
+    settings.validar_configuracion()
     app = FastAPI(title=settings.app_name)
 
     origenes = [origen.strip() for origen in settings.cors_origins.split(",") if origen.strip()]
