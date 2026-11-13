@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy.engine import Engine
 
 from app.config import limpiar_cache_settings
+from app.db import session as modulo_session
 from app.db.session import MENSAJE_SIN_DATABASE_URL, crear_engine
 
 URL_EJEMPLO = (
@@ -48,3 +49,36 @@ def test_crear_engine_acepta_una_url_explicita():
 
     assert engine.dialect.name == "postgresql"
     engine.dispose()
+
+
+def test_crear_engine_pone_timeout_de_conexion_en_postgres(monkeypatch):
+    capturado: dict[str, object] = {}
+
+    def crear_falso(url, **opciones):
+        capturado["url"] = url
+        capturado["opciones"] = opciones
+        return object()
+
+    monkeypatch.setattr(modulo_session, "create_engine", crear_falso)
+
+    modulo_session.crear_engine(URL_EJEMPLO)
+
+    assert capturado["url"] == URL_EJEMPLO
+    assert capturado["opciones"] == {
+        "pool_pre_ping": True,
+        "connect_args": {"connect_timeout": modulo_session.TIMEOUT_CONEXION_SEG},
+    }
+
+
+def test_crear_engine_no_pone_timeout_fuera_de_postgres(monkeypatch):
+    capturado: dict[str, object] = {}
+
+    def crear_falso(url, **opciones):
+        capturado["opciones"] = opciones
+        return object()
+
+    monkeypatch.setattr(modulo_session, "create_engine", crear_falso)
+
+    modulo_session.crear_engine("sqlite://")
+
+    assert capturado["opciones"] == {"pool_pre_ping": True}
