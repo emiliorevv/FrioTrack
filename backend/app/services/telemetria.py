@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -36,12 +38,41 @@ def _cargar_alertas_abiertas(session: Session, camara_id: int) -> list[Alerta]:
     )
 
 
-def _validar_sensor(session: Session, sensor_id: str, camara_id: int) -> None:
-    """Comprueba que el sensor exista, esté activo y pertenezca a la cámara."""
+def _hash_token(token: str) -> str:
+    """SHA-256 en hex del token: lo único que se guarda en `sensores.token_hash`."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _validar_sensor(
+    session: Session, sensor_id: str, camara_id: int, token: str
+) -> None:
+    """Autentica el token del sensor y comprueba que escriba en su propia cámara.
+
+    Códigos del contrato: sensor inexistente o token incorrecto -> 401; sensor
+    inactivo o de otra cámara -> 403. Los mensajes no distinguen cuál falló.
+    """
     sensor = session.get(Sensor, sensor_id)
-    # Auth pendiente (fase posterior): aquí irá la comparación del token y el
-    # hash SHA-256; por ahora basta con que el sensor exista y sea de la cámara.
-    if sensor is None or not sensor.activo or sensor.camara_id != camara_id:
+    if sensor is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token de sensor inválido.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not sensor.activo:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El sensor está inactivo.",
+        )
+
+    if not hmac.compare_digest(sensor.token_hash, _hash_token(token)):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token de sensor inválido.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if sensor.camara_id != camara_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="El sensor no está autorizado para escribir en esa cámara.",
@@ -49,7 +80,7 @@ def _validar_sensor(session: Session, sensor_id: str, camara_id: int) -> None:
 
 
 def procesar_telemetria(
-    session: Session, datos: TelemetriaIn
+    session: Session, datos: TelemetriaIn, token: str
 ) -> tuple[int, str]:
     """Persiste una lectura, aplica las reglas ERP y regresa `(lectura_id, estado)`."""
     camara = session.get(Camara, datos.camara_id)
@@ -59,7 +90,7 @@ def procesar_telemetria(
             detail=f"No existe la cámara {datos.camara_id}.",
         )
 
-    _validar_sensor(session, datos.sensor_id, camara.id)
+    _validar_sensor(session, datos.sensor_id, camara.id, token)
 
     ahora = utcnow()
     lectura = Lectura(

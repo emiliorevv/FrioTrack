@@ -1,5 +1,6 @@
 """Pruebas de POST /api/telemetria y del servicio de ingesta; sin base ni red."""
 
+import hashlib
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -17,6 +18,9 @@ from app.services import telemetria as servicio
 from app.services.telemetria import procesar_telemetria
 
 AHORA = datetime(2026, 11, 18, 19, 0, tzinfo=UTC)
+
+TOKEN = "token-de-prueba"
+AUTORIZACION = {"Authorization": f"Bearer {TOKEN}"}
 
 
 @pytest.fixture(autouse=True)
@@ -50,9 +54,13 @@ def _datos(**cambios: object) -> TelemetriaIn:
 def _cliente(monkeypatch: pytest.MonkeyPatch, resultado=(18342, "en_rango")):
     """TestClient con el servicio y la sesión sustituidos por dobles."""
     llamadas: list[TelemetriaIn] = []
+    tokens: list[str] = []
 
-    def servicio_falso(_session: object, datos: TelemetriaIn) -> tuple[int, str]:
+    def servicio_falso(
+        _session: object, datos: TelemetriaIn, token: str
+    ) -> tuple[int, str]:
         llamadas.append(datos)
+        tokens.append(token)
         return resultado
 
     monkeypatch.setattr(router_telemetria, "procesar_telemetria", servicio_falso)
@@ -62,7 +70,7 @@ def _cliente(monkeypatch: pytest.MonkeyPatch, resultado=(18342, "en_rango")):
         yield None
 
     app.dependency_overrides[get_db] = sesion_falsa
-    return TestClient(app), llamadas
+    return TestClient(app), llamadas, tokens
 
 
 class SesionFalsa:
@@ -111,7 +119,12 @@ def _camara(**cambios: object) -> Camara:
 
 
 def _sensor(**cambios: object) -> Sensor:
-    base = {"id": "S-PES-01", "camara_id": 1, "token_hash": "hash", "activo": True}
+    base = {
+        "id": "S-PES-01",
+        "camara_id": 1,
+        "token_hash": hashlib.sha256(TOKEN.encode()).hexdigest(),
+        "activo": True,
+    }
     base.update(cambios)
     return Sensor(**base)
 
@@ -133,16 +146,62 @@ def _lote(estado: str = "ok", producto: str = "Robalo fresco", lote_id: int = 1)
 
 
 def test_post_telemetria_responde_202_con_lectura_y_estado(monkeypatch):
-    cliente, llamadas = _cliente(monkeypatch)
+    cliente, llamadas, tokens = _cliente(monkeypatch)
 
     with cliente:
-        respuesta = cliente.post("/api/telemetria", json=_payload())
+        respuesta = cliente.post(
+            "/api/telemetria", json=_payload(), headers=AUTORIZACION
+        )
 
     assert respuesta.status_code == 202
     assert respuesta.json() == {"lectura_id": 18342, "estado_camara": "en_rango"}
     assert len(llamadas) == 1
     assert llamadas[0].sensor_id == "S-PES-01"
     assert llamadas[0].camara_id == 1
+    assert tokens == [TOKEN]  # el token llega al servicio sin alterarse
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Authorization": ""},
+        {"Authorization": "Bearer"},
+        {"Authorization": "Bearer "},
+        {"Authorization": "Bearer    "},
+        {"Authorization": TOKEN},
+        {"Authorization": "Basic dXN1YXJpbzpwYXNz"},
+    ],
+    ids=[
+        "sin-header",
+        "header-vacio",
+        "solo-bearer",
+        "bearer-sin-token",
+        "bearer-solo-espacios",
+        "token-sin-prefijo",
+        "otro-esquema",
+    ],
+)
+def test_post_telemetria_sin_bearer_valido_responde_401(monkeypatch, headers):
+    def no_debe_procesar(
+        _session: object, _datos: TelemetriaIn, _token: str
+    ) -> tuple[int, str]:
+        raise AssertionError("El router debió rechazar el header antes del servicio.")
+
+    monkeypatch.setattr(router_telemetria, "procesar_telemetria", no_debe_procesar)
+    app = create_app()
+
+    def sesion_falsa():
+        yield None
+
+    app.dependency_overrides[get_db] = sesion_falsa
+
+    with TestClient(app) as cliente:
+        respuesta = cliente.post("/api/telemetria", json=_payload(), headers=headers)
+
+    assert respuesta.status_code == 401
+    assert respuesta.headers["www-authenticate"] == "Bearer"
+    assert "Bearer" in respuesta.json()["detail"]
 
 
 @pytest.mark.parametrize(
@@ -165,7 +224,9 @@ def test_post_telemetria_responde_202_con_lectura_y_estado(monkeypatch):
     ],
 )
 def test_telemetria_invalida_responde_422(monkeypatch, cambios):
-    def no_debe_procesar(_session: object, _datos: TelemetriaIn) -> tuple[int, str]:
+    def no_debe_procesar(
+        _session: object, _datos: TelemetriaIn, _token: str
+    ) -> tuple[int, str]:
         raise AssertionError("La validación debió rechazar la lectura antes del servicio.")
 
     monkeypatch.setattr(router_telemetria, "procesar_telemetria", no_debe_procesar)
@@ -177,7 +238,9 @@ def test_telemetria_invalida_responde_422(monkeypatch, cambios):
     app.dependency_overrides[get_db] = sesion_falsa
 
     with TestClient(app) as cliente:
-        respuesta = cliente.post("/api/telemetria", json=_payload(**cambios))
+        respuesta = cliente.post(
+            "/api/telemetria", json=_payload(**cambios), headers=AUTORIZACION
+        )
 
     assert respuesta.status_code == 422
 
@@ -185,25 +248,93 @@ def test_telemetria_invalida_responde_422(monkeypatch, cambios):
 # --- Servicio ---------------------------------------------------------------
 
 
+def _cliente_con_servicio_real(
+    monkeypatch: pytest.MonkeyPatch, sesion: SesionFalsa
+) -> TestClient:
+    """TestClient con el servicio real y una sesión falsa (sin base ni red)."""
+    monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
+    monkeypatch.setattr(servicio, "_cargar_lotes", lambda _s, _c: [_lote()])
+    monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
+    app = create_app()
+
+    def sesion_falsa():
+        yield sesion
+
+    app.dependency_overrides[get_db] = sesion_falsa
+    return TestClient(app)
+
+
+def test_post_telemetria_con_token_valido_responde_202(monkeypatch):
+    sesion = SesionFalsa(camara=_camara(), sensor=_sensor())
+    cliente = _cliente_con_servicio_real(monkeypatch, sesion)
+
+    with cliente:
+        respuesta = cliente.post(
+            "/api/telemetria", json=_payload(), headers=AUTORIZACION
+        )
+
+    assert respuesta.status_code == 202
+    assert respuesta.json() == {
+        "lectura_id": sesion.siguiente_id,
+        "estado_camara": "en_rango",
+    }
+    assert sesion.commits == 1
+
+
+def test_post_telemetria_con_token_incorrecto_responde_401(monkeypatch):
+    sesion = SesionFalsa(camara=_camara(), sensor=_sensor())
+    cliente = _cliente_con_servicio_real(monkeypatch, sesion)
+
+    with cliente:
+        respuesta = cliente.post(
+            "/api/telemetria",
+            json=_payload(),
+            headers={"Authorization": "Bearer token-equivocado"},
+        )
+
+    assert respuesta.status_code == 401
+    assert sesion.commits == 0
+    assert sesion.agregados == []
+
+
 def test_servicio_camara_inexistente_responde_404():
     with pytest.raises(HTTPException) as error:
-        procesar_telemetria(SesionFalsa(camara=None, sensor=None), _datos())
+        procesar_telemetria(
+            SesionFalsa(camara=None, sensor=None), _datos(), token=TOKEN
+        )
 
     assert error.value.status_code == 404
 
 
 @pytest.mark.parametrize(
-    "sensor",
-    [None, _sensor(activo=False), _sensor(camara_id=2)],
-    ids=["inexistente", "inactivo", "de-otra-camara"],
+    ("sensor", "token", "codigo"),
+    [
+        (None, TOKEN, 401),
+        (_sensor(activo=False), TOKEN, 403),
+        (_sensor(), "token-equivocado", 401),
+        (_sensor(camara_id=2), TOKEN, 403),
+    ],
+    ids=["inexistente", "inactivo", "token-incorrecto", "de-otra-camara"],
 )
-def test_servicio_sensor_no_autorizado_responde_403(sensor):
+def test_servicio_sensor_no_autorizado_rechaza_sin_escribir(sensor, token, codigo):
     sesion = SesionFalsa(camara=_camara(), sensor=sensor)
 
     with pytest.raises(HTTPException) as error:
-        procesar_telemetria(sesion, _datos())
+        procesar_telemetria(sesion, _datos(), token=token)
 
-    assert error.value.status_code == 403
+    assert error.value.status_code == codigo
+    assert sesion.commits == 0
+    assert sesion.agregados == []
+
+
+def test_servicio_acepta_solo_el_hash_sha256_del_token():
+    """El servicio hashea el token recibido; guardar el token en claro no sirve."""
+    sesion = SesionFalsa(camara=_camara(), sensor=_sensor(token_hash=TOKEN))
+
+    with pytest.raises(HTTPException) as error:
+        procesar_telemetria(sesion, _datos(), token=TOKEN)
+
+    assert error.value.status_code == 401
 
 
 def test_servicio_lectura_normal_persiste_y_queda_en_rango(monkeypatch):
@@ -212,7 +343,7 @@ def test_servicio_lectura_normal_persiste_y_queda_en_rango(monkeypatch):
     monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
     sesion = SesionFalsa(camara=_camara(), sensor=_sensor())
 
-    lectura_id, estado = procesar_telemetria(sesion, _datos(temperatura_c=1.0))
+    lectura_id, estado = procesar_telemetria(sesion, _datos(temperatura_c=1.0), token=TOKEN)
 
     lectura = sesion.agregados[0]
     assert isinstance(lectura, Lectura)
@@ -238,7 +369,7 @@ def test_servicio_abre_alerta_y_pasa_lote_a_riesgo_en_el_umbral(monkeypatch):
     monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
     sesion = SesionFalsa(camara=camara, sensor=_sensor())
 
-    lectura_id, estado = procesar_telemetria(sesion, _datos(temperatura_c=3.0))
+    lectura_id, estado = procesar_telemetria(sesion, _datos(temperatura_c=3.0), token=TOKEN)
 
     assert lectura_id == sesion.siguiente_id
     assert lote_ok.estado == "en_riesgo"
@@ -263,7 +394,7 @@ def test_servicio_marca_merma_con_su_fecha(monkeypatch):
     monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
     sesion = SesionFalsa(camara=camara, sensor=_sensor())
 
-    _, estado = procesar_telemetria(sesion, _datos(temperatura_c=3.0))
+    _, estado = procesar_telemetria(sesion, _datos(temperatura_c=3.0), token=TOKEN)
 
     assert lote.estado == "merma"
     assert lote.merma_en == AHORA
@@ -277,7 +408,7 @@ def test_servicio_abre_alerta_de_puerta_y_queda_en_alerta(monkeypatch):
     monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
     sesion = SesionFalsa(camara=camara, sensor=_sensor())
 
-    _, estado = procesar_telemetria(sesion, _datos(puerta_abierta=True))
+    _, estado = procesar_telemetria(sesion, _datos(puerta_abierta=True), token=TOKEN)
 
     assert estado == "alerta"
     alertas = [fila for fila in sesion.agregados if isinstance(fila, Alerta)]
@@ -311,7 +442,7 @@ def test_servicio_cierra_alertas_y_recupera_lotes_al_volver_al_rango(monkeypatch
     )
     sesion = SesionFalsa(camara=camara, sensor=_sensor())
 
-    _, estado = procesar_telemetria(sesion, _datos(temperatura_c=1.0))
+    _, estado = procesar_telemetria(sesion, _datos(temperatura_c=1.0), token=TOKEN)
 
     assert camara.fuera_de_rango_desde is None
     assert camara.puerta_abierta_desde is None
