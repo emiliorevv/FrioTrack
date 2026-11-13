@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.middleware.acceso import AccesoLogMiddleware
 from app.routers.camaras import router as camaras_router
 from app.routers.operacion import router as operacion_router
 from app.routers.telemetria import router as telemetria_router
@@ -24,6 +25,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Después de CORS: el log también ve los preflight y las respuestas de error.
+    app.add_middleware(AccesoLogMiddleware)
 
     @app.get("/api/health")
     def salud() -> dict[str, int | bool]:

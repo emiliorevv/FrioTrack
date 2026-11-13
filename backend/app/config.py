@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Obligatoria para cargar el seed (usuarios `jefe` y `gerente`); sin default.
     seed_password: str = ""
     cors_origins: str = "*"
+    # Con False el middleware de acceso solo imprime en stdout: no consulta
+    # `ips_bloqueadas` ni escribe en `logs_acceso` (lo usan las pruebas).
+    middleware_acceso_db: bool = True
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_from: str = ""

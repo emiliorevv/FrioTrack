@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -46,14 +46,18 @@ def _token_de_sensor(authorization: str | None) -> str:
 )
 def recibir_telemetria(
     datos: TelemetriaIn,
+    request: Request,
     session: SesionDB,
     authorization: Autorizacion = None,
 ) -> TelemetriaOut:
     """Recibe una lectura autenticada con el token de su sensor.
 
     El contrato pide un token por sensor (`Authorization: Bearer <token_sensor>`).
-    El JWT de usuario del dashboard sigue diferido a la fase de consulta.
+    El JWT de usuario del dashboard sigue diferido a la fase de consulta: por eso
+    la credencial es `sensor` y el sujeto es el `sensor_id` del cuerpo.
     """
     token = _token_de_sensor(authorization)
+    request.state.credencial = "sensor"
+    request.state.sujeto = datos.sensor_id
     lectura_id, estado_camara = procesar_telemetria(session, datos, token=token)
     return TelemetriaOut(lectura_id=lectura_id, estado_camara=estado_camara)
