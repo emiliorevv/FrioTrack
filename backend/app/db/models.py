@@ -127,7 +127,7 @@ class Alerta(Base):
     atendida_por: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
     atendida_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     nota: Mapped[str | None] = mapped_column(Text)
-    sms_enviados: Mapped[int] = mapped_column(Integer, default=1)
+    sms_enviados: Mapped[int] = mapped_column(Integer, default=0)
 
     camara: Mapped[Camara] = relationship(back_populates="alertas")
     atendida_por_usuario: Mapped[Usuario | None] = relationship(foreign_keys=[atendida_por])

@@ -1,17 +1,37 @@
 """Pruebas del seed y de los hashes; no tocan base de datos, disco ni red."""
 
 import hashlib
+import json
 from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal
 
+import pytest
+
+from app.config import limpiar_cache_settings
 from app.core.security import verify_password
 from app.db.models import Camara, Lote, Sensor, Usuario
 from app.db.seed import cargar_seed, construir_seed
 
+TOKENS = {
+    "S-PES-01": "token-pescados",
+    "S-CAR-01": "token-carnes",
+    "S-LAC-01": "token-lacteos",
+    "S-VER-01": "token-verduras",
+    "S-CON-01": "token-congelador",
+}
+
+
+@pytest.fixture(autouse=True)
+def _settings_sin_cache():
+    """Aísla cada prueba de la configuración cacheada y del .env local."""
+    limpiar_cache_settings()
+    yield
+    limpiar_cache_settings()
+
 
 def test_construir_seed_arma_las_cinco_camaras():
-    camaras, _, _, _ = construir_seed(sensor_tokens={}, password="demo")
+    camaras, _, _, _ = construir_seed(sensor_tokens=TOKENS, password="demo")
 
     assert [c.id for c in camaras] == [1, 2, 3, 4, 5]
     assert [c.nombre for c in camaras] == [
@@ -35,14 +55,7 @@ def test_construir_seed_arma_las_cinco_camaras():
 
 
 def test_construir_seed_arma_un_sensor_por_camara_con_token_hasheado():
-    tokens = {
-        "S-PES-01": "token-pescados",
-        "S-CAR-01": "token-carnes",
-        "S-LAC-01": "token-lacteos",
-        "S-VER-01": "token-verduras",
-        "S-CON-01": "token-congelador",
-    }
-    _, sensores, _, _ = construir_seed(sensor_tokens=tokens, password="demo")
+    _, sensores, _, _ = construir_seed(sensor_tokens=TOKENS, password="demo")
 
     assert {s.id: s.camara_id for s in sensores} == {
         "S-PES-01": 1,
@@ -53,7 +66,7 @@ def test_construir_seed_arma_un_sensor_por_camara_con_token_hasheado():
     }
     assert all(s.activo for s in sensores)
     for sensor in sensores:
-        token = tokens[sensor.id]
+        token = TOKENS[sensor.id]
         assert sensor.token_hash == hashlib.sha256(token.encode("utf-8")).hexdigest()
         assert len(sensor.token_hash) == 64
         # El token en claro nunca queda guardado.
@@ -61,16 +74,45 @@ def test_construir_seed_arma_un_sensor_por_camara_con_token_hasheado():
         assert token not in sensor.token_hash
 
 
-def test_construir_seed_usa_fallback_de_desarrollo_sin_tokens():
-    _, sensores, _, _ = construir_seed(sensor_tokens={}, password="demo")
+def test_construir_seed_falla_si_faltan_todos_los_tokens():
+    with pytest.raises(RuntimeError, match="SENSOR_TOKENS") as error:
+        construir_seed(sensor_tokens={}, password="demo")
+
+    for sensor_id in TOKENS:
+        assert sensor_id in str(error.value)
+
+
+def test_construir_seed_falla_con_un_mapa_incompleto_de_tokens():
+    incompletos = {
+        sensor_id: token for sensor_id, token in TOKENS.items() if sensor_id != "S-LAC-01"
+    }
+
+    with pytest.raises(RuntimeError, match="SENSOR_TOKENS") as error:
+        construir_seed(sensor_tokens=incompletos, password="demo")
+
+    assert "S-LAC-01" in str(error.value)
+    assert "S-PES-01" not in str(error.value)
+
+
+def test_construir_seed_lee_sensor_tokens_del_entorno(monkeypatch):
+    monkeypatch.setenv("SENSOR_TOKENS", json.dumps(TOKENS))
+
+    _, sensores, _, _ = construir_seed(password="demo")
 
     assert {s.token_hash for s in sensores} == {
-        hashlib.sha256(f"dev-token-{s.id}".encode()).hexdigest() for s in sensores
+        hashlib.sha256(token.encode("utf-8")).hexdigest() for token in TOKENS.values()
     }
 
 
+def test_construir_seed_sin_password_lanza_error(monkeypatch):
+    monkeypatch.setenv("SEED_PASSWORD", "")
+
+    with pytest.raises(RuntimeError, match="SEED_PASSWORD"):
+        construir_seed(sensor_tokens=TOKENS)
+
+
 def test_construir_seed_arma_los_quince_lotes():
-    _, _, lotes, _ = construir_seed(sensor_tokens={}, password="demo")
+    _, _, lotes, _ = construir_seed(sensor_tokens=TOKENS, password="demo")
 
     assert len(lotes) == 15
     por_camara = Counter(lote.camara_id for lote in lotes)
@@ -93,7 +135,7 @@ def test_construir_seed_arma_los_quince_lotes():
 
 
 def test_construir_seed_arma_los_dos_usuarios_con_password_verificable():
-    _, _, _, usuarios = construir_seed(sensor_tokens={}, password="demo")
+    _, _, _, usuarios = construir_seed(sensor_tokens=TOKENS, password="demo")
 
     por_nombre = {u.usuario: u for u in usuarios}
     assert set(por_nombre) == {"jefe", "gerente"}
@@ -130,7 +172,7 @@ class FakeSession:
 def test_cargar_seed_inserta_todo_y_hace_commit():
     sesion = FakeSession()
 
-    assert cargar_seed(sesion, sensor_tokens={}, password="demo") is True
+    assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is True
     assert sesion.flushes == 1
     assert sesion.commits == 1
     assert len(sesion.agregados) == 5 + 5 + 15 + 2
@@ -143,7 +185,7 @@ def test_cargar_seed_inserta_todo_y_hace_commit():
 def test_cargar_seed_es_idempotente_si_ya_hay_camaras():
     sesion = FakeSession(hay_camaras=True)
 
-    assert cargar_seed(sesion, sensor_tokens={}, password="demo") is False
+    assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is False
     assert sesion.agregados == []
     assert sesion.flushes == 0
     assert sesion.commits == 0

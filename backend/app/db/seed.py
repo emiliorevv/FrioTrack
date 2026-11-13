@@ -70,20 +70,32 @@ def construir_seed(
 ) -> tuple[list[Camara], list[Sensor], list[Lote], list[Usuario]]:
     """Arma en memoria las filas del seed, sin tocar la base de datos.
 
+    Exige un token para cada uno de los cinco sensores (parámetro o `SENSOR_TOKENS`)
+    y una contraseña (parámetro o `SEED_PASSWORD`); si falta algo lanza RuntimeError.
     Es determinista salvo `caducidad`, que se calcula desde hoy.
     """
     settings = get_settings()
     tokens = sensor_tokens if sensor_tokens is not None else _tokens_de_entorno()
+    faltantes = [sensor_id for sensor_id in SENSORES.values() if not tokens.get(sensor_id)]
+    if faltantes:
+        raise RuntimeError(
+            f"Faltan tokens de sensor en SENSOR_TOKENS: {', '.join(faltantes)}. "
+            "Configura SENSOR_TOKENS con un token para cada sensor."
+        )
+
     password = password if password is not None else settings.seed_password
+    if not password:
+        raise RuntimeError(
+            "Falta SEED_PASSWORD: define la contraseña inicial de los usuarios "
+            "semilla `jefe` y `gerente`."
+        )
 
     # `estado` explícito: al no tocar la base, los defaults del modelo no se aplican.
     camaras = [Camara(estado="en_rango", **datos) for datos in CAMARAS]
 
     sensores = []
     for camara_id, sensor_id in SENSORES.items():
-        # Fallback solo de desarrollo: si falta el token en SENSOR_TOKENS se usa uno
-        # predecible para que la demo local funcione sin configurar el .env.
-        token = tokens.get(sensor_id) or f"dev-token-{sensor_id}"
+        token = tokens[sensor_id]
         sensores.append(
             Sensor(
                 id=sensor_id,

@@ -90,6 +90,12 @@ def test_indice_unico_parcial_de_alertas_esta_en_metadata():
     assert "cerrada_en IS NULL" in ddl
 
 
+def test_alerta_nace_sin_sms_enviados():
+    columna = Base.metadata.tables["alertas"].c.sms_enviados
+
+    assert columna.default.arg == 0
+
+
 def test_aristas_sin_fk_documentadas():
     camaras = Base.metadata.tables["camaras"]
     lecturas = Base.metadata.tables["lecturas"]
