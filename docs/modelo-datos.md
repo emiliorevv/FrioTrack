@@ -45,7 +45,10 @@ alertas_seguridad        ips_bloqueadas <── (lo escribe el detector, lo lee 
 | `activo` | `bool` | Revocar un token = poner `false` |
 
 El token en claro vive **solo** en la variable de entorno `SENSOR_TOKENS`, que se
-usa para sembrar o rotar sensores. La API y la base guardan únicamente el
+usa para **sembrar** los sensores la primera vez (cuando la base todavía no tiene
+cámaras). La rotación de tokens no está implementada en el Alfa: habría que
+actualizar `token_hash` a mano o con un script futuro, porque `cargar_seed()` no
+toca los sensores si ya hay cámaras. La API y la base guardan únicamente el
 SHA-256 en `token_hash`; la autenticación del sensor compara el hash, nunca el
 token en claro.
 
