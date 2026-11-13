@@ -63,6 +63,34 @@ Pruebas y lint, desde `backend/`:
 Las pruebas no se conectan a ninguna base ni a la red: usan metadatos de
 SQLAlchemy y una sesión falsa.
 
+## Simulador de sensores
+
+Con la API corriendo (por defecto en `http://127.0.0.1:8000/api`), desde
+`backend/`:
+
+```bash
+# Una sola lectura normal de la cámara 1, para humo o pruebas
+.venv/bin/python -m simulator --escenario normal --camara 1 --iteraciones 1 \
+  --token token-pes-ejemplo
+
+# Provocar una falla en vivo: una lectura cada 3 segundos hasta Ctrl+C
+.venv/bin/python -m simulator --escenario falla_compresor --camara 1
+
+# Abrir la puerta de la cámara 2 y después recuperarla
+.venv/bin/python -m simulator --escenario puerta_abierta --camara 2
+.venv/bin/python -m simulator --escenario recuperar --camara 2
+```
+
+`--iteraciones 0` (el default) corre sin límite y `--intervalo` son los segundos
+entre lecturas (3 por default). El token del sensor se toma de `SENSOR_TOKENS`
+(JSON) del **entorno**; `--token` lo sobreescribe. Ojo: el simulador no lee
+`.env` por sí solo, así que exporta la variable o pasa `--token`.
+
+Al arrancar consulta `GET /api/camaras` para tomar el rango y la última lectura
+de la cámara; si la cámara no existe, termina con un error claro. Si el API
+responde `401` o `403`, muestra el detalle y también termina. Escenarios y guion
+de la demo: [docs/modo-demo.md](../docs/modo-demo.md).
+
 ## Base de datos (Supabase)
 
 El runtime habla directo con el Postgres de Supabase; no hay base local.
