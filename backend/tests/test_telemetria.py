@@ -86,6 +86,7 @@ class SesionFalsa:
         self.flushes = 0
         self.commits = 0
         self.siguiente_id = 500
+        self.siguiente_id_alerta = 900
 
     def get(self, modelo: object, _pk: object) -> object | None:
         if modelo is Camara:
@@ -95,6 +96,11 @@ class SesionFalsa:
         raise AssertionError(f"Modelo inesperado: {modelo!r}")
 
     def add(self, fila: object) -> None:
+        # La base asigna el id al insertar; el doble hace lo mismo para las
+        # alertas, que se serializan antes de cualquier flush.
+        if isinstance(fila, Alerta) and fila.id is None:
+            fila.id = self.siguiente_id_alerta
+            self.siguiente_id_alerta += 1
         self.agregados.append(fila)
 
     def flush(self) -> None:
@@ -424,6 +430,7 @@ def test_servicio_cierra_alertas_y_recupera_lotes_al_volver_al_rango(monkeypatch
     monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
     camara = _camara(fuera_de_rango_desde=AHORA - timedelta(minutes=5))
     alerta_temperatura = Alerta(
+        id=101,
         camara_id=1,
         tipo="temperatura",
         abierta_en=AHORA - timedelta(minutes=5),
@@ -431,6 +438,7 @@ def test_servicio_cierra_alertas_y_recupera_lotes_al_volver_al_rango(monkeypatch
         sms_enviados=0,
     )
     alerta_puerta = Alerta(
+        id=102,
         camara_id=1,
         tipo="puerta",
         abierta_en=AHORA - timedelta(minutes=2),
@@ -519,7 +527,7 @@ def test_servicio_publica_alerta_abierta_y_lote_actualizado(monkeypatch):
     ]
     _, alerta = eventos[1]
     assert alerta == {
-        "id": None,  # la sesión falsa no asigna id al insertar
+        "id": 900,  # la sesión falsa lo asigna al insertar
         "camara_id": 1,
         "tipo": "temperatura",
         "abierta_en": AHORA.isoformat(),
@@ -545,6 +553,7 @@ def test_servicio_publica_alertas_cerradas_y_lote_recuperado(monkeypatch):
     monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
     camara = _camara(fuera_de_rango_desde=AHORA - timedelta(minutes=5))
     alerta_temperatura = Alerta(
+        id=101,
         camara_id=1,
         tipo="temperatura",
         abierta_en=AHORA - timedelta(minutes=5),
@@ -552,6 +561,7 @@ def test_servicio_publica_alertas_cerradas_y_lote_recuperado(monkeypatch):
         sms_enviados=1,
     )
     alerta_puerta = Alerta(
+        id=102,
         camara_id=1,
         tipo="puerta",
         abierta_en=AHORA - timedelta(minutes=2),

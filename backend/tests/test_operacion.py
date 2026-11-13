@@ -1,8 +1,10 @@
 """Pruebas de alertas, KPIs y alertas de seguridad sin base real ni red."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
@@ -12,6 +14,8 @@ from app.db.models import Alerta, AlertaSeguridad, Usuario
 from app.db.session import get_db
 from app.erp.kpis import merma_en_periodo, pct_en_rango, promedio_respuesta_min, valor_en_riesgo
 from app.main import create_app
+from app.realtime.bus import EventBus
+from app.routers import operacion
 from app.services import kpis as kpis_servicio
 
 AHORA = datetime(2026, 11, 12, 18, 0, tzinfo=UTC)
@@ -256,6 +260,40 @@ def test_atender_alerta_cerrada_regresa_409():
     assert respuesta.status_code == 409
     assert respuesta.json()["detail"] == "La alerta ya está cerrada"
     assert sesion.commits == 0
+
+
+def test_atender_alerta_publica_alerta_cerrada_en_el_bus(monkeypatch):
+    alerta = _alerta()
+    sesion = SesionFalsa(
+        obtener=[alerta],
+        unicos=[Usuario(id=1, usuario="jefe", password_hash="hash", rol="jefe_cocina")],
+    )
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: sesion
+    bus = EventBus()
+    monkeypatch.setattr(operacion, "bus", bus)
+
+    async def escenario():
+        cola = bus.suscribir()
+        try:
+            transporte = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transporte, base_url="http://test"
+            ) as cliente:
+                respuesta = await cliente.post(
+                    "/api/alertas/31/atender", json={"nota": "Se cerró la puerta"}
+                )
+            evento = await asyncio.wait_for(cola.get(), timeout=1)
+            return respuesta, evento
+        finally:
+            bus.desuscribir(cola)
+
+    respuesta, (nombre, datos) = asyncio.run(escenario())
+
+    assert respuesta.status_code == 200
+    assert nombre == "alerta_cerrada"
+    assert datos["atendida_por"] == 1
+    assert datos == respuesta.json()
 
 
 def test_atender_alerta_sin_usuario_jefe_regresa_500_con_mensaje_claro():

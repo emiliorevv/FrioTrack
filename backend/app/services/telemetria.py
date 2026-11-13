@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -22,49 +20,14 @@ from app.erp.procesador import (
     evaluar_lectura,
 )
 from app.realtime.bus import bus
+from app.schemas.operacion import alerta_salida, lote_salida
 from app.schemas.telemetria import TelemetriaIn
-
-
-def _iso(valor: datetime | date | None) -> str | None:
-    """Serializa fechas para JSON; si llegan sin zona, asume UTC."""
-    if valor is None:
-        return None
-    if isinstance(valor, datetime) and valor.tzinfo is None:
-        valor = valor.replace(tzinfo=UTC)
-    return valor.isoformat()
+from app.schemas.utils import iso
 
 
 def _flotante(valor: Decimal | float | int | None) -> float | None:
     """Convierte un numeric de Postgres a float (o `None`)."""
     return None if valor is None else float(valor)
-
-
-def _evento_alerta(alerta: Alerta) -> dict[str, Any]:
-    """Objeto de alerta del contrato, sin atributos ORM."""
-    return {
-        "id": alerta.id,
-        "camara_id": alerta.camara_id,
-        "tipo": alerta.tipo,
-        "abierta_en": _iso(alerta.abierta_en),
-        "cerrada_en": _iso(alerta.cerrada_en),
-        "temperatura_max_c": _flotante(alerta.temperatura_max_c),
-        "sms_enviados": alerta.sms_enviados,
-        "atendida_por": alerta.atendida_por,
-    }
-
-
-def _evento_lote(lote: Lote) -> dict[str, Any]:
-    """Objeto de lote del contrato, sin atributos ORM."""
-    return {
-        "id": lote.id,
-        "producto": lote.producto,
-        "camara_id": lote.camara_id,
-        "cantidad": _flotante(lote.cantidad),
-        "unidad": lote.unidad,
-        "costo_total_mxn": _flotante(lote.costo_total_mxn),
-        "caducidad": _iso(lote.caducidad),
-        "estado": lote.estado,
-    }
 
 
 def _publicar_eventos(
@@ -79,7 +42,7 @@ def _publicar_eventos(
         "lectura",
         {
             "camara_id": lectura.camara_id,
-            "ts": _iso(lectura.ts),
+            "ts": iso(lectura.ts),
             "temperatura_c": _flotante(lectura.temperatura_c),
             "humedad_pct": _flotante(lectura.humedad_pct),
             "puerta_abierta": lectura.puerta_abierta,
@@ -87,11 +50,11 @@ def _publicar_eventos(
         },
     )
     for alerta in alertas_abiertas:
-        bus.publicar("alerta_abierta", _evento_alerta(alerta))
+        bus.publicar("alerta_abierta", alerta_salida(alerta).model_dump())
     for alerta in alertas_cerradas:
-        bus.publicar("alerta_cerrada", _evento_alerta(alerta))
+        bus.publicar("alerta_cerrada", alerta_salida(alerta).model_dump())
     for lote in lotes_actualizados:
-        bus.publicar("lote_actualizado", _evento_lote(lote))
+        bus.publicar("lote_actualizado", lote_salida(lote).model_dump())
 
 
 def _cargar_lotes(session: Session, camara_id: int) -> list[Lote]:

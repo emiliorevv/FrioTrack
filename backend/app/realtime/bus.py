@@ -13,6 +13,11 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 TAMANO_COLA = 100
+# El stream cierra la conexión al recibirlo para que `EventSource` reconecte y
+# recargue el estado completo por REST.
+EVENTO_CERRAR = "__cerrar__"
+# Transiciones de estado: si se pierden, el dashboard queda desincronizado.
+EVENTOS_DE_ESTADO = frozenset({"alerta_abierta", "alerta_cerrada", "lote_actualizado", "kpis"})
 
 Evento = tuple[str, dict[str, Any]]
 ColaEventos = asyncio.Queue[Evento]
@@ -22,53 +27,55 @@ class EventBus:
     """Reparte eventos a las colas suscritas sin bloquear al publicador."""
 
     def __init__(self) -> None:
-        self._suscriptores: set[ColaEventos] = set()
-        self._loop: asyncio.AbstractEventLoop | None = None
+        self._suscriptores: dict[ColaEventos, asyncio.AbstractEventLoop] = {}
 
     def suscribir(self) -> ColaEventos:
-        """Crea la cola de una conexión y recuerda el loop donde vive.
-
-        El loop se guarda en la primera suscripción para poder publicar desde
-        los endpoints sync, que FastAPI ejecuta en el threadpool.
-        """
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # Suscripción sin loop (uso sync): se publicará cuando exista uno.
-            loop = None
-        if loop is not None:
-            self._loop = loop
-
+        """Crea la cola de una conexión y la asocia al loop donde vive."""
+        loop = asyncio.get_running_loop()
         cola: ColaEventos = asyncio.Queue(maxsize=TAMANO_COLA)
-        self._suscriptores.add(cola)
+        self._suscriptores[cola] = loop
         return cola
 
     def desuscribir(self, cola: ColaEventos) -> None:
         """Deja de entregar eventos a la cola (conexión cerrada)."""
-        self._suscriptores.discard(cola)
+        self._suscriptores.pop(cola, None)
+
+    def hay_suscriptores(self) -> bool:
+        """Indica si vale la pena calcular eventos que nadie va a recibir."""
+        return bool(self._suscriptores)
 
     def publicar(self, evento: str, data: dict[str, Any]) -> None:
-        """Encola el evento en todas las conexiones; nunca bloquea ni falla.
+        """Encola el evento en cada conexión, en el loop de esa conexión.
 
-        Si la publicación viene de un endpoint sync, se corre en otro hilo:
-        `call_soon_threadsafe` devuelve el reparto al loop de las conexiones.
+        Se puede llamar desde cualquier hilo: `call_soon_threadsafe` devuelve el
+        reparto al loop donde vive cada cola (no todas las conexiones comparten
+        loop, por ejemplo entre TestClient o un segundo loop de pruebas).
         """
-        loop = self._loop
-        if not self._suscriptores or loop is None or loop.is_closed():
-            return
-        try:
-            loop.call_soon_threadsafe(self._repartir, evento, data)
-        except RuntimeError:
-            # El loop se cerró entre la comprobación y la llamada.
-            logger.debug("Evento %s descartado: el loop ya no está disponible", evento)
-
-    def _repartir(self, evento: str, data: dict[str, Any]) -> None:
-        """Copia el evento a cada cola; si una está llena, lo descarta."""
-        for cola in list(self._suscriptores):
+        for cola, loop in list(self._suscriptores.items()):
+            if loop.is_closed():
+                continue
             try:
-                cola.put_nowait((evento, data))
-            except asyncio.QueueFull:
-                logger.debug("Cola SSE llena: se descarta el evento %s", evento)
+                loop.call_soon_threadsafe(self._entregar, cola, evento, data)
+            except RuntimeError:
+                # El loop se cerró entre la comprobación y la llamada.
+                logger.debug("Evento %s descartado: el loop ya no está disponible", evento)
+
+    def _entregar(self, cola: ColaEventos, evento: str, data: dict[str, Any]) -> None:
+        """Encola el evento; con la cola llena, protege el estado del cliente."""
+        if not cola.full():
+            cola.put_nowait((evento, data))
+            return
+        if evento not in EVENTOS_DE_ESTADO:
+            # Las lecturas son muestras: perder una no desincroniza el dashboard.
+            logger.debug("Cola SSE llena: se descarta el evento %s", evento)
+            return
+        # Un evento de estado perdido deja al cliente desincronizado para siempre
+        # (una alerta que nunca aparece, un lote que nunca pasa a merma). Se vacía
+        # la cola y se pide reconectar para que recargue por REST.
+        logger.warning("Cola SSE llena: se pide reconectar para no perder %s", evento)
+        while not cola.empty():
+            cola.get_nowait()
+        cola.put_nowait((EVENTO_CERRAR, {}))
 
 
 bus = EventBus()
