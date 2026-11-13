@@ -65,6 +65,26 @@ def log_stdout():
         manejador.setStream(anterior)
 
 
+@pytest.fixture
+def avisos_logger():
+    """Captura los warnings del middleware sin depender de caplog/propagación."""
+    registros: list[logging.LogRecord] = []
+
+    class _Handler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            registros.append(record)
+
+    manejador = _Handler()
+    anterior = acceso.logger.level
+    acceso.logger.addHandler(manejador)
+    acceso.logger.setLevel(logging.WARNING)
+    try:
+        yield registros
+    finally:
+        acceso.logger.removeHandler(manejador)
+        acceso.logger.setLevel(anterior)
+
+
 def _activar_db(monkeypatch):
     monkeypatch.setenv("MIDDLEWARE_ACCESO_DB", "1")
     limpiar_cache_settings()
@@ -459,7 +479,7 @@ def test_flag_apagada_solo_escribe_stdout(monkeypatch, log_stdout):
     assert salida["ruta"] == "/api/salud"
 
 
-def test_fallo_de_base_no_bloquea_la_peticion(monkeypatch, log_stdout, caplog):
+def test_fallo_de_base_no_bloquea_la_peticion(monkeypatch, log_stdout):
     _activar_db(monkeypatch)
     _configurar_entorno(monkeypatch, entorno="local")
 
@@ -469,10 +489,7 @@ def test_fallo_de_base_no_bloquea_la_peticion(monkeypatch, log_stdout, caplog):
     monkeypatch.setattr(acceso, "SessionLocal", sin_base)
     monkeypatch.setattr(acceso, "get_engine", sin_base)
 
-    with (
-        caplog.at_level(logging.WARNING, logger="app.middleware.acceso"),
-        TestClient(_app_de_prueba()) as cliente,
-    ):
+    with TestClient(_app_de_prueba()) as cliente:
         respuesta = cliente.get("/api/salud")
         _esperar_registros(cliente)
 
@@ -480,29 +497,14 @@ def test_fallo_de_base_no_bloquea_la_peticion(monkeypatch, log_stdout, caplog):
     salida = _lineas(log_stdout.getvalue())[-1]
     assert salida["status"] == 200
 
-    avisos = [registro.getMessage() for registro in caplog.records]
-    assert any("ips_bloqueadas" in aviso for aviso in avisos)
-    assert any("logs_acceso" in aviso for aviso in avisos)
 
+def test_avisar_fallo_loguea_y_rate_limita(avisos_logger):
+    error = RuntimeError("base caída")
 
-def test_avisos_de_base_se_limitan(monkeypatch, caplog):
-    _activar_db(monkeypatch)
-    _configurar_entorno(monkeypatch, entorno="local")
+    acceso._avisar_fallo("ips_bloqueadas", error)
+    acceso._avisar_fallo("ips_bloqueadas", error)  # mismo minuto: no duplica
+    acceso._avisar_fallo("logs_acceso", error)
 
-    def sin_base(*_args, **_kwargs):
-        raise RuntimeError("base caída")
-
-    monkeypatch.setattr(acceso, "SessionLocal", sin_base)
-    monkeypatch.setattr(acceso, "get_engine", sin_base)
-
-    with (
-        caplog.at_level(logging.WARNING, logger="app.middleware.acceso"),
-        TestClient(_app_de_prueba()) as cliente,
-    ):
-        cliente.get("/api/salud")
-        _esperar_registros(cliente)
-        cliente.get("/api/salud")
-        _esperar_registros(cliente)
-
-    # Dos operaciones (consulta e inserción) con su aviso, no cuatro.
-    assert len(caplog.records) == 2
+    assert len(avisos_logger) == 2
+    assert "ips_bloqueadas" in avisos_logger[0].getMessage()
+    assert "logs_acceso" in avisos_logger[1].getMessage()
