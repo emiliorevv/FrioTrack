@@ -4,6 +4,7 @@ import json
 import os
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 JWT_SECRET_POR_DEFECTO = "cambia-esto-en-produccion"
@@ -21,7 +22,7 @@ class Settings(BaseSettings):
     app_name: str = "FríoTrack API"
     # `local` relaja las validaciones; Render se detecta además con RENDER=true.
     entorno: str = "local"
-    escala_tiempo: int = 1
+    escala_tiempo: int = Field(default=1, ge=1)
     # Sin default: el runtime exige la cadena de Supabase (ver app/db/session.py).
     database_url: str = ""
     jwt_secret: str = JWT_SECRET_POR_DEFECTO
