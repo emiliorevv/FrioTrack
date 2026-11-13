@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.routers.camaras import router as camaras_router
+from app.routers.operacion import router as operacion_router
 from app.routers.telemetria import router as telemetria_router
 
 
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
         return {"ok": True, "escala_tiempo": settings.escala_tiempo}
 
     app.include_router(camaras_router)
+    app.include_router(operacion_router)
     app.include_router(telemetria_router)
 
     return app
