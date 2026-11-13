@@ -26,7 +26,9 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
       - name: Instalar dependencias
         run: |
           if [ -f requirements-dev.txt ]; then
@@ -58,5 +60,7 @@ jobs:
         run: npm run lint
       - name: Pruebas con Vitest
         run: npm test
+      - name: Formato con Prettier
+        run: npm run format:check
       - name: Build
         run: npm run build
