@@ -1,8 +1,10 @@
 """Pruebas de alertas, KPIs y alertas de seguridad sin base real ni red."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
@@ -12,7 +14,9 @@ from app.db.models import Alerta, AlertaSeguridad, Usuario
 from app.db.session import get_db
 from app.erp.kpis import merma_en_periodo, pct_en_rango, promedio_respuesta_min, valor_en_riesgo
 from app.main import create_app
+from app.realtime.bus import EventBus
 from app.routers import operacion
+from app.services import kpis as kpis_servicio
 
 AHORA = datetime(2026, 11, 12, 18, 0, tzinfo=UTC)
 
@@ -258,6 +262,40 @@ def test_atender_alerta_cerrada_regresa_409():
     assert sesion.commits == 0
 
 
+def test_atender_alerta_publica_alerta_cerrada_en_el_bus(monkeypatch):
+    alerta = _alerta()
+    sesion = SesionFalsa(
+        obtener=[alerta],
+        unicos=[Usuario(id=1, usuario="jefe", password_hash="hash", rol="jefe_cocina")],
+    )
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: sesion
+    bus = EventBus()
+    monkeypatch.setattr(operacion, "bus", bus)
+
+    async def escenario():
+        cola = bus.suscribir()
+        try:
+            transporte = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transporte, base_url="http://test"
+            ) as cliente:
+                respuesta = await cliente.post(
+                    "/api/alertas/31/atender", json={"nota": "Se cerró la puerta"}
+                )
+            evento = await asyncio.wait_for(cola.get(), timeout=1)
+            return respuesta, evento
+        finally:
+            bus.desuscribir(cola)
+
+    respuesta, (nombre, datos) = asyncio.run(escenario())
+
+    assert respuesta.status_code == 200
+    assert nombre == "alerta_cerrada"
+    assert datos["atendida_por"] == 1
+    assert datos == respuesta.json()
+
+
 def test_atender_alerta_sin_usuario_jefe_regresa_500_con_mensaje_claro():
     sesion = SesionFalsa(obtener=[_alerta()], unicos=[None])
 
@@ -273,7 +311,7 @@ def test_atender_alerta_sin_usuario_jefe_regresa_500_con_mensaje_claro():
 
 
 def test_kpis_con_datos_calculan_todo(monkeypatch):
-    monkeypatch.setattr(operacion, "_ahora", lambda: AHORA)
+    monkeypatch.setattr(kpis_servicio, "_ahora", lambda: AHORA)
 
     # (total de lecturas en 24 h, lecturas dentro de rango) — ya contados en SQL.
     conteo_lecturas = [(3, 2)]
@@ -309,7 +347,7 @@ def test_kpis_con_datos_calculan_todo(monkeypatch):
 
 
 def test_consulta_pct_en_rango_compila_para_postgres():
-    consulta = operacion._consulta_pct_en_rango(AHORA - timedelta(hours=24))
+    consulta = kpis_servicio._consulta_pct_en_rango(AHORA - timedelta(hours=24))
     sql = str(consulta.compile(dialect=postgresql.dialect()))
 
     assert "count(*)" in sql
@@ -319,7 +357,7 @@ def test_consulta_pct_en_rango_compila_para_postgres():
 
 
 def test_kpis_sin_datos_regresan_ceros(monkeypatch):
-    monkeypatch.setattr(operacion, "_ahora", lambda: AHORA)
+    monkeypatch.setattr(kpis_servicio, "_ahora", lambda: AHORA)
     sesion = SesionFalsa(ejecutar=[[(0, 0)], [], []], escalares=[[]], unicos=[0])
 
     with _cliente(sesion) as cliente:

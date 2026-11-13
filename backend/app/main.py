@@ -1,13 +1,33 @@
 """Aplicación FastAPI de FríoTrack."""
 
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.middleware.acceso import AccesoLogMiddleware
+from app.realtime.kpis import publicar_kpis_periodicos
 from app.routers.camaras import router as camaras_router
 from app.routers.operacion import router as operacion_router
+from app.routers.stream import router as stream_router
 from app.routers.telemetria import router as telemetria_router
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Una sola tarea de KPIs para toda la app; se cancela al apagarla."""
+    tarea = asyncio.create_task(publicar_kpis_periodicos())
+    try:
+        yield
+    finally:
+        tarea.cancel()
+        with suppress(asyncio.CancelledError):
+            await tarea
 
 
 def create_app() -> FastAPI:
@@ -15,7 +35,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     # Corta el arranque antes de exponer la API con un secreto de demo.
     settings.validar_configuracion()
-    app = FastAPI(title=settings.app_name)
+    app = FastAPI(title=settings.app_name, lifespan=_lifespan)
 
     origenes = [origen.strip() for origen in settings.cors_origins.split(",") if origen.strip()]
     app.add_middleware(
@@ -35,6 +55,7 @@ def create_app() -> FastAPI:
 
     app.include_router(camaras_router)
     app.include_router(operacion_router)
+    app.include_router(stream_router)
     app.include_router(telemetria_router)
 
     return app
