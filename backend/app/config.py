@@ -83,16 +83,9 @@ class Settings(BaseSettings):
     def _validar_sensor_tokens(self) -> None:
         """Comprueba que SENSOR_TOKENS sea un objeto JSON con los cinco sensores."""
         try:
-            tokens = json.loads(self.sensor_tokens or "{}")
-        except json.JSONDecodeError as error:
-            raise RuntimeError(
-                "SENSOR_TOKENS no es JSON válido; usa el formato "
-                '{"S-PES-01": "token", ...}.'
-            ) from error
-        if not isinstance(tokens, dict):
-            raise RuntimeError(
-                'SENSOR_TOKENS debe ser un objeto JSON con la forma {"S-PES-01": "token", ...}.'
-            )
+            tokens = leer_sensor_tokens(self.sensor_tokens)
+        except ValueError as error:
+            raise RuntimeError(str(error)) from error
 
         faltantes = []
         for sensor_id in SENSORES_ESPERADOS:
@@ -110,6 +103,32 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Devuelve la configuración una sola vez por proceso."""
     return Settings()
+
+
+def leer_sensor_tokens(valor: str | None = None) -> dict[str, str]:
+    """Parsea el JSON de SENSOR_TOKENS y valida su forma.
+
+    Sin argumento usa `get_settings().sensor_tokens`, que resuelve las variables
+    de entorno y `backend/.env`; con un valor explícito parsea ese texto. Lanza
+    `ValueError` con un mensaje accionable si no es un objeto de tokens de texto.
+    """
+    crudo = get_settings().sensor_tokens if valor is None else valor
+    try:
+        tokens = json.loads(crudo or "{}")
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            "SENSOR_TOKENS no es JSON válido; usa el formato "
+            '{"S-PES-01": "token", ...}.'
+        ) from error
+    if not isinstance(tokens, dict):
+        raise ValueError(
+            'SENSOR_TOKENS debe ser un objeto JSON con la forma {"S-PES-01": "token", ...}.'
+        )
+    if not all(isinstance(token, str) for token in tokens.values()):
+        raise ValueError(
+            'SENSOR_TOKENS debe tener tokens de texto: {"S-PES-01": "token", ...}.'
+        )
+    return tokens
 
 
 def limpiar_cache_settings() -> None:

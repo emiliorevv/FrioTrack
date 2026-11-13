@@ -1,7 +1,6 @@
 """Datos semilla idempotentes de FríoTrack."""
 
 import hashlib
-import json
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -9,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
+from app.config import get_settings, leer_sensor_tokens
 from app.core.security import hash_password
 from app.db.models import Camara, Lote, Sensor, Usuario
 
@@ -58,10 +57,9 @@ LOTES: list[tuple[str, int, Decimal, str, Decimal, int]] = [
 def _tokens_de_entorno() -> dict[str, str]:
     """Lee SENSOR_TOKENS (JSON) de la configuración; un valor inválido se ignora."""
     try:
-        tokens = json.loads(get_settings().sensor_tokens or "{}")
-    except json.JSONDecodeError:
+        return leer_sensor_tokens()
+    except ValueError:
         return {}
-    return tokens if isinstance(tokens, dict) else {}
 
 
 def construir_seed(

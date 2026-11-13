@@ -5,8 +5,6 @@ Uso:
 """
 
 import argparse
-import json
-import os
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -14,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
+from app.config import leer_sensor_tokens
+from app.db.seed import SENSORES
 from simulator.cliente import ClienteHTTP, ErrorAPI, Respuesta
 from simulator.escenarios import (
     ESCENARIOS,
@@ -22,15 +22,11 @@ from simulator.escenarios import (
     siguiente_lectura,
 )
 
-SENSORES_POR_CAMARA = {
-    1: "S-PES-01",
-    2: "S-CAR-01",
-    3: "S-LAC-01",
-    4: "S-VER-01",
-    5: "S-CON-01",
-}
 HUMEDAD_POR_DEFECTO = 80.0
 API_URL_POR_DEFECTO = "http://127.0.0.1:8000/api"
+# 1 intento + 2 reintentos ante timeout, error de red o 5xx.
+INTENTOS_POR_LECTURA = 3
+ESPERA_REINTENTO_SEGUNDOS = 1.0
 
 
 class ErrorConfiguracion(RuntimeError):
@@ -125,37 +121,30 @@ def buscar_camara(camaras: list[dict[str, Any]], camara_id: int) -> Camara:
     )
 
 
-def _tokens_del_entorno(entorno: Mapping[str, str]) -> dict[str, Any]:
-    crudo = entorno.get("SENSOR_TOKENS", "")
-    try:
-        tokens = json.loads(crudo or "{}")
-    except json.JSONDecodeError as error:
-        raise ErrorConfiguracion(
-            "SENSOR_TOKENS no es JSON válido; usa el formato "
-            '{"S-PES-01": "token", ...}.'
-        ) from error
-    if not isinstance(tokens, dict):
-        raise ErrorConfiguracion(
-            'SENSOR_TOKENS debe ser un objeto JSON con la forma {"S-PES-01": "token", ...}.'
-        )
-    return tokens
-
-
 def token_de_camara(
     camara_id: int,
     token_manual: str | None = None,
     entorno: Mapping[str, str] | None = None,
 ) -> str:
-    """Resuelve el token del sensor de la cámara, con `--token` o SENSOR_TOKENS."""
-    sensor_id = SENSORES_POR_CAMARA.get(camara_id)
+    """Resuelve el token del sensor de la cámara, con `--token` o SENSOR_TOKENS.
+
+    Sin `entorno`, lee la configuración compartida (`app.config`), que resuelve
+    las variables de entorno y `backend/.env`; el simulador corre desde `backend`.
+    """
+    sensor_id = SENSORES.get(camara_id)
     if sensor_id is None:
         raise ErrorConfiguracion(f"No hay un sensor asignado a la cámara {camara_id}.")
 
     if token_manual and token_manual.strip():
         return token_manual.strip()
 
-    variables = os.environ if entorno is None else entorno
-    token = _tokens_del_entorno(variables).get(sensor_id)
+    try:
+        crudo = None if entorno is None else entorno.get("SENSOR_TOKENS", "")
+        tokens = leer_sensor_tokens(crudo)
+    except ValueError as error:
+        raise ErrorConfiguracion(str(error)) from error
+
+    token = tokens.get(sensor_id)
     if not isinstance(token, str) or not token.strip():
         raise ErrorConfiguracion(
             f"No hay token para {sensor_id} en SENSOR_TOKENS; define esa variable "
@@ -186,6 +175,46 @@ def _detalle(respuesta: Respuesta, por_defecto: str) -> str:
     return str(detalle) if detalle else por_defecto
 
 
+def _enviar_con_reintentos(
+    api: ApiSimulador,
+    datos: dict[str, Any],
+    token: str,
+    dormir: Callable[[float], None],
+) -> Respuesta | None:
+    """Envía una lectura reintentando fallos transitorios (red, timeout o 5xx).
+
+    Regresa la respuesta definitiva (202 o 4xx) o, si se agotaron los intentos,
+    la última respuesta 5xx o None. Nunca propaga `ErrorAPI`.
+    """
+    respuesta: Respuesta | None = None
+    fallo = ""
+    for intento in range(1, INTENTOS_POR_LECTURA + 1):
+        try:
+            respuesta = api.enviar_lectura(datos, token)
+        except ErrorAPI as error:
+            respuesta = None
+            fallo = str(error)
+        else:
+            if respuesta.status_code < 500:
+                return respuesta
+            detalle = _detalle(respuesta, "sin detalle")
+            fallo = f"el API respondió {respuesta.status_code}: {detalle}"
+
+        if intento < INTENTOS_POR_LECTURA:
+            print(
+                f"Fallo transitorio al enviar la lectura "
+                f"(intento {intento}/{INTENTOS_POR_LECTURA}): {fallo}. Reintentando.",
+                file=sys.stderr,
+            )
+            dormir(ESPERA_REINTENTO_SEGUNDOS)
+
+    print(
+        f"Se omite la lectura tras {INTENTOS_POR_LECTURA} intentos: {fallo}",
+        file=sys.stderr,
+    )
+    return respuesta
+
+
 def _enviar_lecturas(
     args: argparse.Namespace,
     camara: Camara,
@@ -201,7 +230,7 @@ def _enviar_lecturas(
         if camara.ultima_humedad_pct is not None
         else HUMEDAD_POR_DEFECTO
     )
-    enviadas = 0
+    generadas = 0
 
     while True:
         lectura = siguiente_lectura(
@@ -212,29 +241,38 @@ def _enviar_lecturas(
             azar(),
         )
         datos = construir_payload(camara.id, sensor_id, lectura, humedad)
-        respuesta = api.enviar_lectura(datos, token)
+        respuesta = _enviar_con_reintentos(api, datos, token, dormir)
 
-        if respuesta.status_code in (401, 403):
+        # La simulación avanza aunque el API no registre esta lectura.
+        anterior = lectura.temperatura_c
+        generadas += 1
+
+        if respuesta is not None and respuesta.status_code in (401, 403):
             detalle = _detalle(respuesta, "token inválido o sin permiso para esta cámara")
             print(
                 f"Error de autenticación ({respuesta.status_code}): {detalle}",
                 file=sys.stderr,
             )
             return 1
-        if respuesta.status_code != 202:
+        if respuesta is not None and 400 <= respuesta.status_code < 500:
             detalle = _detalle(respuesta, "sin detalle")
             print(
-                f"El API respondió {respuesta.status_code}: {detalle}",
+                f"El API rechazó la lectura ({respuesta.status_code}): {detalle}",
                 file=sys.stderr,
             )
             return 1
 
-        estado = respuesta.datos.get("estado_camara", "desconocido")
-        print(f"cámara {camara.id} · {lectura.temperatura_c:.2f} °C · {estado}")
+        if respuesta is not None and respuesta.status_code == 202:
+            estado = respuesta.datos.get("estado_camara", "desconocido")
+            print(f"cámara {camara.id} · {lectura.temperatura_c:.1f} °C · {estado}")
+        elif respuesta is not None and respuesta.status_code < 500:
+            detalle = _detalle(respuesta, "sin detalle")
+            print(
+                f"El API respondió {respuesta.status_code}: {detalle}; se continúa.",
+                file=sys.stderr,
+            )
 
-        anterior = lectura.temperatura_c
-        enviadas += 1
-        if args.iteraciones and enviadas >= args.iteraciones:
+        if args.iteraciones and generadas >= args.iteraciones:
             return 0
         dormir(args.intervalo)
 
@@ -254,11 +292,12 @@ def main(
     if args.iteraciones < 0:
         parser.error("--iteraciones no puede ser negativo")
 
+    cliente_propio = cliente is None
     api = cliente if cliente is not None else ClienteHTTP(args.api_url)
     try:
         camara = buscar_camara(api.listar_camaras(), args.camara)
         token = token_de_camara(camara.id, args.token)
-        sensor_id = SENSORES_POR_CAMARA[camara.id]
+        sensor_id = SENSORES[camara.id]
         return _enviar_lecturas(args, camara, sensor_id, token, api, dormir, azar)
     except (ErrorConfiguracion, ErrorAPI) as error:
         print(f"Error: {error}", file=sys.stderr)
@@ -267,4 +306,5 @@ def main(
         print("\nSimulador detenido.", file=sys.stderr)
         return 130
     finally:
-        api.cerrar()
+        if cliente_propio:
+            api.cerrar()

@@ -32,9 +32,14 @@ def _cuerpo(respuesta: httpx.Response) -> dict[str, Any]:
 class ClienteHTTP:
     """Cliente httpx con las dos llamadas que usa el simulador."""
 
-    def __init__(self, api_url: str, timeout: float = TIMEOUT_SEGUNDOS) -> None:
+    def __init__(
+        self,
+        api_url: str,
+        timeout: float = TIMEOUT_SEGUNDOS,
+        transporte: httpx.BaseTransport | None = None,
+    ) -> None:
         self._url_base = api_url.rstrip("/")
-        self._cliente = httpx.Client(timeout=timeout)
+        self._cliente = httpx.Client(timeout=timeout, transport=transporte)
 
     def listar_camaras(self) -> list[dict[str, Any]]:
         """GET /camaras: rangos y última lectura de cada cámara."""

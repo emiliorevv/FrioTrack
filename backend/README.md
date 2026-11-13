@@ -83,13 +83,19 @@ Con la API corriendo (por defecto en `http://127.0.0.1:8000/api`), desde
 
 `--iteraciones 0` (el default) corre sin límite y `--intervalo` son los segundos
 entre lecturas (3 por default). El token del sensor se toma de `SENSOR_TOKENS`
-(JSON) del **entorno**; `--token` lo sobreescribe. Ojo: el simulador no lee
-`.env` por sí solo, así que exporta la variable o pasa `--token`.
+(JSON) del entorno o de `backend/.env`; `--token` lo sobreescribe. Si el API
+falla de forma transitoria (timeout o 5xx), reintenta dos veces y, si persiste,
+omite esa lectura y sigue con la siguiente. Solo termina ante `401`/`403` o un
+`4xx` de validación.
+
+En `falla_compresor` y `puerta_abierta` la temperatura se estanca 10 °C arriba
+del máximo de la cámara (por ejemplo, 12 °C en la cámara 1) para no acercarse al
+límite físico de `POST /telemetria` ni llenar el dashboard de valores imposibles.
 
 Al arrancar consulta `GET /api/camaras` para tomar el rango y la última lectura
 de la cámara; si la cámara no existe, termina con un error claro. Si el API
-responde `401` o `403`, muestra el detalle y también termina. Escenarios y guion
-de la demo: [docs/modo-demo.md](../docs/modo-demo.md).
+responde `401`/`403` o un `4xx` de validación, muestra el detalle y también
+termina. Escenarios y guion de la demo: [docs/modo-demo.md](../docs/modo-demo.md).
 
 ## Base de datos (Supabase)
 

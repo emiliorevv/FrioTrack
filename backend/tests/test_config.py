@@ -9,6 +9,7 @@ from app.config import (
     JWT_SECRET_POR_DEFECTO,
     SENSORES_ESPERADOS,
     get_settings,
+    leer_sensor_tokens,
     limpiar_cache_settings,
 )
 from app.main import create_app
@@ -130,3 +131,30 @@ def test_escala_tiempo_cero_falla_al_iniciar(monkeypatch):
 
     with pytest.raises(ValidationError):
         get_settings()
+
+
+# --- Parser compartido de SENSOR_TOKENS -------------------------------------
+
+
+def test_leer_sensor_tokens_parsea_un_valor_explicito():
+    assert leer_sensor_tokens(json.dumps(TOKENS_VALIDOS)) == TOKENS_VALIDOS
+
+
+def test_leer_sensor_tokens_usa_la_configuracion_por_defecto(monkeypatch):
+    monkeypatch.setenv("SENSOR_TOKENS", json.dumps(TOKENS_VALIDOS))
+
+    assert leer_sensor_tokens() == TOKENS_VALIDOS
+
+
+@pytest.mark.parametrize(
+    ("valor", "mensaje"),
+    [
+        ("no-es-json", "JSON válido"),
+        ('["S-PES-01"]', "objeto JSON"),
+        ('{"S-PES-01": 1}', "tokens de texto"),
+    ],
+    ids=["json-invalido", "no-es-objeto", "token-no-texto"],
+)
+def test_leer_sensor_tokens_invalido_lanza_valueerror(valor, mensaje):
+    with pytest.raises(ValueError, match=mensaje):
+        leer_sensor_tokens(valor)
