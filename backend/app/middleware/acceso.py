@@ -156,7 +156,11 @@ def limpiar_cache_bloqueos() -> None:
 def _avisar_fallo(operacion: str, error: BaseException) -> None:
     """Registra un fallo de base con un aviso por minuto y operación."""
     ahora = monotonic()
-    if ahora - _ultimo_aviso.get(operacion, 0.0) < SEGUNDOS_ENTRE_AVISOS:
+    anterior = _ultimo_aviso.get(operacion)
+    # `None` = nunca avisado. No usar 0.0: en un proceso/runner recién
+    # arrancado, monotonic() puede ser menor que el intervalo y se perdería el
+    # primer aviso.
+    if anterior is not None and ahora - anterior < SEGUNDOS_ENTRE_AVISOS:
         return
     _ultimo_aviso[operacion] = ahora
     logger.warning(
