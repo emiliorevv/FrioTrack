@@ -35,7 +35,7 @@ export function CameraCard({ camara, serie, ahora }: CameraCardProps) {
           {ETIQUETA_ESTADO[camara.estado]}
         </span>
         <span className="camera-card__age">
-          {formatearHace(lectura.ts, ahora)}
+          {lectura ? formatearHace(lectura.ts, ahora) : 'Sin lecturas'}
         </span>
       </div>
 
@@ -43,12 +43,14 @@ export function CameraCard({ camara, serie, ahora }: CameraCardProps) {
         {camara.nombre}
       </h3>
 
-      <p className="camera-card__temperature">
-        <span className="camera-card__value">
-          {formatearTemperatura(lectura.temperatura_c)}
-        </span>
-        <span className="camera-card__unit">°C</span>
-      </p>
+      {lectura && (
+        <p className="camera-card__temperature">
+          <span className="camera-card__value">
+            {formatearTemperatura(lectura.temperatura_c)}
+          </span>
+          <span className="camera-card__unit">°C</span>
+        </p>
+      )}
 
       <dl className="camera-card__meta">
         <div>
@@ -60,8 +62,12 @@ export function CameraCard({ camara, serie, ahora }: CameraCardProps) {
         </div>
         <div>
           <dt>Puerta</dt>
-          <dd className={lectura.puerta_abierta ? 'is-warn' : undefined}>
-            {lectura.puerta_abierta ? 'Abierta' : 'Cerrada'}
+          <dd className={lectura?.puerta_abierta ? 'is-warn' : undefined}>
+            {lectura
+              ? lectura.puerta_abierta
+                ? 'Abierta'
+                : 'Cerrada'
+              : 'Sin dato'}
           </dd>
         </div>
         <div>
@@ -72,13 +78,15 @@ export function CameraCard({ camara, serie, ahora }: CameraCardProps) {
         </div>
       </dl>
 
-      <Sparkline
-        serie={serie}
-        rangoMin={camara.rango_min_c}
-        rangoMax={camara.rango_max_c}
-        estado={camara.estado}
-        nombre={camara.nombre}
-      />
+      {lectura && (
+        <Sparkline
+          serie={serie}
+          rangoMin={camara.rango_min_c}
+          rangoMax={camara.rango_max_c}
+          estado={camara.estado}
+          nombre={camara.nombre}
+        />
+      )}
     </article>
   )
 }

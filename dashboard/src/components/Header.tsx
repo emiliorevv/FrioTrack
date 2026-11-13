@@ -1,8 +1,21 @@
 interface HeaderProps {
   actualizadoHaceSegundos: number
+  /**
+   * `escala_tiempo` de GET /api/health. En 1 (tiempo real) no se muestra la
+   * etiqueta de demo; mientras no haya API, App pasa 30.
+   */
+  escalaTiempo?: number
+  /** Iniciales del usuario logueado; hoy no hay auth y el default es JC. */
+  iniciales?: string
 }
 
-export function Header({ actualizadoHaceSegundos }: HeaderProps) {
+export function Header({
+  actualizadoHaceSegundos,
+  escalaTiempo,
+  iniciales = 'JC',
+}: HeaderProps) {
+  const mostrarModoDemo = escalaTiempo !== undefined && escalaTiempo !== 1
+
   return (
     <header className="site-header">
       <div className="site-header__inner">
@@ -17,7 +30,9 @@ export function Header({ actualizadoHaceSegundos }: HeaderProps) {
         </div>
 
         <div className="site-header__meta">
-          <span className="demo-pill">MODO DEMO ×30</span>
+          {mostrarModoDemo && (
+            <span className="demo-pill">MODO DEMO ×{escalaTiempo}</span>
+          )}
           <span className="updated">
             <span className="updated__dot" aria-hidden="true" />
             Actualizado hace {actualizadoHaceSegundos} s
@@ -25,9 +40,9 @@ export function Header({ actualizadoHaceSegundos }: HeaderProps) {
           <span
             className="avatar"
             role="img"
-            aria-label="Sesión de JC, jefe de cocina"
+            aria-label={`Sesión de ${iniciales}, jefe de cocina`}
           >
-            JC
+            {iniciales}
           </span>
         </div>
       </div>

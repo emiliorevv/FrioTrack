@@ -30,15 +30,16 @@ describe('vista general', () => {
     expect(screen.getByText('MODO DEMO ×30')).toBeInTheDocument()
   })
 
-  it('el filtro Alerta deja solo Pescados y mariscos', () => {
+  it('el filtro Crítica deja solo Pescados y mariscos y Alerta queda vacío', () => {
     render(<App />)
 
-    const chipAlerta = screen.getByRole('button', { name: 'Alerta (1)' })
-    expect(chipAlerta).toHaveAttribute('aria-pressed', 'false')
+    const chipAlerta = screen.getByRole('button', { name: 'Alerta (0)' })
+    const chipCritica = screen.getByRole('button', { name: 'Crítica (1)' })
+    expect(chipCritica).toHaveAttribute('aria-pressed', 'false')
 
-    fireEvent.click(chipAlerta)
+    fireEvent.click(chipCritica)
 
-    expect(chipAlerta).toHaveAttribute('aria-pressed', 'true')
+    expect(chipCritica).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getAllByRole('article')).toHaveLength(1)
     expect(
       screen.getByRole('article', { name: 'Pescados y mariscos' }),
@@ -46,6 +47,14 @@ describe('vista general', () => {
     expect(
       screen.queryByRole('article', { name: 'Carnes y aves' }),
     ).not.toBeInTheDocument()
+
+    fireEvent.click(chipAlerta)
+
+    expect(chipAlerta).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryAllByRole('article')).toHaveLength(0)
+    expect(
+      screen.getByText('No hay cámaras que coincidan con el filtro.'),
+    ).toBeInTheDocument()
   })
 
   it('la búsqueda congelador deja solo el Congelador', () => {
@@ -80,14 +89,15 @@ describe('vista general', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('el estado de alerta se anuncia en texto, no solo con color', () => {
+  it('el estado crítico se anuncia en texto y con estilo propio', () => {
     render(<App />)
 
     const pescados = screen.getByRole('article', {
       name: 'Pescados y mariscos',
     })
 
-    expect(within(pescados).getByText('Alerta')).toBeInTheDocument()
+    expect(pescados).toHaveClass('camera-card--critica')
+    expect(within(pescados).getByText('Crítica')).toBeInTheDocument()
     expect(within(pescados).getByText('Abierta')).toBeInTheDocument()
     expect(within(pescados).getByText('$4,850')).toBeInTheDocument()
   })

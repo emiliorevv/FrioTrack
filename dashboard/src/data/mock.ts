@@ -27,7 +27,7 @@ export const camaras: Camara[] = [
     rango_max_c: 2,
     min_para_riesgo: 10,
     min_para_merma: 60,
-    estado: 'alerta',
+    estado: 'critica',
     ultima_lectura: {
       ts: '2026-11-12T16:44:50-06:00',
       temperatura_c: 3.1,
@@ -130,22 +130,26 @@ export const seriesCamaras: Record<number, number[]> = {
   ],
 }
 
-/** Dos eventos para la demostración del SIEM. Forma provisional (ver types.ts). */
+/** Dos eventos para la demostración del SIEM (forma de `alertas_seguridad`). */
 export const alertasSeguridad: AlertaSeguridad[] = [
   {
     id: 1,
+    regla_id: '3b8e2f6a-9c41-4d7e-8a15-2f6c0d9e7b41',
+    regla: 'Fuerza bruta de tokens',
+    severidad: 'high',
     ts: '2026-11-12T16:42:00-06:00',
-    titulo: 'Fuerza bruta bloqueada',
-    detalle: '5 intentos fallidos desde 187.190.12.4 · IP bloqueada.',
-    etiqueta: 'Bloqueada',
-    tono: 'ok',
+    ip_origen: '187.190.12.4',
+    detalle: { intentos: 12, ventana: '5 min', ruta: '/api/telemetria' },
+    accion: 'bloquear_ip',
   },
   {
     id: 2,
+    regla_id: '7d1c4a2e-5f83-4b69-9e07-1a6b8c3d2f50',
+    regla: 'Lecturas imposibles',
+    severidad: 'medium',
     ts: '2026-11-12T16:33:00-06:00',
-    titulo: 'Lecturas imposibles marcadas',
-    detalle: '2 lecturas fuera del rango físico desde S-PES-01.',
-    etiqueta: 'Revisar',
-    tono: 'warn',
+    ip_origen: null,
+    detalle: { sensor: 'S-PES-01', cambio: '8.6 °C', ventana: '45 s' },
+    accion: 'marcar_lecturas',
   },
 ]

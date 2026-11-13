@@ -49,7 +49,11 @@ function App() {
         Saltar al contenido
       </a>
 
-      <Header actualizadoHaceSegundos={actualizadoHaceSegundos} />
+      {/* La escala vendrá de GET /api/health; mientras no haya API, la demo corre a ×30. */}
+      <Header
+        actualizadoHaceSegundos={actualizadoHaceSegundos}
+        escalaTiempo={30}
+      />
 
       <main id="contenido" className="app-main">
         <OnboardingBanner />

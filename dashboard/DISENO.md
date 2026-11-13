@@ -23,19 +23,19 @@ login, SSE ni router: esta entrega es solo de interfaz.
 
 Variables en `src/index.css`.
 
-| Token                       | Valor                 | Uso                                              |
-| --------------------------- | --------------------- | ------------------------------------------------ |
-| `--bg`                      | `#F6F4EF`             | Fondo de página, papel cálido.                   |
-| `--surface`                 | `#FFFDF9`             | Tarjetas y header translúcido.                   |
-| `--surface-2`               | `#F0EDE6`             | Hover y bloques secundarios.                     |
-| `--ink`                     | `#1B1A18`             | Texto principal.                                 |
-| `--muted`                   | `#6E6A63`             | Metadatos y texto secundario (AA sobre surface). |
-| `--line`                    | `#E4DED2`             | Bordes de 1 px.                                  |
-| `--accent`                  | `#145C57`             | Verde profundo para marca, chips activos y foco. |
-| `--accent-soft`             | `#E3EFEC`             | Fondos de apoyo y banda de la sparkline.         |
-| `--ok` / `--ok-ink`         | `#2F7A57` / `#246246` | Cámara en rango.                                 |
-| `--warn` / `--warn-ink`     | `#B26B1A` / `#8A4E0F` | Alerta, puerta abierta y valor en riesgo.        |
-| `--danger` / `--danger-ink` | `#B3261E` / `#8F1D18` | Estado crítico (previsto, hoy en 0).             |
+| Token                       | Valor                 | Uso                                                 |
+| --------------------------- | --------------------- | --------------------------------------------------- |
+| `--bg`                      | `#F6F4EF`             | Fondo de página, papel cálido.                      |
+| `--surface`                 | `#FFFDF9`             | Tarjetas y header translúcido.                      |
+| `--surface-2`               | `#F0EDE6`             | Hover y bloques secundarios.                        |
+| `--ink`                     | `#1B1A18`             | Texto principal.                                    |
+| `--muted`                   | `#6E6A63`             | Metadatos y texto secundario (AA sobre surface).    |
+| `--line`                    | `#E4DED2`             | Bordes de 1 px.                                     |
+| `--accent`                  | `#145C57`             | Verde profundo para marca, chips activos y foco.    |
+| `--accent-soft`             | `#E3EFEC`             | Fondos de apoyo y banda de la sparkline.            |
+| `--ok` / `--ok-ink`         | `#2F7A57` / `#246246` | Cámara en rango.                                    |
+| `--warn` / `--warn-ink`     | `#B26B1A` / `#8A4E0F` | Alerta, puerta abierta y valor en riesgo.           |
+| `--danger` / `--danger-ink` | `#B3261E` / `#8F1D18` | Estado crítico (Pescados ya tiene lotes en riesgo). |
 
 Los estados nunca dependen solo del color: cada tarjeta lleva la palabra
 "En rango", "Alerta" o "Crítica" junto al punto.
@@ -80,6 +80,9 @@ Los estados nunca dependen solo del color: cada tarjeta lleva la palabra
   `GET /camaras/{id}/lecturas`.
 - **Reloj fijo de demo** (`AHORA_DEMO`) para que los "hace X" sean estables en
   pruebas y capturas. No hay temporizador ni polling.
+- **Header con props de demo y sesión.** `escalaTiempo` (que vendrá de
+  `GET /health`) oculta la pill cuando vale 1 o no está definido, e `iniciales`
+  tiene default "JC" hasta que exista login.
 - **Sparkline SVG propia:** 24 puntos, polyline, banda del rango permitido y
   punto final. Sin librerías de gráficas.
 - **Filtros locales.** Chips con `aria-pressed`, conteos derivados del mock y
@@ -87,6 +90,7 @@ Los estados nunca dependen solo del color: cada tarjeta lleva la palabra
   para que el conteo visible y el anuncio `role="status"` coincidan.
 - **Onboarding dismissible** con `localStorage` tolerante a fallos. Solo es un
   aviso; no bloquea la vista.
-- **Seguridad** muestra dos eventos de ejemplo para la demo del SIEM. La forma
-  de la alerta es provisional: el contrato define el endpoint, no las columnas.
+- **Seguridad** usa la forma de la tabla `alertas_seguridad` (`regla`,
+  `severidad`, `detalle` y `accion`). El panel deriva el título de `regla`, el
+  tono de `severidad`, la etiqueta de `accion` y el resumen de `detalle`.
 - **Sin dependencias nuevas.** React y Vite bastan; el resto es CSS y SVG.

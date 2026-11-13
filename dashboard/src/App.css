@@ -611,6 +611,10 @@
   font-weight: 600;
 }
 
+.camera-card--critica .camera-card__meta .is-warn {
+  color: var(--danger-ink);
+}
+
 .sparkline {
   display: block;
   width: 100%;
@@ -722,6 +726,14 @@
   background: var(--warn);
 }
 
+.security__dot--danger {
+  background: var(--danger);
+}
+
+.security__dot--neutral {
+  background: var(--muted);
+}
+
 .security__body {
   flex: 1;
   min-width: 0;
@@ -776,6 +788,11 @@
 .tag--warn {
   background: var(--warn-soft);
   color: var(--warn-ink);
+}
+
+.tag--danger {
+  background: var(--danger-soft);
+  color: var(--danger-ink);
 }
 
 /* ------------------------------------------------------------------ */

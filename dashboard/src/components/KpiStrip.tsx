@@ -21,42 +21,49 @@ export function KpiStrip({ kpis }: KpiStripProps) {
       id: 'pct_tiempo_en_rango_24h',
       label: '% en rango 24 h',
       valor: `${kpis.pct_tiempo_en_rango_24h.toFixed(1)}%`,
-      nota: '+1.8 pts vs. ayer',
+      nota: 'Últimas 24 h',
       tono: 'ok',
     },
     {
       id: 'alertas_activas',
       label: 'Alertas activas',
       valor: String(kpis.alertas_activas),
-      nota: '1 pendiente de atender',
+      nota:
+        kpis.alertas_activas === 1
+          ? '1 pendiente de atender'
+          : `${kpis.alertas_activas} pendientes de atender`,
       tono: 'warn',
     },
     {
       id: 'tiempo_respuesta_promedio_min',
       label: 'Tiempo de respuesta',
       valor: `${kpis.tiempo_respuesta_promedio_min.toFixed(1)} min`,
-      nota: 'Bajo la meta de 10 min',
+      nota: 'Promedio del día',
       tono: 'ok',
     },
     {
       id: 'valor_en_riesgo_mxn',
       label: 'Valor en riesgo',
       valor: formatearMxn(kpis.valor_en_riesgo_mxn),
-      nota: '2 lotes · Pescados',
+      nota:
+        kpis.valor_en_riesgo_mxn > 0
+          ? 'Producto en riesgo'
+          : 'Sin producto en riesgo',
       tono: 'warn',
     },
     {
       id: 'merma_hoy_mxn',
       label: 'Merma hoy',
       valor: formatearMxn(kpis.merma_hoy_mxn),
-      nota: 'Sin pérdidas hoy',
+      nota:
+        kpis.merma_hoy_mxn > 0 ? 'Pérdida registrada hoy' : 'Sin pérdidas hoy',
       tono: 'ok',
     },
     {
       id: 'merma_mes_mxn',
       label: 'Merma del mes',
       valor: formatearMxn(kpis.merma_mes_mxn),
-      nota: '−12% vs. octubre',
+      nota: 'Acumulado del mes',
       tono: 'neutral',
     },
   ]

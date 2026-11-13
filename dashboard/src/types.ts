@@ -21,7 +21,8 @@ export interface Camara {
   min_para_riesgo: number
   min_para_merma: number
   estado: EstadoCamara
-  ultima_lectura: UltimaLectura
+  /** Nulo cuando la cámara todavía no tiene lecturas (recién sembrada la base). */
+  ultima_lectura: UltimaLectura | null
   valor_en_riesgo_mxn: number
 }
 
@@ -34,17 +35,25 @@ export interface Kpis {
   merma_mes_mxn: number
 }
 
-/**
- * El contrato define GET /seguridad/alertas pero no la forma de cada fila.
- * Esta es provisional y solo alimenta la vista de demostración del SIEM.
- */
+/** Misma forma que la tabla `alertas_seguridad` de docs/modelo-datos.md. */
+export type SeveridadSeguridad = 'low' | 'medium' | 'high' | 'critical'
+
+/** Acciones de respuesta que ejecuta el detector SIEM. */
+export type AccionSeguridad =
+  'bloquear_ip' | 'revocar_token' | 'marcar_lecturas'
+
 export interface AlertaSeguridad {
   id: number
+  /** `id` de la regla Sigma que la disparó. */
+  regla_id: string
+  /** Título corto de la regla. */
+  regla: string
+  severidad: SeveridadSeguridad
   ts: string
-  titulo: string
-  detalle: string
-  etiqueta: string
-  tono: 'ok' | 'warn'
+  ip_origen: string | null
+  /** Conteos, sensor y lecturas involucradas. */
+  detalle: Record<string, unknown>
+  accion: AccionSeguridad
 }
 
 export type FiltroCamaras = 'todas' | EstadoCamara
