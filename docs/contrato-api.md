@@ -133,7 +133,7 @@ data: {"camara_id":1,"ts":"2026-11-18T19:05:00-06:00","temperatura_c":3.1,"humed
 
 | Entidad | Estados |
 |---|---|
-| Cámara | `en_rango`, `alerta` (fuera de rango o puerta abierta, todavía sin riesgo), `critica` (ya hay lotes en riesgo o merma) |
+| Cámara | `en_rango`, `alerta` (fuera de rango o puerta abierta, todavía sin riesgo), `critica` (hay lotes en riesgo, o merma con la temperatura aún fuera de rango) |
 | Lote | `ok`, `en_riesgo`, `merma` |
 | Alerta | abierta (`cerrada_en` nulo) o cerrada |
 

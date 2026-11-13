@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from app.config import (
     JWT_SECRET_POR_DEFECTO,
@@ -121,3 +122,11 @@ def test_create_app_en_produccion_con_secreto_por_defecto_lanza(monkeypatch):
 
     with pytest.raises(RuntimeError, match="JWT_SECRET"):
         create_app()
+
+
+def test_escala_tiempo_cero_falla_al_iniciar(monkeypatch):
+    """ESCALA_TIEMPO=0 dividiría entre cero; debe romper al construir Settings."""
+    monkeypatch.setenv("ESCALA_TIEMPO", "0")
+
+    with pytest.raises(ValidationError):
+        get_settings()
