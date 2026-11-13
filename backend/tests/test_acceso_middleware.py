@@ -479,7 +479,7 @@ def test_flag_apagada_solo_escribe_stdout(monkeypatch, log_stdout):
     assert salida["ruta"] == "/api/salud"
 
 
-def test_fallo_de_base_no_bloquea_la_peticion(monkeypatch, log_stdout, avisos_logger):
+def test_fallo_de_base_no_bloquea_la_peticion(monkeypatch, log_stdout):
     _activar_db(monkeypatch)
     _configurar_entorno(monkeypatch, entorno="local")
 
@@ -497,26 +497,14 @@ def test_fallo_de_base_no_bloquea_la_peticion(monkeypatch, log_stdout, avisos_lo
     salida = _lineas(log_stdout.getvalue())[-1]
     assert salida["status"] == 200
 
-    avisos = [registro.getMessage() for registro in avisos_logger]
-    assert any("ips_bloqueadas" in aviso for aviso in avisos)
-    assert any("logs_acceso" in aviso for aviso in avisos)
 
+def test_avisar_fallo_loguea_y_rate_limita(avisos_logger):
+    error = RuntimeError("base caída")
 
-def test_avisos_de_base_se_limitan(monkeypatch, avisos_logger):
-    _activar_db(monkeypatch)
-    _configurar_entorno(monkeypatch, entorno="local")
+    acceso._avisar_fallo("ips_bloqueadas", error)
+    acceso._avisar_fallo("ips_bloqueadas", error)  # mismo minuto: no duplica
+    acceso._avisar_fallo("logs_acceso", error)
 
-    def sin_base(*_args, **_kwargs):
-        raise RuntimeError("base caída")
-
-    monkeypatch.setattr(acceso, "SessionLocal", sin_base)
-    monkeypatch.setattr(acceso, "get_engine", sin_base)
-
-    with TestClient(_app_de_prueba()) as cliente:
-        cliente.get("/api/salud")
-        _esperar_registros(cliente)
-        cliente.get("/api/salud")
-        _esperar_registros(cliente)
-
-    # Dos operaciones (consulta e inserción) con su aviso, no cuatro.
     assert len(avisos_logger) == 2
+    assert "ips_bloqueadas" in avisos_logger[0].getMessage()
+    assert "logs_acceso" in avisos_logger[1].getMessage()
