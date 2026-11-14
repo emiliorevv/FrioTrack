@@ -801,9 +801,10 @@
 
 .toast {
   position: fixed;
+  top: 16px;
   right: 16px;
-  bottom: 16px;
-  left: 16px;
+  left: auto;
+  width: min(420px, calc(100vw - 32px));
   z-index: 50;
   display: flex;
   align-items: flex-start;
@@ -867,7 +868,7 @@
 @keyframes toast-entrar {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(-12px);
   }
 
   to {
@@ -878,9 +879,8 @@
 
 @media (min-width: 640px) {
   .toast {
+    top: 24px;
     right: 24px;
-    bottom: 24px;
-    left: auto;
     width: min(420px, calc(100vw - 48px));
   }
 }
