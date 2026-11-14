@@ -44,7 +44,8 @@ export function OnboardingBanner() {
       </span>
 
       <p className="onboarding__text">
-        FríoTrack vigila tus cámaras. Si algo sale de rango, te avisa por SMS.
+        FríoTrack vigila tus cámaras. Si algo sale de rango, te avisa en el
+        dashboard.
       </p>
 
       <button
