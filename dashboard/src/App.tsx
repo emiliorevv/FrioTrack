@@ -4,8 +4,10 @@ import { CameraCard } from './components/CameraCard'
 import { FilterBar } from './components/FilterBar'
 import { Header } from './components/Header'
 import { KpiStrip } from './components/KpiStrip'
+import { NotificationToast } from './components/NotificationToast'
 import { OnboardingBanner } from './components/OnboardingBanner'
 import { SecurityPanel } from './components/SecurityPanel'
+import { useNotificaciones } from './hooks/useNotificaciones'
 import {
   AHORA_DEMO,
   actualizadoHaceSegundos,
@@ -26,6 +28,7 @@ function normalizar(texto: string): string {
 function App() {
   const [filtro, setFiltro] = useState<FiltroCamaras>('todas')
   const [busqueda, setBusqueda] = useState('')
+  const { notificacion, cerrar } = useNotificaciones()
 
   const consulta = normalizar(busqueda.trim())
   const camarasFiltradas = camaras.filter((camara) => {
@@ -55,7 +58,7 @@ function App() {
         escalaTiempo={30}
       />
 
-      <main id="contenido" className="app-main">
+      <main id="contenido" className="app-main" tabIndex={-1}>
         <OnboardingBanner />
 
         <section className="section" aria-labelledby="resumen-title">
@@ -111,6 +114,14 @@ function App() {
       <footer className="site-footer">
         <p>Datos simulados · FríoTrack Alfa</p>
       </footer>
+
+      {notificacion && (
+        <NotificationToast
+          key={notificacion.id}
+          notificacion={notificacion.datos}
+          onCerrar={cerrar}
+        />
+      )}
     </div>
   )
 }

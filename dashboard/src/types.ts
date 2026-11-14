@@ -56,4 +56,25 @@ export interface AlertaSeguridad {
   accion: AccionSeguridad
 }
 
+export const TIPOS_NOTIFICACION = [
+  'alerta_temperatura',
+  'alerta_puerta',
+  'merma',
+] as const
+
+export type TipoNotificacion = (typeof TIPOS_NOTIFICACION)[number]
+
+/** Payload del evento `notificacion` de `GET /api/stream`. */
+export interface Notificacion {
+  canal: 'simulado'
+  tipo: TipoNotificacion
+  camara_id: number
+  /** Texto ya formateado por la API; el dashboard solo lo muestra. */
+  mensaje: string
+  /** ISO 8601. */
+  ts: string
+  /** Link al dashboard; la vista no navega a ningún lado. */
+  url: string
+}
+
 export type FiltroCamaras = 'todas' | EstadoCamara
