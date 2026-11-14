@@ -17,12 +17,12 @@ from app.db.seed import SENSORES
 from simulator.cliente import ClienteHTTP, ErrorAPI, Respuesta
 from simulator.escenarios import (
     ESCENARIOS,
+    HUMEDAD_POR_DEFECTO,
     LecturaSimulada,
     azar_aleatorio,
     siguiente_lectura,
 )
 
-HUMEDAD_POR_DEFECTO = 80.0
 API_URL_POR_DEFECTO = "http://127.0.0.1:8000/api"
 # 1 intento + 2 reintentos ante timeout, error de red o 5xx.
 INTENTOS_POR_LECTURA = 3

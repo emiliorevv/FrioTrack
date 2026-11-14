@@ -23,6 +23,8 @@ dist/
 .env
 .env.*
 !.env.example
+.dev.vars
+.wrangler/
 
 # Sistema
 .DS_Store

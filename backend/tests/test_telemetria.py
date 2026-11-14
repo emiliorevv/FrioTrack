@@ -88,7 +88,7 @@ class SesionFalsa:
         self.siguiente_id = 500
         self.siguiente_id_alerta = 900
 
-    def get(self, modelo: object, _pk: object) -> object | None:
+    def get(self, modelo: object, _pk: object, **_kwargs: object) -> object | None:
         if modelo is Camara:
             return self.camara
         if modelo is Sensor:

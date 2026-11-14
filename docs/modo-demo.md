@@ -32,7 +32,9 @@ Reglas para que no se rompa nada:
 ## Cómo conviven el simulador y el cron
 
 - El Cloudflare Worker llama a `/simulador/tick` cada minuto y genera lecturas **normales**.
+- El tick **solo genera en modo demo** (`ESCALA_TIEMPO > 1`). En producción no inventa lecturas: solo mantiene Render despierto y responde `{lecturas: 0, saltadas: []}`.
 - Si una cámara recibió una lectura real del simulador (cualquier `sensor_id` distinto de `SIM-CRON`) en los últimos 2 minutos, el tick **se la salta**. Así el cron no "arregla" la temperatura de una falla que se está provocando en vivo.
+- Si dos ticks se solapan (por ejemplo, por el cold start de Render), el segundo **se salta** las cámaras que ya recibieron un tick en los últimos 30 segundos.
 
 ## Escenarios del simulador
 

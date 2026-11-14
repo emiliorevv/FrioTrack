@@ -14,6 +14,7 @@ from app.middleware.acceso import AccesoLogMiddleware
 from app.realtime.kpis import publicar_kpis_periodicos
 from app.routers.camaras import router as camaras_router
 from app.routers.operacion import router as operacion_router
+from app.routers.simulador import router as simulador_router
 from app.routers.stream import router as stream_router
 from app.routers.telemetria import router as telemetria_router
 
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
 
     app.include_router(camaras_router)
     app.include_router(operacion_router)
+    app.include_router(simulador_router)
     app.include_router(stream_router)
     app.include_router(telemetria_router)
 

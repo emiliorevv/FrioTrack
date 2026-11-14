@@ -13,6 +13,8 @@ RUIDO_NORMAL_C = 0.3
 PASO_PUERTA_ABIERTA_C = 0.2
 PASO_FALLA_COMPRESOR_C = 0.4
 PASO_RECUPERACION_C = 0.5
+# Humedad que manda el simulador cuando la API no trae una anterior.
+HUMEDAD_POR_DEFECTO = 80.0
 # Techo de los escenarios que suben sin control: 10 °C arriba del máximo de la
 # cámara, muy por debajo del límite físico de POST /telemetria (60 °C).
 TECHO_EXTRA_C = 10.0

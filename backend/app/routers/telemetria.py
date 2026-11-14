@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.core.auth import token_bearer
 from app.db.session import get_db
 from app.schemas.telemetria import TelemetriaIn, TelemetriaOut
 from app.services.telemetria import procesar_telemetria
@@ -14,7 +15,6 @@ router = APIRouter(prefix="/api", tags=["telemetria"])
 SesionDB = Annotated[Session, Depends(get_db)]
 Autorizacion = Annotated[str | None, Header(alias="Authorization")]
 
-PREFIJO_BEARER = "Bearer "
 MENSAJE_TOKEN_AUSENTE = (
     "Token de sensor ausente o mal formado: usa `Authorization: Bearer <token_sensor>`."
 )
@@ -26,10 +26,7 @@ def _token_de_sensor(authorization: str | None) -> str:
     El token nunca se registra ni se incluye en los mensajes de error: solo se
     pasa al servicio, que compara su SHA-256 contra `sensores.token_hash`.
     """
-    token = ""
-    if authorization and authorization.startswith(PREFIJO_BEARER):
-        token = authorization.removeprefix(PREFIJO_BEARER).strip()
-
+    token = token_bearer(authorization)
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

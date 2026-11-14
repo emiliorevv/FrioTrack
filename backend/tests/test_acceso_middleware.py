@@ -1,6 +1,5 @@
 """Pruebas del middleware de logs de acceso y bloqueo de IPs."""
 
-import io
 import json
 import threading
 from datetime import UTC, datetime, timedelta
@@ -50,18 +49,6 @@ def sesion_falsa(monkeypatch):
     monkeypatch.setattr(acceso, "SessionLocal", lambda bind=None: sesion)
     monkeypatch.setattr(acceso, "get_engine", lambda: None)
     return sesion
-
-
-@pytest.fixture
-def log_stdout():
-    """Apunta el logger de acceso a un buffer para leer la línea JSON emitida."""
-    flujo = io.StringIO()
-    manejador = acceso.logger_salida.handlers[0]
-    anterior = manejador.setStream(flujo)
-    try:
-        yield flujo
-    finally:
-        manejador.setStream(anterior)
 
 
 def _activar_db(monkeypatch):

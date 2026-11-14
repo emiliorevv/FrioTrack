@@ -1,7 +1,7 @@
-title: Fuerza bruta de tokens en ingesta de telemetría
+title: Fuerza bruta de tokens en ingesta de telemetría y cron
 id: 3b8e2f6a-9c41-4d7e-8a15-2f6c0d9e7b41
 status: experimental
-description: Muchos intentos fallidos de autenticación contra el endpoint de sensores desde la misma IP
+description: Muchos intentos fallidos de autenticación contra los endpoints de sensores y del cron desde la misma IP
 author: Equipo FríoTrack
 date: 2026-11-11
 logsource:
@@ -9,7 +9,9 @@ logsource:
   service: api_access
 detection:
   selection:
-    ruta: /api/telemetria
+    ruta:
+      - /api/telemetria
+      - /api/simulador/tick
     status:
       - 401
       - 403
@@ -21,5 +23,6 @@ tags:
   - attack.t1110
 falsepositives:
   - Sensor mal configurado con un token viejo
+  - Worker del cron con un CRON_TOKEN desactualizado
 # Acción de respuesta (no es parte del estándar Sigma, la ejecuta el detector):
 # bloquear ip_origen 1 hora y avisar al responsable.
