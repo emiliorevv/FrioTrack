@@ -11,6 +11,7 @@ export class EventSourceFalso {
   readyState = EventSourceFalso.CONNECTING
   cerrado = false
   onerror: ((evento: Event) => void) | null = null
+  onopen: ((evento: Event) => void) | null = null
   private oyentes = new Map<string, Set<OyenteSSE>>()
 
   constructor(url: string) {
@@ -47,5 +48,10 @@ export class EventSourceFalso {
   simularError(readyState = EventSourceFalso.CLOSED) {
     this.readyState = readyState
     this.onerror?.(new Event('error'))
+  }
+
+  simularApertura() {
+    this.readyState = EventSourceFalso.OPEN
+    this.onopen?.(new Event('open'))
   }
 }

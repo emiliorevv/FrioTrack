@@ -76,23 +76,30 @@ describe('useNotificaciones', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('segunda')
   })
 
-  it(`conserva como máximo ${MAX_NOTIFICACIONES} en la cola FIFO`, () => {
+  it('con la cola llena conserva el toast visible y descarta el pendiente más antiguo', () => {
     renderizar()
 
-    for (const mensaje of ['A', 'B', 'C', 'D', 'E', 'F']) {
+    for (const mensaje of ['A', 'B', 'C', 'D', 'E']) {
       emitir(conMensaje(mensaje))
     }
+    expect(screen.getByText('A')).toBeInTheDocument()
 
-    expect(screen.getByText('B')).toBeInTheDocument()
-    expect(screen.queryByText('A')).not.toBeInTheDocument()
+    emitir(conMensaje('F'))
+    emitir(conMensaje('G'))
 
-    for (let cierre = 0; cierre < MAX_NOTIFICACIONES - 1; cierre += 1) {
+    expect(screen.getByText('A')).toBeInTheDocument()
+
+    const visibles: string[] = []
+    for (let cierre = 0; cierre < MAX_NOTIFICACIONES; cierre += 1) {
+      const toast = screen.getByRole('alert')
+      visibles.push(toast.querySelector('.toast__message')?.textContent ?? '')
       fireEvent.click(
         screen.getByRole('button', { name: 'Cerrar notificación' }),
       )
     }
 
-    expect(screen.getByText('F')).toBeInTheDocument()
+    expect(visibles).toEqual(['A', 'D', 'E', 'F', 'G'])
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('ignora una notificación con un tipo desconocido', () => {

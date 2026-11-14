@@ -22,10 +22,12 @@ export function NotificationToast({
   onCerrar,
   duracionMs = DURACION_NOTIFICACION_MS,
 }: NotificationToastProps) {
+  const raizRef = useRef<HTMLDivElement>(null)
   const restanteRef = useRef(duracionMs)
   const inicioRef = useRef<number | null>(null)
   const timerRef = useRef<number | null>(null)
-  const pausasRef = useRef(0)
+  const punteroEncimaRef = useRef(false)
+  const focoDentroRef = useRef(false)
 
   const detener = useCallback(() => {
     if (timerRef.current !== null) {
@@ -51,36 +53,66 @@ export function NotificationToast({
     }, restanteRef.current)
   }, [onCerrar])
 
-  useEffect(() => {
-    reanudar()
-    return detener
-  }, [reanudar, detener])
-
-  const pausar = useCallback(() => {
-    pausasRef.current += 1
-    if (pausasRef.current === 1) {
+  /** Pausa si el puntero está encima o el foco sigue dentro; si no, reanuda. */
+  const actualizarPausa = useCallback(() => {
+    if (punteroEncimaRef.current || focoDentroRef.current) {
       detener()
-    }
-  }, [detener])
-
-  const despausar = useCallback(() => {
-    pausasRef.current = Math.max(0, pausasRef.current - 1)
-    if (pausasRef.current === 0) {
+    } else {
       reanudar()
     }
-  }, [reanudar])
+  }, [detener, reanudar])
+
+  useEffect(() => {
+    // El toast puede montarse debajo de un puntero quieto o con el foco ya
+    // dentro (p. ej. el toast anterior): en ese caso no arranca el timer.
+    const raiz = raizRef.current
+    punteroEncimaRef.current = raiz?.matches(':hover') ?? false
+    focoDentroRef.current = raiz?.contains(document.activeElement) ?? false
+    actualizarPausa()
+
+    return detener
+  }, [actualizarPausa, detener])
+
+  const alEntrarPuntero = useCallback(() => {
+    punteroEncimaRef.current = true
+    actualizarPausa()
+  }, [actualizarPausa])
+
+  const alSalirPuntero = useCallback(() => {
+    punteroEncimaRef.current = false
+    actualizarPausa()
+  }, [actualizarPausa])
+
+  const alEntrarFoco = useCallback(() => {
+    focoDentroRef.current = true
+    actualizarPausa()
+  }, [actualizarPausa])
+
+  const alSalirFoco = useCallback(() => {
+    focoDentroRef.current = false
+    actualizarPausa()
+  }, [actualizarPausa])
+
+  const cerrar = useCallback(() => {
+    onCerrar()
+    // Si se cerró por teclado, el botón desaparece y el foco cae a <body>.
+    requestAnimationFrame(() => {
+      document.getElementById('contenido')?.focus({ preventScroll: true })
+    })
+  }, [onCerrar])
 
   const esMerma = notificacion.tipo === 'merma'
 
   return (
     <div
+      ref={raizRef}
       className={`toast toast--${esMerma ? 'merma' : 'alerta'}`}
       role="alert"
       aria-atomic="true"
-      onMouseEnter={pausar}
-      onMouseLeave={despausar}
-      onFocusCapture={pausar}
-      onBlurCapture={despausar}
+      onMouseEnter={alEntrarPuntero}
+      onMouseLeave={alSalirPuntero}
+      onFocusCapture={alEntrarFoco}
+      onBlurCapture={alSalirFoco}
     >
       <div className="toast__body">
         <p className="toast__eyebrow">Notificación simulada</p>
@@ -91,7 +123,7 @@ export function NotificationToast({
       <button
         type="button"
         className="icon-button toast__close"
-        onClick={onCerrar}
+        onClick={cerrar}
         aria-label="Cerrar notificación"
       >
         <svg

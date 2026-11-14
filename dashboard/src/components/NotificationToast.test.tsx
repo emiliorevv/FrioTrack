@@ -33,6 +33,7 @@ function renderizar(onCerrar = vi.fn()) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
@@ -127,6 +128,58 @@ describe('NotificationToast', () => {
     expect(onCerrar).not.toHaveBeenCalled()
 
     act(() => vi.advanceTimersByTime(1))
+    expect(onCerrar).toHaveBeenCalledTimes(1)
+  })
+
+  it('devuelve el foco a #contenido al cerrar', () => {
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0)
+      return 0
+    })
+
+    render(
+      <>
+        <main id="contenido" tabIndex={-1}>
+          Contenido
+        </main>
+        <NotificationToast
+          notificacion={crearNotificacion()}
+          onCerrar={() => {}}
+        />
+      </>,
+    )
+
+    const boton = screen.getByRole('button', { name: 'Cerrar notificación' })
+    boton.focus()
+    expect(boton).toHaveFocus()
+
+    fireEvent.click(boton)
+
+    expect(document.getElementById('contenido')).toHaveFocus()
+  })
+
+  it('monta en pausa si el puntero ya está encima', () => {
+    vi.useFakeTimers()
+    const onCerrar = vi.fn()
+    const matchesOriginal = Element.prototype.matches
+
+    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (
+      this: Element,
+      selector: string,
+    ) {
+      if (selector === ':hover') {
+        return this.classList.contains('toast')
+      }
+      return matchesOriginal.call(this, selector)
+    })
+
+    const toast = renderizar(onCerrar)
+
+    act(() => vi.advanceTimersByTime(20_000))
+    expect(onCerrar).not.toHaveBeenCalled()
+
+    fireEvent.mouseLeave(toast)
+    act(() => vi.advanceTimersByTime(DURACION_NOTIFICACION_MS))
     expect(onCerrar).toHaveBeenCalledTimes(1)
   })
 })

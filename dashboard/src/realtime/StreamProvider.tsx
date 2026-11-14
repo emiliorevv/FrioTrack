@@ -9,8 +9,8 @@ import {
 import {
   construirUrlStream,
   EVENTOS_STREAM,
-  RECONEXION_MS,
   resolverApiUrl,
+  retrasoReconexion,
   type EventoStream,
 } from './stream'
 
@@ -48,6 +48,7 @@ export function StreamProvider({ children, token }: StreamProviderProps) {
     let fuente: EventSource | null = null
     let alRecibir: ((evento: Event) => void) | null = null
     let timerReconexion: number | null = null
+    let intentoReconexion = 0
     let desmontado = false
 
     const desconectar = () => {
@@ -68,10 +69,12 @@ export function StreamProvider({ children, token }: StreamProviderProps) {
       if (desmontado || timerReconexion !== null) {
         return
       }
+      const retraso = retrasoReconexion(intentoReconexion)
+      intentoReconexion += 1
       timerReconexion = window.setTimeout(() => {
         timerReconexion = null
         conectar()
-      }, RECONEXION_MS)
+      }, retraso)
     }
 
     const conectar = () => {
@@ -92,6 +95,11 @@ export function StreamProvider({ children, token }: StreamProviderProps) {
 
       for (const nombre of EVENTOS_STREAM) {
         nueva.addEventListener(nombre, despachar)
+      }
+
+      nueva.onopen = () => {
+        // El stream volvió: el próximo corte reintenta desde 5 s.
+        intentoReconexion = 0
       }
 
       nueva.onerror = () => {

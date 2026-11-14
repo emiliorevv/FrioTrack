@@ -10,8 +10,21 @@ export const EVENTOS_STREAM = [
 
 export type EventoStream = (typeof EVENTOS_STREAM)[number]
 
-/** Espera antes de recrear un EventSource que quedó CLOSED. */
-export const RECONEXION_MS = 5_000
+/** Base y tope del backoff de reconexión del stream. */
+export const RECONEXION_BASE_MS = 5_000
+export const RECONEXION_MAX_MS = 30_000
+
+/**
+ * Backoff exponencial con jitter de ±25 % y tope de 30 s: 5, 10, 20, 30, 30…
+ * El jitter evita que todas las pestañas reintenten en lockstep.
+ */
+export function retrasoReconexion(
+  intento: number,
+  aleatorio = Math.random(),
+): number {
+  const base = Math.min(RECONEXION_BASE_MS * 2 ** intento, RECONEXION_MAX_MS)
+  return Math.round(base * (0.75 + aleatorio * 0.5))
+}
 
 /**
  * Resuelve la base de la API.

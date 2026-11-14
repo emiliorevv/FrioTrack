@@ -33,7 +33,13 @@ export function useNotificaciones() {
       id: siguienteId.current,
       datos: notificacion,
     }
-    setCola((actual) => [...actual, enCola].slice(-MAX_NOTIFICACIONES))
+    setCola((actual) =>
+      actual.length < MAX_NOTIFICACIONES
+        ? [...actual, enCola]
+        : // La cola está llena: se conserva el toast visible (índice 0) y se
+          // descarta el pendiente más antiguo.
+          [actual[0], ...actual.slice(2), enCola],
+    )
   })
 
   const cerrar = useCallback(() => {

@@ -2,7 +2,12 @@ import { useState } from 'react'
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventSourceFalso } from '../test/EventSourceFalso'
-import { construirUrlStream, RECONEXION_MS, type EventoStream } from './stream'
+import {
+  construirUrlStream,
+  RECONEXION_BASE_MS,
+  RECONEXION_MAX_MS,
+  type EventoStream,
+} from './stream'
 import { StreamProvider, useStreamEvent } from './StreamProvider'
 
 const API = 'https://api.prueba.mx/api'
@@ -22,6 +27,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
@@ -69,8 +75,9 @@ describe('StreamProvider', () => {
     )
   })
 
-  it('reconecta a los 5 s cuando el stream quedó CLOSED', () => {
+  it('reconecta con backoff exponencial y tope, y lo reinicia al abrir', () => {
     vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
     render(
       <StreamProvider>
         <p>contenido</p>
@@ -80,13 +87,30 @@ describe('StreamProvider', () => {
     expect(EventSourceFalso.instancias).toHaveLength(1)
     const primera = EventSourceFalso.instancias[0]
 
-    act(() => primera?.simularError(EventSourceFalso.CLOSED))
-    expect(EventSourceFalso.instancias).toHaveLength(1)
+    const reconectar = (retraso: number) => {
+      const antes = EventSourceFalso.instancias.length
+      act(() =>
+        EventSourceFalso.instancias[antes - 1]?.simularError(
+          EventSourceFalso.CLOSED,
+        ),
+      )
+      act(() => vi.advanceTimersByTime(retraso - 1))
+      expect(EventSourceFalso.instancias).toHaveLength(antes)
+      act(() => vi.advanceTimersByTime(1))
+      expect(EventSourceFalso.instancias).toHaveLength(antes + 1)
+    }
 
-    act(() => vi.advanceTimersByTime(RECONEXION_MS))
-
-    expect(EventSourceFalso.instancias).toHaveLength(2)
+    reconectar(RECONEXION_BASE_MS)
     expect(primera?.cerrado).toBe(true)
+
+    reconectar(RECONEXION_BASE_MS * 2)
+    reconectar(RECONEXION_BASE_MS * 4)
+    reconectar(RECONEXION_MAX_MS)
+    reconectar(RECONEXION_MAX_MS)
+
+    // Al abrir de nuevo, el backoff vuelve a empezar en 5 s.
+    act(() => EventSourceFalso.instancias.at(-1)?.simularApertura())
+    reconectar(RECONEXION_BASE_MS)
   })
 
   it('no reconecta si el stream sigue CONNECTING (reintenta el navegador)', () => {
@@ -100,7 +124,7 @@ describe('StreamProvider', () => {
     act(() =>
       EventSourceFalso.instancias[0]?.simularError(EventSourceFalso.CONNECTING),
     )
-    act(() => vi.advanceTimersByTime(RECONEXION_MS))
+    act(() => vi.advanceTimersByTime(RECONEXION_MAX_MS))
 
     expect(EventSourceFalso.instancias).toHaveLength(1)
   })
@@ -116,7 +140,7 @@ describe('StreamProvider', () => {
 
     act(() => fuente?.simularError(EventSourceFalso.CLOSED))
     unmount()
-    act(() => vi.advanceTimersByTime(RECONEXION_MS))
+    act(() => vi.advanceTimersByTime(RECONEXION_MAX_MS))
 
     expect(fuente?.cerrado).toBe(true)
     expect(EventSourceFalso.instancias).toHaveLength(1)

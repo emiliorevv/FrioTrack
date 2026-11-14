@@ -58,7 +58,7 @@ function App() {
         escalaTiempo={30}
       />
 
-      <main id="contenido" className="app-main">
+      <main id="contenido" className="app-main" tabIndex={-1}>
         <OnboardingBanner />
 
         <section className="section" aria-labelledby="resumen-title">
