@@ -6,15 +6,16 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { resolverApiUrl } from '../api/url'
 import {
   construirUrlStream,
   EVENTOS_STREAM,
-  resolverApiUrl,
   retrasoReconexion,
   type EventoStream,
 } from './stream'
 
-export { construirUrlStream, resolverApiUrl } from './stream'
+export { construirUrlStream } from './stream'
+export { resolverApiUrl } from '../api/url'
 
 export type OyenteStream = (evento: MessageEvent<string>) => void
 type Suscriptores = Map<string, Set<OyenteStream>>

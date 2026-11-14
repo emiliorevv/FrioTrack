@@ -49,9 +49,11 @@ function resumirDetalle(detalle: Record<string, unknown>): string {
 interface SecurityPanelProps {
   alertas: AlertaSeguridad[]
   ahora: Date
+  /** Aclaración visible, por ejemplo mientras el detector SIEM no existe. */
+  nota?: string
 }
 
-export function SecurityPanel({ alertas, ahora }: SecurityPanelProps) {
+export function SecurityPanel({ alertas, ahora, nota }: SecurityPanelProps) {
   return (
     <section className="security" aria-labelledby="seguridad-title">
       <div className="section-heading">
@@ -61,6 +63,8 @@ export function SecurityPanel({ alertas, ahora }: SecurityPanelProps) {
         </div>
         <span className="tag">SIEM</span>
       </div>
+
+      {nota && <p className="security__nota">{nota}</p>}
 
       <ul className="security__list">
         {alertas.map((alerta) => {

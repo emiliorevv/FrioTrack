@@ -31,4 +31,16 @@ describe('SecurityPanel', () => {
       ),
     ).toBeInTheDocument()
   })
+
+  it('muestra la nota visible cuando se pasa', () => {
+    render(
+      <SecurityPanel
+        alertas={[alerta]}
+        ahora={new Date('2026-11-12T16:45:00-06:00')}
+        nota="Datos de ejemplo: el detector SIEM todavía no está conectado."
+      />,
+    )
+
+    expect(screen.getByText(/Datos de ejemplo/)).toBeInTheDocument()
+  })
 })
