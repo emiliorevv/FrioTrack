@@ -2,7 +2,7 @@
 
 Prototipo Alfa del Desafío Data-Driven 4.0 (4ta Revolución Industrial, segundo parcial).
 
-FríoTrack monitorea en tiempo real las cámaras frigoríficas y el congelador de la cocina de un restaurante. Sensores simulados mandan temperatura, humedad y estado de puerta a un backend en la nube. El backend cruza esas lecturas con el inventario (emulando un ERP), detecta cuando un lote de producto queda en riesgo y manda un SMS al celular del jefe de cocina antes de que se pierda.
+FríoTrack monitorea en tiempo real las cámaras frigoríficas y el congelador de la cocina de un restaurante. Sensores simulados mandan temperatura, humedad y estado de puerta a un backend en la nube. El backend cruza esas lecturas con el inventario (emulando un ERP), detecta cuando un lote de producto queda en riesgo y notifica al jefe de cocina en el dashboard antes de que se pierda.
 
 ## El problema en una frase
 
@@ -18,7 +18,7 @@ Es una **arquitectura IoT en tres capas** (borde, plataforma y aplicación), con
 │ Sensores simulados       │   │ Gateway con  │   │ API FastAPI (Render, PaaS)       │
 │ (temp, humedad, puerta)  │──▶│ TLS + token  │──▶│  - ingesta de telemetría         │
 │ simulator/               │   │ por sensor   │   │  - lógica ERP: lotes, mermas     │
-└──────────────────────────┘   └──────────────┘   │  - alertas y SMS (Twilio)        │
+└──────────────────────────┘   └──────────────┘   │  - alertas y notificaciones      │
                                                   │  - stream en tiempo real (SSE)   │
                                                   └───────────────┬──────────────────┘
                                                                   │
@@ -37,7 +37,7 @@ Es una **arquitectura IoT en tres capas** (borde, plataforma y aplicación), con
 | Base de datos | Postgres | Supabase |
 | Dashboard | React + Vite, responsivo | Vercel |
 | Tiempo real | Server-Sent Events desde la API | — |
-| Notificaciones al celular | SMS con Twilio (cuenta de prueba) | API → celular del jefe de cocina |
+| Notificaciones | En la demo, notificación simulada por SSE en el dashboard; SMS con Twilio en producción | API → dashboard (Twilio en producción) |
 | Seguridad | Diagrama IDMZ + reglas SIEM en formato Sigma | `security/` |
 
 Cada decisión tiene su ADR en [docs/adr/](docs/adr/).
@@ -100,7 +100,7 @@ El restaurante tiene cinco equipos de frío. Cada uno guarda un tipo de producto
 ## Lógica de negocio que emula el ERP/MES
 
 1. Cada lote de inventario (producto, cantidad, costo y caducidad) está asignado a una cámara.
-2. Si una cámara sale de su rango más del tiempo de **en riesgo**, se abre una alerta, sus lotes pasan a **en riesgo** y llega un SMS al jefe de cocina.
+2. Si una cámara sale de su rango más del tiempo de **en riesgo**, se abre una alerta, sus lotes pasan a **en riesgo** y aparece una notificación en el dashboard del jefe de cocina.
 3. Si sigue fuera de rango más del tiempo de **merma**, los lotes pasan a **merma** y se registra la pérdida en pesos en el inventario.
 4. Una puerta abierta más de **5 minutos** genera alerta aunque la temperatura siga en rango.
 
@@ -109,7 +109,7 @@ Los rangos y tiempos se configuran por cámara en la base de datos. Para la demo
 ## Tiempo real y notificaciones
 
 - **Dashboard en vivo (SSE):** el dashboard abre una conexión a `GET /api/stream` que se queda abierta. Cada vez que la API recibe una lectura o abre una alerta, la manda por esa conexión y la pantalla se actualiza sola, sin recargar. Si se cae la conexión, el navegador se reconecta automáticamente.
-- **SMS (Twilio):** cuando se abre una alerta, la API le manda un SMS al jefe de cocina con la cámara, la temperatura y el valor del producto en riesgo, más el link al dashboard. Para no llenarlo de mensajes, se manda un SMS al abrir la alerta y otro si pasa a merma, no uno por lectura. La cuenta de prueba de Twilio da crédito gratis y solo manda a números verificados, que para la demo basta (se verifican los celulares del equipo).
+- **Notificación simulada (demo):** cuando se abre una alerta, la API publica una notificación por SSE que aparece en el dashboard con la cámara, la temperatura y el valor del producto en riesgo, más el link al dashboard. Para no llenarlo de mensajes, se manda una notificación al abrir la alerta y otra si pasa a merma, no una por lectura. El canal es simulado (no sale nada a la red); el SMS real con Twilio queda para producción.
 
 ## KPIs del dashboard
 
@@ -198,7 +198,7 @@ Una tarea está terminada cuando:
 | [ADR-0005](docs/adr/0005-dashboard-web-responsivo.md) | Dashboard web responsivo en lugar de app nativa |
 | [ADR-0006](docs/adr/0006-idmz-zero-trust.md) | Segmentación IDMZ y Zero Trust |
 | [ADR-0007](docs/adr/0007-reglas-siem-sigma.md) | Reglas SIEM en formato Sigma |
-| [ADR-0008](docs/adr/0008-notificaciones-sms.md) | Alertas por SMS (Twilio) en lugar de app nativa, Web Push o WhatsApp |
+| [ADR-0008](docs/adr/0008-notificaciones-sms.md) | Alertas por SMS (Twilio); en la demo, notificación simulada en el dashboard |
 | [ADR-0009](docs/adr/0009-cron-cloudflare-worker.md) | Flujo continuo con Cloudflare Worker en lugar de worker de Render |
 | [ADR-0010](docs/adr/0010-escala-tiempo-demo.md) | Escala de tiempo para que la demo quepa en 6 minutos |
 

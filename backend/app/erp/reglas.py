@@ -45,6 +45,13 @@ def _segundos_transcurridos(desde: datetime, ahora: datetime) -> float:
     return (asegurar_utc(ahora) - asegurar_utc(desde)).total_seconds()
 
 
+def minutos_demo(desde: datetime | None, ahora: datetime, escala: float) -> int:
+    """Minutos de demo transcurridos desde `desde`; sin fecha, reporta 1."""
+    if desde is None:
+        return 1
+    return max(1, round(_segundos_transcurridos(desde, ahora) * escala / 60))
+
+
 def debe_abrir_alerta_temperatura(
     fuera_de_rango_desde: datetime | None,
     ahora: datetime,

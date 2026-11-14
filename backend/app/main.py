@@ -17,6 +17,7 @@ from app.routers.operacion import router as operacion_router
 from app.routers.simulador import router as simulador_router
 from app.routers.stream import router as stream_router
 from app.routers.telemetria import router as telemetria_router
+from app.services.notificaciones import cerrar_notificaciones
 
 
 @asynccontextmanager
@@ -29,6 +30,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         tarea.cancel()
         with suppress(asyncio.CancelledError):
             await tarea
+        cerrar_notificaciones()
 
 
 def create_app() -> FastAPI:

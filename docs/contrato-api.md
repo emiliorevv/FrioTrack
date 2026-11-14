@@ -120,12 +120,16 @@ Server-Sent Events. Va el token en la URL porque `EventSource` del navegador no 
 | `alerta_abierta` | Se abre una alerta | El objeto de la alerta |
 | `alerta_cerrada` | La cámara vuelve a rango o la atienden | El objeto de la alerta |
 | `lote_actualizado` | Un lote cambia de estado | El objeto del lote |
+| `notificacion` | Se abre una alerta o lotes pasan a merma | `{ canal, tipo, camara_id, mensaje, ts, url }` (`canal` es `"simulado"`; `tipo` es `alerta_temperatura`, `alerta_puerta` o `merma`) |
 | `kpis` | Cada 30 segundos | El mismo objeto que `GET /kpis` |
 
 Ejemplo de lo que llega por la conexión:
 ```
 event: lectura
 data: {"camara_id":1,"ts":"2026-11-18T19:05:00-06:00","temperatura_c":3.1,"humedad_pct":85,"puerta_abierta":true,"estado_camara":"alerta"}
+
+event: notificacion
+data: {"canal":"simulado","tipo":"alerta_temperatura","camara_id":1,"mensaje":"FríoTrack: Cámara Pescados y mariscos a 3.4 °C hace 10 min. $4,850 en riesgo.","ts":"2026-11-18T19:05:00+00:00","url":"http://localhost:5173"}
 
 ```
 
