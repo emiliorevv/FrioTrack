@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  obtenerAlertasSeguridad,
   obtenerCamaras,
   obtenerHealth,
   obtenerKpis,
@@ -8,9 +9,10 @@ import {
 } from './api/client'
 import App from './App'
 import { useStreamEvent } from './realtime/StreamProvider'
-import type { Camara, Kpis, Lectura } from './types'
+import type { AlertaSeguridad, Camara, Kpis, Lectura } from './types'
 
 vi.mock('./api/client', () => ({
+  obtenerAlertasSeguridad: vi.fn(),
   obtenerHealth: vi.fn(),
   obtenerCamaras: vi.fn(),
   obtenerKpis: vi.fn(),
@@ -32,6 +34,22 @@ const kpis: Kpis = {
   valor_en_riesgo_mxn: 4850,
   merma_hoy_mxn: 0,
   merma_mes_mxn: 1720,
+}
+
+const alertaSeguridad: AlertaSeguridad = {
+  id: 1,
+  regla_id: '3b8e2f6a-9c41-4d7e-8a15-2f6c0d9e7b41',
+  regla: 'Fuerza bruta de tokens en ingesta de telemetría y cron',
+  severidad: 'high',
+  ts: new Date().toISOString(),
+  ip_origen: '192.168.0.4',
+  detalle: {
+    clave: 'ip:192.168.0.4',
+    rutas: ['/api/telemetria'],
+    intentos: 15,
+    ventana_s: 300,
+  },
+  accion: 'bloquear_ip',
 }
 
 function crearCamaras(): Camara[] {
@@ -145,6 +163,7 @@ beforeEach(() => {
   vi.mocked(obtenerHealth).mockResolvedValue({ ok: true, escala_tiempo: 30 })
   vi.mocked(obtenerCamaras).mockResolvedValue(crearCamaras())
   vi.mocked(obtenerKpis).mockResolvedValue(kpis)
+  vi.mocked(obtenerAlertasSeguridad).mockResolvedValue([alertaSeguridad])
   vi.mocked(obtenerLecturas).mockImplementation(async (id) => crearSerie(id))
 })
 
@@ -252,16 +271,37 @@ describe('vista general', () => {
     expect(within(pescados).getByText('$4,850')).toBeInTheDocument()
   })
 
-  it('muestra datos en vivo y avisa que el SIEM usa ejemplos', async () => {
+  it('muestra datos en vivo y la alerta real del detector', async () => {
     render(<App />)
     await screen.findAllByRole('article')
 
     expect(screen.getByText('Datos en vivo · FríoTrack')).toBeInTheDocument()
     expect(screen.queryByText(/Datos simulados/)).not.toBeInTheDocument()
-    expect(screen.getByText(/Datos de ejemplo/)).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Fuerza bruta de tokens en ingesta de telemetría y cron',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Alta')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '192.168.0.4 · clave: ip:192.168.0.4 · rutas: /api/telemetria · intentos: 15 · ventana s: 300 · IP bloqueada',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Datos de ejemplo/)).not.toBeInTheDocument()
     expect(
       screen.getAllByText(/Actualizado hace \d+ s/).length,
     ).toBeGreaterThan(0)
+  })
+
+  it('muestra el estado vacío del panel de seguridad', async () => {
+    vi.mocked(obtenerAlertasSeguridad).mockResolvedValueOnce([])
+
+    render(<App />)
+    await screen.findAllByRole('article')
+
+    expect(screen.getByText('Sin alertas del detector.')).toBeInTheDocument()
+    expect(screen.queryByText(/Datos de ejemplo/)).not.toBeInTheDocument()
   })
 
   it('muestra el skeleton mientras no llega la primera respuesta', () => {

@@ -895,13 +895,14 @@
   box-shadow: var(--shadow-1);
 }
 
-.security__nota {
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--warn-soft);
-  color: var(--warn-ink);
-  font-size: 0.72rem;
+.security__empty {
+  padding: 16px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 0.8rem;
   line-height: 1.45;
+  text-align: center;
 }
 
 .security__list {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  obtenerAlertasSeguridad,
   obtenerCamaras,
   obtenerHealth,
   obtenerKpis,
@@ -8,6 +9,7 @@ import {
 import { esObjeto, parsearJson } from '../lib/sse'
 import { useStreamEvent } from '../realtime/StreamProvider'
 import type {
+  AlertaSeguridad,
   Camara,
   EstadoCamara,
   Health,
@@ -29,6 +31,8 @@ export interface EstadoDashboard {
   health: Health | null
   camaras: Camara[]
   kpis: Kpis | null
+  /** Alertas del detector SIEM; se actualizan con el polling de 60 s. */
+  alertasSeguridad: AlertaSeguridad[]
   /** Temperaturas por cámara, de la más vieja a la más reciente. */
   series: Record<number, SerieCamara>
   /** Solo la primera carga (o un reintento sin datos) marca `true`. */
@@ -49,6 +53,9 @@ export function useDashboard(): EstadoDashboard {
   const [health, setHealth] = useState<Health | null>(null)
   const [camaras, setCamaras] = useState<Camara[]>([])
   const [kpis, setKpis] = useState<Kpis | null>(null)
+  const [alertasSeguridad, setAlertasSeguridad] = useState<AlertaSeguridad[]>(
+    [],
+  )
   const [series, setSeries] = useState<Record<number, SerieCamara>>({})
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -101,9 +108,11 @@ export function useDashboard(): EstadoDashboard {
       }
 
       try {
-        const [lista, kpisNuevos] = await Promise.all([
+        const [lista, kpisNuevos, alertas] = await Promise.all([
           obtenerCamaras(signal),
           obtenerKpis(signal),
+          // Seguridad es opcional: si falla se conservan las alertas previas.
+          obtenerAlertasSeguridad(signal).catch(() => null),
         ])
         if (!activoRef.current || solicitudRef.current !== id) {
           return
@@ -111,6 +120,9 @@ export function useDashboard(): EstadoDashboard {
 
         setCamaras((actuales) => fusionarCamaras(actuales, lista))
         setKpis(kpisNuevos)
+        if (alertas) {
+          setAlertasSeguridad(alertas)
+        }
         setActualizadoEn(new Date())
         setError(null)
         hayDatosRef.current = true
@@ -270,6 +282,7 @@ export function useDashboard(): EstadoDashboard {
     health,
     camaras,
     kpis,
+    alertasSeguridad,
     series,
     cargando,
     error,

@@ -40,14 +40,23 @@ describe('SecurityPanel', () => {
     expect(screen.getByText('hace 3 min')).toBeInTheDocument()
   })
 
-  it('muestra la nota visible cuando se pasa', () => {
-    render(
-      <SecurityPanel
-        alertas={[alerta]}
-        nota="Datos de ejemplo: el detector SIEM todavía no está conectado."
-      />,
-    )
+  it('muestra el estado vacío cuando no hay alertas', () => {
+    render(<SecurityPanel alertas={[]} />)
 
-    expect(screen.getByText(/Datos de ejemplo/)).toBeInTheDocument()
+    expect(screen.getByText('Sin alertas del detector.')).toBeInTheDocument()
+    expect(screen.queryByText(/Datos de ejemplo/)).not.toBeInTheDocument()
+  })
+
+  it('no rompe con una severidad o acción desconocidas', () => {
+    const rara = {
+      ...alerta,
+      severidad: 'rara',
+      accion: 'otra',
+    } as unknown as AlertaSeguridad
+
+    render(<SecurityPanel alertas={[rara]} />)
+
+    expect(screen.getByText('Desconocida')).toBeInTheDocument()
+    expect(screen.getByText(/Sin acción/)).toBeInTheDocument()
   })
 })

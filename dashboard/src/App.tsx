@@ -8,7 +8,6 @@ import { NotificationToast } from './components/NotificationToast'
 import { OnboardingBanner } from './components/OnboardingBanner'
 import { SecurityPanel } from './components/SecurityPanel'
 import { TiempoRelativo } from './components/TiempoRelativo'
-import { alertasSeguridad } from './data/mock'
 import { useDashboard } from './hooks/useDashboard'
 import { useNotificaciones } from './hooks/useNotificaciones'
 import { useReloj } from './hooks/useReloj'
@@ -32,6 +31,7 @@ function App() {
     health,
     camaras,
     kpis,
+    alertasSeguridad,
     series,
     cargando,
     error,
@@ -159,10 +159,7 @@ function App() {
               )}
             </section>
 
-            <SecurityPanel
-              alertas={alertasSeguridad}
-              nota="Datos de ejemplo: el detector SIEM todavía no está conectado."
-            />
+            <SecurityPanel alertas={alertasSeguridad} />
           </>
         )}
       </main>

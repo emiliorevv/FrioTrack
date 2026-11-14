@@ -1,4 +1,13 @@
-import type { Camara, Health, Kpis, Lectura } from '../types'
+import type {
+  AccionSeguridad,
+  AlertaSeguridad,
+  Camara,
+  Health,
+  Kpis,
+  Lectura,
+  SeveridadSeguridad,
+} from '../types'
+import { esObjeto } from '../lib/sse'
 import { resolverApiUrl } from './url'
 
 const TIEMPO_LIMITE_MS = 10_000
@@ -95,6 +104,83 @@ export function obtenerLecturas(
   senal?: AbortSignal,
 ): Promise<Lectura[]> {
   return pedir<Lectura[]>(`/camaras/${camaraId}/lecturas`, { signal: senal })
+}
+
+/**
+ * Alertas del detector SIEM. El backend manda `severidad` y `accion` como
+ * strings; se validan antes de tipar y las filas desconocidas se descartan
+ * para que el panel nunca reciba un valor fuera del contrato.
+ */
+export async function obtenerAlertasSeguridad(
+  senal?: AbortSignal,
+): Promise<AlertaSeguridad[]> {
+  const datos = await pedir<unknown>('/seguridad/alertas', { signal: senal })
+
+  if (!Array.isArray(datos)) {
+    return []
+  }
+
+  return datos
+    .map(normalizarAlertaSeguridad)
+    .filter((alerta): alerta is AlertaSeguridad => alerta !== null)
+}
+
+function normalizarAlertaSeguridad(valor: unknown): AlertaSeguridad | null {
+  if (!esObjeto(valor)) {
+    return null
+  }
+
+  const {
+    id,
+    regla_id: reglaId,
+    regla,
+    severidad,
+    ts,
+    ip_origen: ipOrigen,
+    detalle,
+    accion,
+  } = valor
+
+  if (
+    typeof id !== 'number' ||
+    typeof reglaId !== 'string' ||
+    typeof regla !== 'string' ||
+    !esSeveridad(severidad) ||
+    typeof ts !== 'string' ||
+    (ipOrigen !== null && typeof ipOrigen !== 'string') ||
+    !esObjeto(detalle) ||
+    !esAccion(accion)
+  ) {
+    return null
+  }
+
+  return {
+    id,
+    regla_id: reglaId,
+    regla,
+    severidad,
+    ts,
+    ip_origen: typeof ipOrigen === 'string' ? ipOrigen : null,
+    detalle,
+    accion,
+  }
+}
+
+function esSeveridad(valor: unknown): valor is SeveridadSeguridad {
+  return (
+    valor === 'low' ||
+    valor === 'medium' ||
+    valor === 'high' ||
+    valor === 'critical'
+  )
+}
+
+function esAccion(valor: unknown): valor is AccionSeguridad {
+  return (
+    valor === 'bloquear_ip' ||
+    valor === 'revocar_token' ||
+    valor === 'marcar_lecturas'
+  )
 }
 
 /** El `AbortSignal.timeout` rechaza con un DOMException llamado TimeoutError. */

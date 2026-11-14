@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ErrorApi,
+  obtenerAlertasSeguridad,
   obtenerCamaras,
   obtenerHealth,
   obtenerKpis,
@@ -146,5 +147,55 @@ describe('pedir', () => {
     })
 
     await expect(obtenerHealth()).rejects.toThrow('tardó más de 10 s')
+  })
+})
+
+describe('obtenerAlertasSeguridad', () => {
+  const alerta = {
+    id: 1,
+    regla_id: '3b8e2f6a-9c41-4d7e-8a15-2f6c0d9e7b41',
+    regla: 'Fuerza bruta de tokens',
+    severidad: 'high',
+    ts: '2026-11-14T23:30:25+00:00',
+    ip_origen: '192.168.0.4',
+    detalle: {
+      clave: 'ip:192.168.0.4',
+      rutas: ['/api/telemetria'],
+      intentos: 15,
+      ventana_s: 300,
+    },
+    accion: 'bloquear_ip',
+  }
+
+  it('pide las alertas del detector y las tipa', async () => {
+    fetchFalso.mockResolvedValue(respuesta([alerta]))
+
+    await expect(obtenerAlertasSeguridad()).resolves.toEqual([alerta])
+    expect(fetchFalso).toHaveBeenCalledWith(
+      `${BASE}/seguridad/alertas`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('descarta alertas con severidad o acción fuera del contrato', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta([
+        alerta,
+        { ...alerta, id: 2, severidad: 'rara' },
+        { ...alerta, id: 3, accion: 'otra' },
+        null,
+        { ...alerta, id: 4, severidad: 'critical', accion: 'revocar_token' },
+      ]),
+    )
+
+    const alertas = await obtenerAlertasSeguridad()
+
+    expect(alertas.map((item) => item.id)).toEqual([1, 4])
+  })
+
+  it('devuelve [] si la respuesta no es un arreglo', async () => {
+    fetchFalso.mockResolvedValue(respuesta({ detail: 'contrato roto' }))
+
+    await expect(obtenerAlertasSeguridad()).resolves.toEqual([])
   })
 })
