@@ -2,7 +2,7 @@
 
 ## El problema
 
-La exposición dura 6 minutos, pero las reglas reales tardan más: la cámara de pescado pasa a "en riesgo" a los 10 minutos y a merma a la hora, y la puerta tarda 5 minutos en alertar. Con los tiempos reales nunca se vería una alerta, un SMS ni una merma en vivo.
+La exposición dura 6 minutos, pero las reglas reales tardan más: la cámara de pescado pasa a "en riesgo" a los 10 minutos y a merma a la hora, y la puerta tarda 5 minutos en alertar. Con los tiempos reales nunca se vería una alerta, una notificación ni una merma en vivo.
 
 ## La solución: escala de tiempo
 
@@ -42,7 +42,7 @@ Reglas para que no se rompa nada:
 |---|---|---|
 | `normal` | Temperatura en el centro del rango con ruido de ±0.3 °C, puerta cerrada | Todo verde |
 | `puerta_abierta --camara N` | Puerta abierta y la temperatura sube 0.2 °C por lectura | Alerta de puerta a los 10 s, luego fuera de rango |
-| `falla_compresor --camara N` | Puerta cerrada y la temperatura sube 0.4 °C por lectura sin parar | En riesgo, SMS y, si se deja correr, merma con su costo |
+| `falla_compresor --camara N` | Puerta cerrada y la temperatura sube 0.4 °C por lectura sin parar | En riesgo, notificación simulada y, si se deja correr, merma con su costo |
 | `recuperar --camara N` | Regresa la temperatura al rango poco a poco | La alerta se cierra y los lotes en riesgo vuelven a `ok` |
 
 Intervalo por defecto: una lectura cada 3 segundos por cámara.
@@ -53,7 +53,7 @@ Intervalo por defecto: una lectura cada 3 segundos por cámara.
 |---|---|---|
 | 0:00–1:00 | Integrante 1 | El problema y la arquitectura (diagrama del README) |
 | 1:00–2:00 | Integrante 2 | Dashboard en el celular proyectado; QR para que el profe lo abra; KPIs moviéndose en vivo |
-| 2:00–3:30 | Integrante 2 | `falla_compresor --camara 1`: la tarjeta se pone amarilla, luego roja, llega el SMS al celular, aparecen los pesos en riesgo; se atiende la alerta desde el celular |
+| 2:00–3:30 | Integrante 2 | `falla_compresor --camara 1`: la tarjeta se pone amarilla, luego roja, aparece la notificación simulada en el dashboard, aparecen los pesos en riesgo; se atiende la alerta desde el celular |
 | 3:30–4:30 | Integrante 3 | Diagrama IDMZ y regla Sigma; se corre el script de ataque y el detector bloquea la IP; se ve en el dashboard |
 | 4:30–5:30 | Integrante 1 | Barreras legacy y culturales, valor conectado, por qué PaaS |
 | 5:30–6:00 | Todos | Cierre |
@@ -65,5 +65,5 @@ Plan B si falla internet: video grabado de la misma demo (la rúbrica lo acepta,
 1. 30 minutos antes: abrir la API para que Render despierte y revisar `/health`.
 2. Confirmar `ESCALA_TIEMPO=30` en Render.
 3. Correr `recuperar` en todas las cámaras para empezar en verde.
-4. Verificar que el celular que recibe los SMS esté verificado en Twilio.
+4. Confirmar que el canal de notificaciones es el simulado: la notificación aparece en el dashboard y no se manda ningún SMS (Twilio queda para producción).
 5. Desbloquear la IP del salón si quedó bloqueada en un ensayo.

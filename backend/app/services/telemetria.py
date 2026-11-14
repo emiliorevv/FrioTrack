@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -23,6 +24,9 @@ from app.realtime.bus import bus
 from app.schemas.operacion import alerta_salida, lote_salida
 from app.schemas.telemetria import TelemetriaIn
 from app.schemas.utils import iso
+from app.services.notificaciones import notificar_cambios
+
+logger = logging.getLogger(__name__)
 
 
 def _flotante(valor: Decimal | float | int | None) -> float | None:
@@ -251,4 +255,24 @@ def procesar_lectura(
         alertas_cerradas,
         lotes_actualizados,
     )
+
+    # Canal simulado de la demo: log + evento SSE `notificacion`. Solo por
+    # transiciones, después del commit y sin poder tumbar la ingesta.
+    if alertas_abiertas_nuevas or resultado.lotes_a_merma:
+        try:
+            notificar_cambios(
+                camara,
+                alertas_abiertas_nuevas,
+                lotes,
+                resultado.lotes_a_merma,
+                ahora,
+                get_settings().escala_tiempo,
+                datos.temperatura_c,
+            )
+        except Exception:
+            logger.exception(
+                "No se notificaron los cambios de la cámara %s; la lectura quedó guardada.",
+                camara.id,
+            )
+
     return lectura.id, camara.estado

@@ -464,6 +464,86 @@ def test_servicio_cierra_alertas_y_recupera_lotes_al_volver_al_rango(monkeypatch
     assert sesion.commits == 1
 
 
+# --- Notificaciones simuladas ----------------------------------------------
+
+
+def test_servicio_notifica_al_abrir_una_alerta(monkeypatch):
+    llamadas: list[tuple[object, ...]] = []
+    monkeypatch.setattr(servicio, "notificar_cambios", lambda *args: llamadas.append(args))
+    monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
+    camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=20))
+    lote = _lote("ok")
+    monkeypatch.setattr(servicio, "_cargar_lotes", lambda _s, _c: [lote])
+    monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
+    sesion = SesionFalsa(camara=camara, sensor=_sensor())
+
+    procesar_telemetria(sesion, _datos(temperatura_c=3.0), token=TOKEN)
+
+    assert len(llamadas) == 1
+    camara_recibida, alertas, lotes, lotes_a_merma, ahora, escala, temperatura = llamadas[0]
+    assert camara_recibida is camara
+    assert [alerta.tipo for alerta in alertas] == ["temperatura"]
+    assert alertas[0].sms_enviados == 0  # el canal simulado no cuenta como SMS
+    assert lotes == [lote]
+    assert lotes_a_merma == []
+    assert ahora == AHORA
+    assert escala == 30
+    assert temperatura == 3.0
+    assert lote.estado == "en_riesgo"  # ya se notifica el estado confirmado
+
+
+def test_servicio_notifica_al_pasar_lotes_a_merma(monkeypatch):
+    llamadas: list[tuple[object, ...]] = []
+    monkeypatch.setattr(servicio, "notificar_cambios", lambda *args: llamadas.append(args))
+    monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
+    camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=130))
+    lote = _lote("en_riesgo")
+    monkeypatch.setattr(servicio, "_cargar_lotes", lambda _s, _c: [lote])
+    monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
+    sesion = SesionFalsa(camara=camara, sensor=_sensor())
+
+    procesar_telemetria(sesion, _datos(temperatura_c=3.0), token=TOKEN)
+
+    assert len(llamadas) == 1
+    assert llamadas[0][3] == [lote]
+    assert lote.estado == "merma"
+
+
+def test_servicio_lectura_normal_no_notifica(monkeypatch):
+    llamadas: list[tuple[object, ...]] = []
+    monkeypatch.setattr(servicio, "notificar_cambios", lambda *args: llamadas.append(args))
+    monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
+    monkeypatch.setattr(servicio, "_cargar_lotes", lambda _s, _c: [_lote()])
+    monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
+    sesion = SesionFalsa(camara=_camara(), sensor=_sensor())
+
+    procesar_telemetria(sesion, _datos(temperatura_c=1.0), token=TOKEN)
+
+    assert llamadas == []
+
+
+def test_fallo_del_notificador_no_rompe_la_ingesta(monkeypatch):
+    def notificar_roto(*_args: object) -> None:
+        raise RuntimeError("canal caído")
+
+    monkeypatch.setattr(servicio, "notificar_cambios", notificar_roto)
+    monkeypatch.setattr(servicio, "utcnow", lambda: AHORA)
+    camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=20))
+    monkeypatch.setattr(servicio, "_cargar_lotes", lambda _s, _c: [_lote("ok")])
+    monkeypatch.setattr(servicio, "_cargar_alertas_abiertas", lambda _s, _c: [])
+    sesion = SesionFalsa(camara=camara, sensor=_sensor())
+    cliente = _cliente_con_servicio_real(monkeypatch, sesion)
+
+    with cliente:
+        respuesta = cliente.post(
+            "/api/telemetria", json=_payload(temperatura_c=3.0), headers=AUTORIZACION
+        )
+
+    assert respuesta.status_code == 202
+    assert respuesta.json()["estado_camara"] == "critica"
+    assert sesion.commits == 1
+
+
 # --- Eventos publicados al bus ---------------------------------------------
 
 
@@ -524,6 +604,7 @@ def test_servicio_publica_alerta_abierta_y_lote_actualizado(monkeypatch):
         "lectura",
         "alerta_abierta",
         "lote_actualizado",
+        "notificacion",
     ]
     _, alerta = eventos[1]
     assert alerta == {

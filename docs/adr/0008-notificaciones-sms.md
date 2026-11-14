@@ -25,3 +25,5 @@ Ejemplo: `FríoTrack: Cámara Pescados a 3.4 °C hace 10 min. $4,850 en riesgo. 
 - Para la demo se usa la cuenta de prueba de Twilio con crédito gratis; se verifican los celulares del equipo (y el del profe si se quiere mostrar en vivo). Los mensajes llevan el prefijo "Sent from your Twilio trial account".
 - Las credenciales de Twilio van en variables de entorno de Render.
 - Si Twilio falla, la alerta sigue en el dashboard; el envío de SMS no puede tumbar la ingesta (se hace en segundo plano).
+
+Nota 2026-11-14: por falta de acceso a Twilio, la demo usa un canal simulado que publica la notificación por SSE; la interfaz `Notificador` queda lista para conectar Twilio. `sms_enviados` sigue contando solo SMS reales.
