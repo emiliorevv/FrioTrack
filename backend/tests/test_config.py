@@ -65,8 +65,9 @@ def test_produccion_con_secreto_corto_lanza(monkeypatch):
         get_settings().validar_configuracion()
 
 
-def test_produccion_sin_cron_token_lanza(monkeypatch):
-    _configurar_produccion(monkeypatch, CRON_TOKEN="")
+@pytest.mark.parametrize("cron_token", ["", "   "], ids=["vacio", "en-blanco"])
+def test_produccion_sin_cron_token_lanza(monkeypatch, cron_token):
+    _configurar_produccion(monkeypatch, CRON_TOKEN=cron_token)
 
     with pytest.raises(RuntimeError, match="CRON_TOKEN"):
         get_settings().validar_configuracion()

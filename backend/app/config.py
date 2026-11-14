@@ -66,7 +66,7 @@ class Settings(BaseSettings):
                 f"(el valor por defecto {JWT_SECRET_POR_DEFECTO!r} solo sirve en local)."
             )
 
-        if not self.cron_token:
+        if not self.cron_token.strip():
             raise RuntimeError(
                 "Falta CRON_TOKEN: el simulador y el Worker de Cloudflare lo usan para "
                 "disparar los ticks; defínelo también en producción."

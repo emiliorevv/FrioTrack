@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.auth import token_bearer
 from app.db.session import get_db
 from app.schemas.simulador import TickOut
 from app.services.tick import SENSOR_CRON, ejecutar_tick
@@ -16,7 +17,6 @@ router = APIRouter(prefix="/api/simulador", tags=["simulador"])
 SesionDB = Annotated[Session, Depends(get_db)]
 Autorizacion = Annotated[str | None, Header(alias="Authorization")]
 
-PREFIJO_BEARER = "Bearer "
 MENSAJE_TOKEN_INVALIDO = (
     "Token de cron ausente o inválido: usa `Authorization: Bearer <token_cron>`."
 )
@@ -28,11 +28,8 @@ def _validar_token(authorization: str | None) -> None:
     El token nunca se registra ni se incluye en los mensajes de error. Sin
     token, mal formado, incorrecto o sin `CRON_TOKEN` configurado -> 401.
     """
-    token = ""
-    if authorization and authorization.startswith(PREFIJO_BEARER):
-        token = authorization.removeprefix(PREFIJO_BEARER).strip()
-
-    esperado = get_settings().cron_token
+    token = token_bearer(authorization)
+    esperado = get_settings().cron_token.strip()
     if not token or not esperado or not hmac.compare_digest(
         token.encode("utf-8"), esperado.encode("utf-8")
     ):

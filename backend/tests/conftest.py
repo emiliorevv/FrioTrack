@@ -1,5 +1,7 @@
 """Configuración común de pytest."""
 
+import io
+
 import pytest
 
 from app.config import limpiar_cache_settings
@@ -17,3 +19,15 @@ def _middleware_sin_base(monkeypatch):
     yield
     acceso.limpiar_cache_bloqueos()
     limpiar_cache_settings()
+
+
+@pytest.fixture
+def log_stdout():
+    """Apunta el logger de acceso a un buffer para leer la línea JSON emitida."""
+    flujo = io.StringIO()
+    manejador = acceso.logger_salida.handlers[0]
+    anterior = manejador.setStream(flujo)
+    try:
+        yield flujo
+    finally:
+        manejador.setStream(anterior)

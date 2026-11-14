@@ -2,21 +2,28 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.config import limpiar_cache_settings
-from app.db.models import Camara, Lectura
+from app.db.models import Camara
 from app.db.session import get_db
 from app.main import create_app
 from app.routers import simulador as router_simulador
 from app.schemas.telemetria import TelemetriaIn
 from app.services import tick
-from app.services.tick import SENSOR_CRON, VENTANA_LECTURA_REAL, ejecutar_tick
+from app.services.tick import (
+    SENSOR_CRON,
+    VENTANA_LECTURA_REAL,
+    VENTANA_TICK,
+    ejecutar_tick,
+)
 
 AHORA = datetime(2026, 11, 18, 19, 0, tzinfo=UTC)
 
@@ -40,37 +47,22 @@ def _entorno_de_pruebas(monkeypatch):
 
 
 class SesionFalsa:
-    """Sesión mínima: lista cámaras y detecta lecturas reales recientes."""
+    """Sesión mínima: entrega cámaras por id y cuenta rollbacks y locks."""
 
-    def __init__(
-        self,
-        camaras: list[Camara] | None = None,
-        lecturas: list[Lectura] | None = None,
-    ) -> None:
-        self.camaras = camaras or []
-        self.lecturas = lecturas or []
-        self.consultas: list[Any] = []
+    def __init__(self, camaras: dict[int, Camara] | None = None) -> None:
+        self.camaras = camaras or {}
+        self.locks: list[int] = []
+        self.rollbacks = 0
 
-    def scalars(self, stmt: Any) -> Any:
-        sql = str(stmt).lower()
-        self.consultas.append(stmt)
+    def get(self, modelo: object, pk: object, **kwargs: object) -> Camara | None:
+        assert modelo is Camara
+        if kwargs.get("with_for_update") is not True:
+            raise AssertionError("El tick debe bloquear la cámara antes de leerla.")
+        self.locks.append(int(pk))  # type: ignore[arg-type]
+        return self.camaras.get(int(pk))  # type: ignore[arg-type]
 
-        if "from camaras" in sql:
-            return sorted(self.camaras, key=lambda camara: camara.id)
-        if "from lecturas" in sql:
-            params = stmt.compile().params
-            desde = next(
-                valor for clave, valor in params.items() if clave.startswith("recibida_en_")
-            )
-            sensor = next(
-                valor for clave, valor in params.items() if clave.startswith("sensor_id_")
-            )
-            return {
-                lectura.camara_id
-                for lectura in self.lecturas
-                if lectura.recibida_en >= desde and lectura.sensor_id != sensor
-            }
-        raise AssertionError(f"Consulta no soportada por la sesión falsa:\n{stmt}")
+    def rollback(self) -> None:
+        self.rollbacks += 1
 
 
 def _camara(camara_id: int, nombre: str = "Pescados y mariscos", **cambios: object) -> Camara:
@@ -87,94 +79,143 @@ def _camara(camara_id: int, nombre: str = "Pescados y mariscos", **cambios: obje
     return Camara(**base)
 
 
-def _lectura(
-    camara_id: int,
-    sensor_id: str = "S-PES-01",
-    recibida_en: datetime = AHORA,
-) -> Lectura:
-    return Lectura(
-        id=1,
-        camara_id=camara_id,
-        sensor_id=sensor_id,
-        ts=recibida_en,
-        recibida_en=recibida_en,
-        temperatura_c=Decimal("1.0"),
-        humedad_pct=Decimal("80.0"),
-        puerta_abierta=False,
-    )
-
-
-def _preparar_tick(monkeypatch: pytest.MonkeyPatch) -> list[TelemetriaIn]:
-    """Fija la hora y sustituye `procesar_lectura`; regresa las llamadas."""
+def _preparar_tick(
+    monkeypatch: pytest.MonkeyPatch,
+    camaras: dict[int, Camara],
+    *,
+    escala_tiempo: int = 30,
+    reales: frozenset[int] = frozenset(),
+    ticks: frozenset[int] = frozenset(),
+    falla_en: frozenset[int] = frozenset(),
+) -> tuple[
+    SesionFalsa,
+    list[tuple[TelemetriaIn, Camara]],
+    list[tuple[int, datetime, bool]],
+    list[int],
+]:
+    """Sustituye los helpers del tick; regresa llamadas, consultas e intentos."""
     monkeypatch.setattr(tick, "utcnow", lambda: AHORA)
-    llamadas: list[TelemetriaIn] = []
+    monkeypatch.setattr(
+        tick, "get_settings", lambda: SimpleNamespace(escala_tiempo=escala_tiempo)
+    )
+    monkeypatch.setattr(tick, "_ids_de_camaras", lambda _session: sorted(camaras))
 
-    def procesar_lectura_falsa(_session: object, datos: TelemetriaIn):
-        llamadas.append(datos)
+    consultas: list[tuple[int, datetime, bool]] = []
+
+    def hay_lectura_reciente(_session, camara_id, desde, *, solo_cron):
+        consultas.append((camara_id, desde, solo_cron))
+        return camara_id in (ticks if solo_cron else reales)
+
+    monkeypatch.setattr(tick, "_hay_lectura_reciente", hay_lectura_reciente)
+
+    llamadas: list[tuple[TelemetriaIn, Camara]] = []
+    intentos: list[int] = []
+
+    def procesar_lectura_falsa(_session, datos, camara):
+        intentos.append(datos.camara_id)
+        if datos.camara_id in falla_en:
+            raise RuntimeError("falló el procesamiento")
+        llamadas.append((datos, camara))
         return 500 + len(llamadas), "en_rango"
 
     monkeypatch.setattr(tick, "procesar_lectura", procesar_lectura_falsa)
-    return llamadas
+    return SesionFalsa(camaras), llamadas, consultas, intentos
 
 
 # --- Servicio ---------------------------------------------------------------
 
 
-def test_tick_genera_una_lectura_por_camara_sin_datos_recientes(monkeypatch):
-    llamadas = _preparar_tick(monkeypatch)
-    sesion = SesionFalsa(camaras=[_camara(2, "Lácteos"), _camara(1)])
+def test_tick_genera_una_lectura_por_camara_ordenada(monkeypatch):
+    sesion, llamadas, _, _ = _preparar_tick(
+        monkeypatch, {2: _camara(2, "Lácteos"), 1: _camara(1)}
+    )
 
     generadas, saltadas = ejecutar_tick(sesion)
 
     assert (generadas, saltadas) == (2, [])
-    # Las cámaras se recorren ordenadas por id, sin importar el orden de la base.
-    assert [datos.camara_id for datos in llamadas] == [1, 2]
+    assert [datos.camara_id for datos, _ in llamadas] == [1, 2]
+    assert sesion.locks == [1, 2]
 
 
 def test_tick_salta_la_camara_con_lectura_real_dentro_de_la_ventana(monkeypatch):
-    llamadas = _preparar_tick(monkeypatch)
-    sesion = SesionFalsa(
-        camaras=[_camara(1), _camara(2, "Lácteos")],
-        lecturas=[_lectura(1, recibida_en=AHORA - timedelta(seconds=30))],
+    sesion, llamadas, consultas, _ = _preparar_tick(
+        monkeypatch,
+        {1: _camara(1), 2: _camara(2, "Lácteos")},
+        reales=frozenset({1}),
     )
 
     generadas, saltadas = ejecutar_tick(sesion)
 
     assert (generadas, saltadas) == (1, [1])
-    assert [datos.camara_id for datos in llamadas] == [2]
+    assert [datos.camara_id for datos, _ in llamadas] == [2]
+    # Con la lectura real no se llega a consultar el dedupe de ticks.
+    assert consultas[:1] == [(1, AHORA - VENTANA_LECTURA_REAL, False)]
+    assert (1, AHORA - VENTANA_TICK, True) not in consultas
 
 
-def test_tick_no_salta_por_una_lectura_real_mas_vieja_que_la_ventana(monkeypatch):
-    llamadas = _preparar_tick(monkeypatch)
-    vieja = AHORA - VENTANA_LECTURA_REAL - timedelta(seconds=1)
-    sesion = SesionFalsa(camaras=[_camara(1)], lecturas=[_lectura(1, recibida_en=vieja)])
-
-    generadas, saltadas = ejecutar_tick(sesion)
-
-    assert (generadas, saltadas) == (1, [])
-    assert [datos.camara_id for datos in llamadas] == [1]
-
-
-def test_tick_no_cuenta_una_lectura_previa_del_cron_como_real(monkeypatch):
-    llamadas = _preparar_tick(monkeypatch)
-    sesion = SesionFalsa(
-        camaras=[_camara(1)],
-        lecturas=[_lectura(1, sensor_id=SENSOR_CRON, recibida_en=AHORA - timedelta(seconds=10))],
+def test_tick_salta_la_camara_con_un_tick_reciente(monkeypatch):
+    sesion, llamadas, consultas, _ = _preparar_tick(
+        monkeypatch, {1: _camara(1)}, ticks=frozenset({1})
     )
 
     generadas, saltadas = ejecutar_tick(sesion)
 
-    assert (generadas, saltadas) == (1, [])
-    assert len(llamadas) == 1
+    assert (generadas, saltadas) == (0, [1])
+    assert llamadas == []
+    assert consultas == [
+        (1, AHORA - VENTANA_LECTURA_REAL, False),
+        (1, AHORA - VENTANA_TICK, True),
+    ]
+
+
+def test_tick_reporta_varias_saltadas_en_orden(monkeypatch):
+    sesion, llamadas, _, _ = _preparar_tick(
+        monkeypatch,
+        {3: _camara(3, "Verduras"), 1: _camara(1), 2: _camara(2, "Lácteos")},
+        reales=frozenset({3}),
+        ticks=frozenset({1}),
+    )
+
+    generadas, saltadas = ejecutar_tick(sesion)
+
+    assert (generadas, saltadas) == (1, [1, 3])
+    assert [datos.camara_id for datos, _ in llamadas] == [2]
+
+
+def test_tick_no_genera_sin_modo_demo(monkeypatch):
+    def no_debe_consultar(*_args: object, **_kwargs: object) -> Any:
+        raise AssertionError("Sin modo demo el tick no debe tocar la base.")
+
+    monkeypatch.setattr(tick, "get_settings", lambda: SimpleNamespace(escala_tiempo=1))
+    monkeypatch.setattr(tick, "_ids_de_camaras", no_debe_consultar)
+    monkeypatch.setattr(tick, "_hay_lectura_reciente", no_debe_consultar)
+    monkeypatch.setattr(tick, "procesar_lectura", no_debe_consultar)
+
+    assert ejecutar_tick(SesionFalsa()) == (0, [])
+
+
+def test_tick_continua_si_falla_una_camara(monkeypatch):
+    sesion, llamadas, _, intentos = _preparar_tick(
+        monkeypatch,
+        {1: _camara(1), 2: _camara(2), 3: _camara(3)},
+        falla_en=frozenset({2}),
+    )
+
+    generadas, saltadas = ejecutar_tick(sesion)
+
+    assert (generadas, saltadas) == (2, [])
+    assert intentos == [1, 2, 3]
+    assert [datos.camara_id for datos, _ in llamadas] == [1, 3]
+    assert sesion.rollbacks == 1
 
 
 def test_tick_arma_la_lectura_con_sensor_cron_humedad_y_rango(monkeypatch):
-    llamadas = _preparar_tick(monkeypatch)
-    sesion = SesionFalsa(camaras=[_camara(1)])
+    sesion, llamadas, _, _ = _preparar_tick(monkeypatch, {1: _camara(1)})
 
     ejecutar_tick(sesion)
 
-    (datos,) = llamadas
+    (datos, camara) = llamadas[0]
+    assert camara.id == 1
     assert datos.sensor_id == SENSOR_CRON
     assert datos.camara_id == 1
     assert datos.ts == AHORA
@@ -182,6 +223,28 @@ def test_tick_arma_la_lectura_con_sensor_cron_humedad_y_rango(monkeypatch):
     assert datos.humedad_pct == 80.0
     assert datos.puerta_abierta is False
     assert 0.0 <= datos.temperatura_c <= 2.0
+
+
+def test_tick_usa_las_ventanas_exactas(monkeypatch):
+    sesion, _, consultas, _ = _preparar_tick(monkeypatch, {1: _camara(1)})
+
+    ejecutar_tick(sesion)
+
+    assert consultas == [
+        (1, AHORA - timedelta(minutes=2), False),
+        (1, AHORA - timedelta(seconds=30), True),
+    ]
+
+
+def test_tick_se_salta_una_camara_inexistente(monkeypatch):
+    sesion, llamadas, _, _ = _preparar_tick(monkeypatch, {1: _camara(1)})
+    monkeypatch.setattr(tick, "_ids_de_camaras", lambda _session: [1, 2])
+
+    generadas, saltadas = ejecutar_tick(sesion)
+
+    assert (generadas, saltadas) == (1, [])
+    assert sesion.locks == [1, 2]
+    assert [datos.camara_id for datos, _ in llamadas] == [1]
 
 
 # --- Router -----------------------------------------------------------------
@@ -260,8 +323,9 @@ def test_post_tick_sin_token_valido_responde_401(monkeypatch, headers):
     assert TOKEN_CRON not in respuesta.json()["detail"]
 
 
-def test_post_tick_sin_cron_token_configurado_responde_401(monkeypatch):
-    monkeypatch.setenv("CRON_TOKEN", "")
+@pytest.mark.parametrize("cron_token", ["", "   "], ids=["vacio", "en-blanco"])
+def test_post_tick_sin_cron_token_configurado_responde_401(monkeypatch, cron_token):
+    monkeypatch.setenv("CRON_TOKEN", cron_token)
     limpiar_cache_settings()
 
     def no_debe_ejecutar(_session: object) -> tuple[int, list[int]]:
@@ -280,3 +344,23 @@ def test_post_tick_sin_cron_token_configurado_responde_401(monkeypatch):
 
     assert respuesta.status_code == 401
     assert respuesta.headers["www-authenticate"] == "Bearer"
+
+
+def test_post_tick_sin_token_registra_el_intento_del_cron(log_stdout):
+    """El 401 debe conservar credencial y sujeto para la regla SIEM."""
+    app = create_app()
+
+    def sesion_falsa():
+        yield None
+
+    app.dependency_overrides[get_db] = sesion_falsa
+
+    with TestClient(app) as cliente:
+        respuesta = cliente.post("/api/simulador/tick")
+
+    assert respuesta.status_code == 401
+    lineas = [json.loads(linea) for linea in log_stdout.getvalue().splitlines() if linea]
+    evento = next(linea for linea in lineas if linea["ruta"] == "/api/simulador/tick")
+    assert evento["credencial"] == "cron"
+    assert evento["sujeto"] == "SIM-CRON"
+    assert evento["status"] == 401

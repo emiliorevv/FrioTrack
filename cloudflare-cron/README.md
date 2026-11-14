@@ -31,4 +31,4 @@ Para ver cada ejecución (y los errores del tick) mientras corre:
 wrangler tail
 ```
 
-El plan Free de Cloudflare incluye 1,440 ejecuciones al día (una por minuto), que es justo lo que consume este cron; no hay cobro por excedente porque no se puede pasar del límite.
+El plan Free de Cloudflare incluye **100,000 solicitudes al día**; este cron consume 1,440 (1.44 %). Al agotar el límite las solicitudes fallan hasta el reinicio del contador, y en Free no hay cobro por excedente.
