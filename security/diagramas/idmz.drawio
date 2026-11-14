@@ -1,0 +1,239 @@
+<mxfile host="app.diagrams.net" modified="2026-11-14T00:00:00.000Z" agent="FrioTrack" version="24.0.0">
+  <diagram id="idmz-zero-trust" name="IDMZ y Zero Trust">
+    <mxGraphModel dx="1600" dy="1000" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="z-ot" value='&lt;b&gt;ZONA OT · Nivel 0–2&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:11px" color="#334155"&gt;Sensores de frío · sin salida directa a Internet&lt;/font&gt;' style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#EAF4FF;strokeColor=#3B82F6;strokeWidth=2;align=left;verticalAlign=top;spacingLeft=20;spacingTop=8;fontFamily=Arial;fontSize=15;fontStyle=1;fontColor=#1E3A8A;" vertex="1" parent="1">
+          <mxGeometry x="40" y="138" width="390" height="398" as="geometry"/>
+        </mxCell>
+        <mxCell id="z-idmz" value='&lt;b&gt;IDMZ · Nivel 3.5&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:11px" color="#334155"&gt;Firewall y proxy de salida&lt;/font&gt;' style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#F59E0B;strokeWidth=2;align=left;verticalAlign=top;spacingLeft=20;spacingTop=8;fontFamily=Arial;fontSize=15;fontStyle=1;fontColor=#92400E;" vertex="1" parent="1">
+          <mxGeometry x="500" y="138" width="280" height="398" as="geometry"/>
+        </mxCell>
+        <mxCell id="z-it" value='&lt;b&gt;IT CORPORATIVA · Nivel 4&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:11px" color="#334155"&gt;Oficina y punto de venta · sin ruta a la OT&lt;/font&gt;' style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#EEF2FF;strokeColor=#6366F1;strokeWidth=2;align=left;verticalAlign=top;spacingLeft=20;spacingTop=8;fontFamily=Arial;fontSize=15;fontStyle=1;fontColor=#3730A3;" vertex="1" parent="1">
+          <mxGeometry x="40" y="580" width="390" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="z-guests" value='&lt;b&gt;INVITADOS · VLAN 30&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:11px" color="#334155"&gt;Wi-Fi de clientes · aislada de todo lo interno&lt;/font&gt;' style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#94A3B8;strokeWidth=2;align=left;verticalAlign=top;spacingLeft=20;spacingTop=8;fontFamily=Arial;fontSize=15;fontStyle=1;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="40" y="770" width="390" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="z-cloud" value='&lt;b&gt;NUBE · Nivel 5&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:11px" color="#334155"&gt;Servicios gestionados · TLS de extremo a extremo&lt;/font&gt;' style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#ECFDF5;strokeColor=#10B981;strokeWidth=2;align=left;verticalAlign=top;spacingLeft=24;spacingTop=8;fontFamily=Arial;fontSize=15;fontStyle=1;fontColor=#065F46;" vertex="1" parent="1">
+          <mxGeometry x="860" y="138" width="700" height="798" as="geometry"/>
+        </mxCell>
+        <mxCell id="vlan10" value="VLAN 10" style="rounded=1;arcSize=50;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#93C5FD;strokeWidth=1;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#1D4ED8;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="340" y="150" width="70" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="vlan15" value="VLAN 15" style="rounded=1;arcSize=50;whiteSpace=wrap;html=1;fillColor=#FFEDD5;strokeColor=#FDBA74;strokeWidth=1;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#9A3412;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="700" y="150" width="60" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="vlan20" value="VLAN 20" style="rounded=1;arcSize=50;whiteSpace=wrap;html=1;fillColor=#E0E7FF;strokeColor=#A5B4FC;strokeWidth=1;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#4338CA;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="340" y="590" width="70" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="vlan30" value="VLAN 30" style="rounded=1;arcSize=50;whiteSpace=wrap;html=1;fillColor=#E2E8F0;strokeColor=#CBD5E1;strokeWidth=1;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#334155;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="340" y="780" width="70" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="ot-sensors" value='&lt;b&gt;&lt;font style="font-size:13px"&gt;Sensores de frío (5 cámaras)&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10.5px" color="#475569"&gt;Temperatura · humedad · puerta · token por sensor&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#60A5FA;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="208" width="350" height="112" as="geometry"/>
+        </mxCell>
+        <mxCell id="ot-gateway" value='&lt;b&gt;&lt;font style="font-size:13px"&gt;Gateway OT&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10.5px" color="#475569"&gt;Nivel 2–3 · VLAN 10&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10.5px" color="#475569"&gt;solo habla con el proxy&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#60A5FA;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="160" y="365" width="190" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="chip-pes" value="Pescado" style="rounded=1;arcSize=20;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#BFDBFE;strokeWidth=1;fontFamily=Arial;fontSize=9.5;fontStyle=1;fontColor=#1E40AF;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="74" y="264" width="58" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="chip-car" value="Carnes" style="rounded=1;arcSize=20;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#BFDBFE;strokeWidth=1;fontFamily=Arial;fontSize=9.5;fontStyle=1;fontColor=#1E40AF;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="140" y="264" width="58" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="chip-lac" value="Lácteos" style="rounded=1;arcSize=20;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#BFDBFE;strokeWidth=1;fontFamily=Arial;fontSize=9.5;fontStyle=1;fontColor=#1E40AF;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="206" y="264" width="58" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="chip-ver" value="Verduras" style="rounded=1;arcSize=20;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#BFDBFE;strokeWidth=1;fontFamily=Arial;fontSize=9.5;fontStyle=1;fontColor=#1E40AF;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="272" y="264" width="58" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="chip-con" value="Congel." style="rounded=1;arcSize=20;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#BFDBFE;strokeWidth=1;fontFamily=Arial;fontSize=9.5;fontStyle=1;fontColor=#1E40AF;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="338" y="264" width="58" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="idmz-box" value='&lt;b&gt;&lt;font style="font-size:13px"&gt;Firewall + proxy de salida&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;niega todo por omisión&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;443 TLS · salida única&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;solo POST /api/telemetria&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;token por sensor&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;registra en logs_acceso&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#F59E0B;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="530" y="250" width="220" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="it-pc" value='&lt;b&gt;&lt;font style="font-size:12px"&gt;PC del gerente&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;JWT de usuario&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#818CF8;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="62" y="646" width="175" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="it-pos" value='&lt;b&gt;&lt;font style="font-size:12px"&gt;Punto de venta (POS)&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;red separada de OT&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#818CF8;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="249" y="646" width="175" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="guests-box" value='&lt;b&gt;&lt;font style="font-size:12px"&gt;SSID separado · aislamiento de clientes&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;sin rutas hacia OT, IT ni la nube interna&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CBD5E1;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="62" y="836" width="362" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="api" value='&lt;b&gt;&lt;font style="font-size:13px"&gt;API FastAPI — Render&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;ingesta y reglas ERP&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;valida token de sensor y JWT&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;escribe logs_acceso (SIEM)&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;SSE /api/stream&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#34D399;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="900" y="230" width="260" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="supabase" value='&lt;b&gt;&lt;font style="font-size:13px"&gt;Supabase Postgres&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;5432 TLS&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;logs_acceso · lecturas&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;alertas · IPS · inventario&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#34D399;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="200" width="260" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="twilio" value='&lt;b&gt;&lt;font style="font-size:13px"&gt;Twilio&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;SMS al jefe de cocina&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;443 TLS&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#34D399;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="360" width="260" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="dashboard" value='&lt;b&gt;&lt;font style="font-size:13px"&gt;Dashboard — Vercel&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;React + SSE · responsivo&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;consulta con JWT&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;KPIs, alertas y mermas&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#34D399;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="900" y="520" width="260" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="device" value='&lt;b&gt;&lt;font style="font-size:13px"&gt;Celular / PC del equipo&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;navegador del gerente&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;y del jefe de cocina&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;JWT de usuario&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#34D399;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="520" width="260" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="worker" value='&lt;b&gt;&lt;font style="font-size:13px"&gt;Cloudflare Worker&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;Cron Trigger cada minuto&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;POST /api/simulador/tick&lt;/font&gt;&lt;br&gt;&lt;font style="font-size:10px" color="#475569"&gt;mantiene viva la API&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#34D399;strokeWidth=1.5;fontFamily=Arial;verticalAlign=middle;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="900" y="740" width="260" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="internet" value='&lt;b&gt;&lt;font style="font-size:15px"&gt;Internet&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:9.5px" color="#475569"&gt;solo salida de invitados&lt;/font&gt;' style="shape=cloud;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#94A3B8;strokeWidth=1.5;fontFamily=Arial;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="540" y="790" width="190" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="zt-panel" value='&lt;b&gt;&lt;font style="font-size:12px"&gt;Controles Zero Trust&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style="font-size:9.5px" color="#334155"&gt;•&amp;nbsp; token de sensor: solo su cámara&lt;br&gt;•&amp;nbsp; CRON_TOKEN: solo /simulador/tick&lt;br&gt;•&amp;nbsp; JWT de usuario: lectura y alertas&lt;br&gt;•&amp;nbsp; TLS en todos los saltos externos&lt;br&gt;•&amp;nbsp; cada petición queda en logs_acceso&lt;/font&gt;' style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#F0FDF4;strokeColor=#86EFAC;strokeWidth=1.2;fontFamily=Arial;align=left;verticalAlign=top;spacingLeft=14;spacingTop=12;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="690" width="260" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend" value="" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CBD5E1;strokeWidth=1.2;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="20" width="520" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend-ok" value="" style="html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=block;endFill=1;endSize=6;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1058" y="48" as="sourcePoint"/>
+            <mxPoint x="1097" y="48" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="legend-deny" value="" style="html=1;strokeColor=#DC2626;strokeWidth=2.5;dashed=1;dashPattern=6 4;endArrow=block;endFill=1;endSize=6;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1058" y="74" as="sourcePoint"/>
+            <mxPoint x="1097" y="74" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="legend-ok-t" value="Flujo permitido" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="1107" y="38" width="130" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend-deny-t" value="Flujo denegado" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="1107" y="64" width="130" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend-div" value="" style="html=1;strokeColor=#E2E8F0;strokeWidth=1;endArrow=none;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1252" y="32" as="sourcePoint"/>
+            <mxPoint x="1252" y="86" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="legend-zt" value="ZERO TRUST" style="rounded=1;arcSize=50;whiteSpace=wrap;html=1;fillColor=#ECFDF5;strokeColor=#34D399;strokeWidth=1;fontFamily=Arial;fontSize=8.5;fontStyle=1;fontColor=#047857;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1270" y="36" width="74" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend-zt-t" value="mínimo privilegio" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="1355" y="38" width="160" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend-tls" value="TLS en cada salto externo" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="1270" y="68" width="270" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="title" value="FríoTrack — Segmentación IDMZ y Zero Trust" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=30;fontStyle=1;fontColor=#0F172A;" vertex="1" parent="1">
+          <mxGeometry x="48" y="30" width="950" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="subtitle" value="Modelo Purdue / ISA-95 · VLANs, puertos y flujos mínimos (ADR-0006)" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=14;fontColor=#475569;" vertex="1" parent="1">
+          <mxGeometry x="48" y="68" width="900" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="sensors-local" value="local (Modbus/serial)&lt;br&gt;o HTTP interno" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontColor=#475569;" vertex="1" parent="1">
+          <mxGeometry x="247" y="324" width="200" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-gw-proxy" value="443" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontStyle=1;fontColor=#0F766E;align=center;" vertex="1" parent="1">
+          <mxGeometry x="450" y="381" width="30" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-proxy-api" value="443 TLS" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontStyle=1;fontColor=#0F766E;align=center;" vertex="1" parent="1">
+          <mxGeometry x="782" y="255" width="60" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-guests" value="80/443" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10;fontStyle=1;fontColor=#475569;align=center;" vertex="1" parent="1">
+          <mxGeometry x="457" y="828" width="60" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-api-supabase" value="5432 TLS" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontStyle=1;fontColor=#0F766E;align=center;" vertex="1" parent="1">
+          <mxGeometry x="1172" y="224" width="56" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-api-twilio" value="443" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontStyle=1;fontColor=#0F766E;" vertex="1" parent="1">
+          <mxGeometry x="1211" y="358" width="30" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-device-dash" value="443 · JWT" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontStyle=1;fontColor=#0F766E;align=center;" vertex="1" parent="1">
+          <mxGeometry x="1168" y="544" width="64" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-dash-api" value="443 · JWT" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontStyle=1;fontColor=#0F766E;" vertex="1" parent="1">
+          <mxGeometry x="1044" y="426" width="70" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-worker-api" value="443 · POST /api/simulador/tick" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10;fontStyle=1;fontColor=#0F766E;" vertex="1" parent="1">
+          <mxGeometry x="888" y="688" width="200" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-it-ot" value="IT → OT" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10;fontStyle=1;fontColor=#DC2626;align=right;" vertex="1" parent="1">
+          <mxGeometry x="165" y="551" width="54" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-denegado" value="DENEGADO" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#DC2626;" vertex="1" parent="1">
+          <mxGeometry x="253" y="549" width="100" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="deny-x" value="✕" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#DC2626;align=center;" vertex="1" parent="1">
+          <mxGeometry x="222" y="544" width="26" height="26" as="geometry"/>
+        </mxCell>
+        <mxCell id="idmz-note" value="Único punto de salida de la OT&lt;br&gt;cualquier otro flujo se niega" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontColor=#92400E;" vertex="1" parent="1">
+          <mxGeometry x="520" y="458" width="230" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="footer" value="Purdue/ISA-95: OT 0–2 · Gateway 2–3 · IDMZ 3.5 · IT 4 · Nube 5. Zero Trust: identidad por dispositivo, mínimo privilegio y TLS en cada salto externo." style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10.5;fontColor=#64748B;" vertex="1" parent="1">
+          <mxGeometry x="40" y="965" width="1200" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="footer-right" value="FríoTrack · ADR-0006 / ADR-0007" style="text;html=1;whiteSpace=wrap;fontFamily=Arial;align=left;verticalAlign=middle;fontSize=10;fontColor=#94A3B8;align=right;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="965" width="160" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-sensors-gateway" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=block;endFill=1;endSize=6;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#0F766E;labelBackgroundColor=#F8FAFC;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="ot-sensors" target="ot-gateway">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-gateway-proxy" value="443" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=block;endFill=1;endSize=6;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#0F766E;labelBackgroundColor=#F8FAFC;exitX=1;exitY=0.5;entryX=0;entryY=0.861;" edge="1" parent="1" source="ot-gateway" target="idmz-box">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-proxy-api" value="443 TLS" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=block;endFill=1;endSize=6;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#0F766E;labelBackgroundColor=#F8FAFC;exitX=1;exitY=0.444;entryX=0;entryY=0.455;" edge="1" parent="1" source="idmz-box" target="api">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="820" y="330"/>
+              <mxPoint x="820" y="280"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-guests-internet" value="80/443" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=block;endFill=1;endSize=6;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#0F766E;labelBackgroundColor=#F8FAFC;exitX=1;exitY=0.267;entryX=0;entryY=0.564;" edge="1" parent="1" source="guests-box" target="internet">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-api-supabase" value="5432 TLS" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=block;endFill=1;endSize=6;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#0F766E;labelBackgroundColor=#F8FAFC;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="api" target="supabase">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1200" y="285"/>
+              <mxPoint x="1200" y="250"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-api-twilio" value="443" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=block;endFill=1;endSize=6;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#0F766E;labelBackgroundColor=#F8FAFC;exitX=1;exitY=0.818;entryX=0;entryY=0.5;" edge="1" parent="1" source="api" target="twilio">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1200" y="320"/>
+              <mxPoint x="1200" y="405"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-device-dashboard" value="443 · JWT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=block;endFill=1;endSize=6;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#0F766E;labelBackgroundColor=#F8FAFC;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="device" target="dashboard">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-dashboard-api" value="443 · JWT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=block;endFill=1;endSize=6;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#0F766E;labelBackgroundColor=#F8FAFC;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="dashboard" target="api">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-worker-api" value="443 · POST /api/simulador/tick" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=block;endFill=1;endSize=6;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#0F766E;labelBackgroundColor=#F8FAFC;exitX=0;exitY=0.5;entryX=0;entryY=0.818;" edge="1" parent="1" source="worker" target="api">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="875" y="790"/>
+              <mxPoint x="875" y="320"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-deny" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#DC2626;strokeWidth=2.5;dashed=1;dashPattern=8 6;endArrow=block;endFill=1;endSize=6;fontFamily=Arial;fontSize=10;fontStyle=1;fontColor=#DC2626;labelBackgroundColor=#F8FAFC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="235" y="578" as="sourcePoint"/>
+            <mxPoint x="235" y="538" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
