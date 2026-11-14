@@ -840,6 +840,46 @@
   transform: scale(0.98);
 }
 
+.retry-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.retry-button--sm {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 5px 12px;
+  font-size: 0.72rem;
+}
+
+.refresh-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 12px;
+  padding: 10px 12px;
+  border: 1px solid #e4cba8;
+  border-radius: 12px;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+
+.refresh-error__body {
+  min-width: 0;
+}
+
+.refresh-error p {
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.refresh-error__detail {
+  margin-top: 2px;
+  font-size: 0.7rem;
+  opacity: 0.85;
+}
+
 /* ------------------------------------------------------------------ */
 /* Seguridad                                                           */
 /* ------------------------------------------------------------------ */

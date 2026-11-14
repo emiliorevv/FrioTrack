@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   obtenerCamaras,
   obtenerHealth,
@@ -7,6 +7,7 @@ import {
   obtenerLecturas,
 } from './api/client'
 import App from './App'
+import { useStreamEvent } from './realtime/StreamProvider'
 import type { Camara, Kpis, Lectura } from './types'
 
 vi.mock('./api/client', () => ({
@@ -15,6 +16,14 @@ vi.mock('./api/client', () => ({
   obtenerKpis: vi.fn(),
   obtenerLecturas: vi.fn(),
 }))
+
+vi.mock('./realtime/StreamProvider', () => ({
+  useStreamEvent: vi.fn(),
+}))
+
+type Oyente = (evento: MessageEvent<string>) => void
+
+const oyentes = new Map<string, Oyente>()
 
 const kpis: Kpis = {
   pct_tiempo_en_rango_24h: 97.3,
@@ -127,11 +136,20 @@ function crearSerie(camaraId: number): Lectura[] {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
+  oyentes.clear()
   window.localStorage.clear()
+  vi.mocked(useStreamEvent).mockImplementation((evento, oyente) => {
+    oyentes.set(evento, oyente)
+  })
   vi.mocked(obtenerHealth).mockResolvedValue({ ok: true, escala_tiempo: 30 })
   vi.mocked(obtenerCamaras).mockResolvedValue(crearCamaras())
   vi.mocked(obtenerKpis).mockResolvedValue(kpis)
   vi.mocked(obtenerLecturas).mockImplementation(async (id) => crearSerie(id))
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('vista general', () => {
@@ -257,9 +275,12 @@ describe('vista general', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'Cargando datos del dashboard',
     )
+    expect(screen.getByText('Sin datos')).toBeInTheDocument()
+    expect(screen.queryByText(/Actualizado hace/)).not.toBeInTheDocument()
+    expect(screen.getByText('Conectando · FríoTrack')).toBeInTheDocument()
   })
 
-  it('muestra el error y lo resuelve al pulsar Reintentar', async () => {
+  it('muestra el error, deshabilita Reintentar mientras reintenta y luego pinta los datos', async () => {
     vi.mocked(obtenerCamaras).mockRejectedValueOnce(
       new Error('La API no responde'),
     )
@@ -269,10 +290,62 @@ describe('vista general', () => {
     const alerta = await screen.findByRole('alert')
     expect(alerta).toHaveTextContent('No se pudo cargar el dashboard')
     expect(alerta).toHaveTextContent('La API no responde')
+    expect(screen.getByText('Sin datos')).toBeInTheDocument()
+    expect(screen.getByText('Sin conexión · FríoTrack')).toBeInTheDocument()
+
+    let resolver!: (camaras: Camara[]) => void
+    vi.mocked(obtenerCamaras).mockReturnValueOnce(
+      new Promise<Camara[]>((resolverCamaras) => {
+        resolver = resolverCamaras
+      }),
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }))
 
+    const reintentando = screen.getByRole('button', {
+      name: 'Reintentando…',
+    })
+    expect(reintentando).toBeDisabled()
+    expect(reintentando).toHaveAttribute('aria-busy', 'true')
+
+    await act(async () => {
+      resolver(crearCamaras())
+    })
+
     expect(await screen.findAllByRole('article')).toHaveLength(5)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('avisa de un refresco fallido sin ocultar los datos', async () => {
+    render(<App />)
+    await screen.findAllByRole('article')
+    expect(screen.getByText('Datos en vivo · FríoTrack')).toBeInTheDocument()
+
+    vi.mocked(obtenerCamaras).mockRejectedValueOnce(new Error('sin red'))
+    vi.useFakeTimers()
+
+    act(() => {
+      oyentes.get('alerta_abierta')?.(
+        new MessageEvent('alerta_abierta', { data: '{"id":1}' }),
+      )
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(screen.getAllByRole('article')).toHaveLength(5)
+    expect(
+      screen.getByText(/No se pudo actualizar; mostrando datos de/),
+    ).toBeInTheDocument()
+    expect(screen.getByText('sin red')).toBeInTheDocument()
+    expect(
+      screen.getByText('Datos desactualizados · FríoTrack'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('Datos en vivo · FríoTrack'),
+    ).not.toBeInTheDocument()
   })
 })

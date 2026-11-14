@@ -5,6 +5,7 @@ import {
   obtenerKpis,
   obtenerLecturas,
 } from '../api/client'
+import { esObjeto, parsearJson } from '../lib/sse'
 import { useStreamEvent } from '../realtime/StreamProvider'
 import type {
   Camara,
@@ -15,7 +16,7 @@ import type {
   SerieCamara,
 } from '../types'
 
-/** Respaldo por si el SSE se cae: vuelve a preguntar toda la base. */
+/** Respaldo por si el SSE se cae: vuelve a preguntar cámaras y KPIs. */
 export const INTERVALO_REFRESCO_MS = 60_000
 /** Debounce de los eventos que no traen el valor en riesgo actualizado. */
 export const RETRASO_RESUMEN_MS = 500
@@ -40,6 +41,9 @@ export interface EstadoDashboard {
 /**
  * Une la carga inicial de la API, el respaldo por polling y el stream SSE.
  * `StreamProvider` reparte los eventos; aquí solo se interpretan.
+ *
+ * Cada solicitud HTTP aborta la anterior y lleva un id: una respuesta vieja
+ * que resuelve tarde no puede pisar a la más reciente ni a un evento SSE.
  */
 export function useDashboard(): EstadoDashboard {
   const [health, setHealth] = useState<Health | null>(null)
@@ -52,23 +56,107 @@ export function useDashboard(): EstadoDashboard {
 
   const activoRef = useRef(false)
   const hayDatosRef = useRef(false)
+  const seriesCargadasRef = useRef(false)
+  const healthRef = useRef<Health | null>(null)
+  const healthIntentadoRef = useRef(false)
+  const controladorRef = useRef<AbortController | null>(null)
+  const solicitudRef = useRef(0)
   const timerResumenRef = useRef<number | null>(null)
 
-  const refrescar = useCallback(async () => {
-    const primera = !hayDatosRef.current
+  const iniciarSolicitud = useCallback(() => {
+    controladorRef.current?.abort()
+    const controlador = new AbortController()
+    controladorRef.current = controlador
+    solicitudRef.current += 1
+    return { id: solicitudRef.current, signal: controlador.signal }
+  }, [])
+
+  /**
+   * `manual` permite reintentar `/health` si la carga inicial no lo obtuvo.
+   * El polling no lo repite: `escala_tiempo` es estático.
+   */
+  const ejecutarRefresco = useCallback(
+    async (manual: boolean) => {
+      const { id, signal } = iniciarSolicitud()
+      const primera = !hayDatosRef.current
+      const incluirSeries = !seriesCargadasRef.current
+      const pedirHealth =
+        healthRef.current === null && (manual || !healthIntentadoRef.current)
+
+      if (pedirHealth) {
+        healthIntentadoRef.current = true
+        // `/health` solo controla la etiqueta de demo: si falla o tarda, las
+        // cámaras y los KPIs se muestran igual.
+        void obtenerHealth(signal)
+          .then((salud) => {
+            if (!activoRef.current || solicitudRef.current !== id) {
+              return
+            }
+            healthRef.current = salud
+            setHealth(salud)
+          })
+          .catch(() => {
+            // Opcional para el dashboard; se reintenta en un refresco manual.
+          })
+      }
+
+      try {
+        const [lista, kpisNuevos] = await Promise.all([
+          obtenerCamaras(signal),
+          obtenerKpis(signal),
+        ])
+        if (!activoRef.current || solicitudRef.current !== id) {
+          return
+        }
+
+        setCamaras((actuales) => fusionarCamaras(actuales, lista))
+        setKpis(kpisNuevos)
+        setActualizadoEn(new Date())
+        setError(null)
+        hayDatosRef.current = true
+        if (primera) {
+          setCargando(false)
+        }
+
+        if (incluirSeries) {
+          const seriesNuevas = await cargarSeries(lista, signal)
+          if (!activoRef.current || solicitudRef.current !== id) {
+            return
+          }
+          setSeries(seriesNuevas)
+          seriesCargadasRef.current = true
+        }
+      } catch (fallo) {
+        if (!activoRef.current || solicitudRef.current !== id) {
+          return
+        }
+        if (esAbortado(fallo)) {
+          return
+        }
+        setError(mensajeDeError(fallo))
+      } finally {
+        if (activoRef.current && solicitudRef.current === id && primera) {
+          setCargando(false)
+        }
+      }
+    },
+    [iniciarSolicitud],
+  )
+
+  const refrescarResumen = useCallback(async () => {
+    const { id, signal } = iniciarSolicitud()
 
     try {
-      const [salud, lista, kpisNuevos] = await Promise.all([
-        obtenerHealth(),
-        obtenerCamaras(),
-        obtenerKpis(),
+      const [lista, kpisNuevos] = await Promise.all([
+        obtenerCamaras(signal),
+        obtenerKpis(signal),
       ])
-      if (!activoRef.current) {
+      if (!activoRef.current || solicitudRef.current !== id) {
         return
       }
 
-      setHealth(salud)
-      setCamaras(lista)
+      const primera = !hayDatosRef.current
+      setCamaras((actuales) => fusionarCamaras(actuales, lista))
       setKpis(kpisNuevos)
       setActualizadoEn(new Date())
       setError(null)
@@ -76,40 +164,19 @@ export function useDashboard(): EstadoDashboard {
       if (primera) {
         setCargando(false)
       }
-
-      const seriesNuevas = await cargarSeries(lista)
-      if (activoRef.current) {
-        setSeries(seriesNuevas)
-      }
     } catch (fallo) {
-      if (activoRef.current) {
-        setError(mensajeDeError(fallo))
-      }
-    } finally {
-      if (activoRef.current && primera) {
-        setCargando(false)
-      }
-    }
-  }, [])
-
-  const refrescarResumen = useCallback(async () => {
-    try {
-      const [lista, kpisNuevos] = await Promise.all([
-        obtenerCamaras(),
-        obtenerKpis(),
-      ])
-      if (!activoRef.current) {
+      if (!activoRef.current || solicitudRef.current !== id) {
         return
       }
-
-      setCamaras(lista)
-      setKpis(kpisNuevos)
-      setActualizadoEn(new Date())
-      setError(null)
-    } catch {
-      // Se conserva lo que ya está en pantalla; el polling de respaldo reintenta.
+      if (!hayDatosRef.current) {
+        setCargando(false)
+      }
+      if (esAbortado(fallo)) {
+        return
+      }
+      setError(mensajeDeError(fallo))
     }
-  }, [])
+  }, [iniciarSolicitud])
 
   const programarRefrescoResumen = useCallback(() => {
     if (timerResumenRef.current !== null) {
@@ -123,23 +190,24 @@ export function useDashboard(): EstadoDashboard {
 
   useEffect(() => {
     activoRef.current = true
-    // La carga debe arrancar al montar; los setState de `refrescar` ocurren
-    // después del primer await, cuando ya hay respuesta de la API.
+    // La carga debe arrancar al montar; los setState de `ejecutarRefresco`
+    // ocurren después del primer await, cuando ya hay respuesta de la API.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refrescar()
+    void ejecutarRefresco(true)
     const intervalo = window.setInterval(() => {
-      void refrescar()
+      void ejecutarRefresco(false)
     }, INTERVALO_REFRESCO_MS)
 
     return () => {
       activoRef.current = false
+      controladorRef.current?.abort()
       window.clearInterval(intervalo)
       if (timerResumenRef.current !== null) {
         window.clearTimeout(timerResumenRef.current)
         timerResumenRef.current = null
       }
     }
-  }, [refrescar])
+  }, [ejecutarRefresco])
 
   const alRecibirLectura = useCallback((evento: MessageEvent<string>) => {
     const lectura = leerLectura(evento.data)
@@ -191,6 +259,13 @@ export function useDashboard(): EstadoDashboard {
   useStreamEvent('alerta_cerrada', programarRefrescoResumen)
   useStreamEvent('lote_actualizado', programarRefrescoResumen)
 
+  const refrescar = useCallback(async () => {
+    if (!hayDatosRef.current) {
+      setCargando(true)
+    }
+    await ejecutarRefresco(true)
+  }, [ejecutarRefresco])
+
   return {
     health,
     camaras,
@@ -203,12 +278,48 @@ export function useDashboard(): EstadoDashboard {
   }
 }
 
+/**
+ * Conserva la lectura y el estado más nuevos cuando el SSE adelantó al HTTP.
+ * `valor_en_riesgo_mxn` siempre viene de la API: es el resumen autoritativo
+ * después de alertas y cambios de lote.
+ */
+export function fusionarCamaras(
+  actuales: Camara[],
+  nuevas: Camara[],
+): Camara[] {
+  const porId = new Map(actuales.map((camara) => [camara.id, camara]))
+
+  return nuevas.map((nueva) => {
+    const actual = porId.get(nueva.id)
+    const lecturaActual = actual?.ultima_lectura
+    if (!actual || !lecturaActual) {
+      return nueva
+    }
+
+    const lecturaNueva = nueva.ultima_lectura
+    const actualEsMasNueva =
+      !lecturaNueva ||
+      new Date(lecturaActual.ts).getTime() > new Date(lecturaNueva.ts).getTime()
+
+    if (!actualEsMasNueva) {
+      return nueva
+    }
+
+    return {
+      ...nueva,
+      estado: actual.estado,
+      ultima_lectura: lecturaActual,
+    }
+  })
+}
+
 /** Una serie fallida no tumba la carga: esa cámara queda sin sparkline. */
 async function cargarSeries(
   camaras: Camara[],
+  signal: AbortSignal,
 ): Promise<Record<number, SerieCamara>> {
   const resultados = await Promise.allSettled(
-    camaras.map((camara) => obtenerLecturas(camara.id)),
+    camaras.map((camara) => obtenerLecturas(camara.id, signal)),
   )
   const series: Record<number, SerieCamara> = {}
 
@@ -224,6 +335,15 @@ async function cargarSeries(
   return series
 }
 
+function esAbortado(fallo: unknown): boolean {
+  return (
+    typeof fallo === 'object' &&
+    fallo !== null &&
+    'name' in fallo &&
+    fallo.name === 'AbortError'
+  )
+}
+
 function mensajeDeError(fallo: unknown): string {
   if (fallo instanceof Error && fallo.message) {
     return fallo.message
@@ -231,24 +351,12 @@ function mensajeDeError(fallo: unknown): string {
   return 'No se pudo conectar con la API de FríoTrack.'
 }
 
-function esObjeto(valor: unknown): valor is Record<string, unknown> {
-  return typeof valor === 'object' && valor !== null
-}
-
-function leerJson(texto: string): unknown {
-  try {
-    return JSON.parse(texto)
-  } catch {
-    return null
-  }
-}
-
 function esEstado(valor: unknown): valor is EstadoCamara {
   return valor === 'en_rango' || valor === 'alerta' || valor === 'critica'
 }
 
 function leerLectura(texto: string): LecturaStream | null {
-  const datos = leerJson(texto)
+  const datos = parsearJson(texto)
   if (!esObjeto(datos)) {
     return null
   }
@@ -300,6 +408,6 @@ function esKpis(valor: unknown): valor is Kpis {
 }
 
 function leerKpis(texto: string): Kpis | null {
-  const datos = leerJson(texto)
+  const datos = parsearJson(texto)
   return esKpis(datos) ? datos : null
 }

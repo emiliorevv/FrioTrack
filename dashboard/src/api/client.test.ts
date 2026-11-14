@@ -5,6 +5,7 @@ import {
   obtenerHealth,
   obtenerKpis,
   obtenerLecturas,
+  pedir,
 } from './client'
 import { resolverApiUrl } from './url'
 
@@ -56,10 +57,43 @@ describe('pedir', () => {
     expect(fetchFalso).toHaveBeenCalledWith(
       `${BASE}/camaras`,
       expect.objectContaining({
-        headers: expect.objectContaining({ Accept: 'application/json' }),
+        headers: expect.any(Headers),
         signal: expect.any(AbortSignal),
       }),
     )
+    const [, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(new Headers(init.headers).get('Accept')).toBe('application/json')
+  })
+
+  it('fusiona los headers del llamador sin perder los suyos', async () => {
+    fetchFalso.mockResolvedValue(respuesta({}))
+
+    await pedir('/prueba', {
+      headers: new Headers({ 'X-Prueba': '1' }),
+    })
+
+    const [, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    const headers = new Headers(init.headers)
+    expect(headers.get('X-Prueba')).toBe('1')
+    expect(headers.get('Accept')).toBe('application/json')
+  })
+
+  it('respeta la señal del llamador', async () => {
+    const controlador = new AbortController()
+    fetchFalso.mockImplementation((_url: string, init?: RequestInit) => {
+      return new Promise((_resolver, rechazar) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => rechazar(new DOMException('abortado', 'AbortError')),
+          { once: true },
+        )
+      })
+    })
+
+    const peticion = obtenerCamaras(controlador.signal)
+    controlador.abort()
+
+    await expect(peticion).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('arma la ruta de lecturas con el id de la cámara', async () => {

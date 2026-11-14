@@ -36,9 +36,11 @@ async function leerDetalle(respuesta: Response): Promise<string> {
 
 /**
  * Petición JSON con la misma base que el stream SSE.
- * El `signal` corta la petición si la API no contesta en 10 s.
+ *
+ * Respeta la señal del llamador y la combina con un timeout de 10 s, así
+ * `AbortController` puede cancelar un refresco superado sin perder el límite.
  */
-async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
+export async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
   const base = resolverApiUrl()
   if (!base) {
     throw new Error(
@@ -46,15 +48,19 @@ async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
     )
   }
 
+  const headers = new Headers(init?.headers)
+  headers.set('Accept', 'application/json')
+
+  const senal = init?.signal
+    ? AbortSignal.any([init.signal, AbortSignal.timeout(TIEMPO_LIMITE_MS)])
+    : AbortSignal.timeout(TIEMPO_LIMITE_MS)
+
   let respuesta: Response
   try {
     respuesta = await fetch(`${base}${ruta}`, {
       ...init,
-      headers: {
-        Accept: 'application/json',
-        ...init?.headers,
-      },
-      signal: AbortSignal.timeout(TIEMPO_LIMITE_MS),
+      headers,
+      signal: senal,
     })
   } catch (error) {
     if (esTimeout(error)) {
@@ -72,20 +78,23 @@ async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
   return (await respuesta.json()) as T
 }
 
-export function obtenerHealth(): Promise<Health> {
-  return pedir<Health>('/health')
+export function obtenerHealth(senal?: AbortSignal): Promise<Health> {
+  return pedir<Health>('/health', { signal: senal })
 }
 
-export function obtenerCamaras(): Promise<Camara[]> {
-  return pedir<Camara[]>('/camaras')
+export function obtenerCamaras(senal?: AbortSignal): Promise<Camara[]> {
+  return pedir<Camara[]>('/camaras', { signal: senal })
 }
 
-export function obtenerKpis(): Promise<Kpis> {
-  return pedir<Kpis>('/kpis')
+export function obtenerKpis(senal?: AbortSignal): Promise<Kpis> {
+  return pedir<Kpis>('/kpis', { signal: senal })
 }
 
-export function obtenerLecturas(camaraId: number): Promise<Lectura[]> {
-  return pedir<Lectura[]>(`/camaras/${camaraId}/lecturas`)
+export function obtenerLecturas(
+  camaraId: number,
+  senal?: AbortSignal,
+): Promise<Lectura[]> {
+  return pedir<Lectura[]>(`/camaras/${camaraId}/lecturas`, { signal: senal })
 }
 
 /** El `AbortSignal.timeout` rechaza con un DOMException llamado TimeoutError. */

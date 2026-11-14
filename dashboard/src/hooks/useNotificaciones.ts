@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import { esObjeto, parsearJson } from '../lib/sse'
 import { useStreamEvent } from '../realtime/StreamProvider'
 import { TIPOS_NOTIFICACION, type Notificacion } from '../types'
 
@@ -50,21 +51,15 @@ export function useNotificaciones() {
 }
 
 function leerNotificacion(texto: string): Notificacion | null {
-  let datos: unknown
-  try {
-    datos = JSON.parse(texto)
-  } catch {
-    return null
-  }
+  const datos = parsearJson(texto)
   return esNotificacion(datos) ? datos : null
 }
 
 function esNotificacion(valor: unknown): valor is Notificacion {
-  if (typeof valor !== 'object' || valor === null) {
+  if (!esObjeto(valor)) {
     return false
   }
-  const datos = valor as Record<string, unknown>
-  const { mensaje, camara_id: camaraId, ts, tipo } = datos
+  const { mensaje, camara_id: camaraId, ts, tipo } = valor
   return (
     typeof mensaje === 'string' &&
     typeof camaraId === 'number' &&

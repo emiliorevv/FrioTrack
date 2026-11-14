@@ -7,11 +7,15 @@ import { KpiStrip } from './components/KpiStrip'
 import { NotificationToast } from './components/NotificationToast'
 import { OnboardingBanner } from './components/OnboardingBanner'
 import { SecurityPanel } from './components/SecurityPanel'
+import { TiempoRelativo } from './components/TiempoRelativo'
 import { alertasSeguridad } from './data/mock'
 import { useDashboard } from './hooks/useDashboard'
 import { useNotificaciones } from './hooks/useNotificaciones'
 import { useReloj } from './hooks/useReloj'
 import type { FiltroCamaras } from './types'
+
+/** Pasado este tiempo sin datos nuevos, el pie deja de decir "en vivo". */
+const UMBRAL_DATOS_VIEJOS_MS = 90_000
 
 function normalizar(texto: string): string {
   return texto
@@ -34,7 +38,6 @@ function App() {
     actualizadoEn,
     refrescar,
   } = useDashboard()
-  const ahora = useReloj()
 
   const consulta = normalizar(busqueda.trim())
   const camarasFiltradas = camaras.filter((camara) => {
@@ -52,12 +55,6 @@ function App() {
 
   const equiposEnAlerta = conteos.alerta + conteos.critica
   const sinDatos = camaras.length === 0 && kpis === null
-  const actualizadoHaceSegundos = actualizadoEn
-    ? Math.max(
-        0,
-        Math.floor((ahora.getTime() - actualizadoEn.getTime()) / 1000),
-      )
-    : 0
 
   return (
     <div className="app">
@@ -66,27 +63,52 @@ function App() {
       </a>
 
       <Header
-        actualizadoHaceSegundos={actualizadoHaceSegundos}
+        actualizadoEn={actualizadoEn}
         escalaTiempo={health?.escala_tiempo}
       />
 
       <main id="contenido" className="app-main" tabIndex={-1}>
-        {cargando && sinDatos ? (
-          <EsqueletoDashboard />
-        ) : error && sinDatos ? (
+        {error && sinDatos ? (
           <section className="error-panel" role="alert">
             <h2>No se pudo cargar el dashboard</h2>
             <p>{error}</p>
             <button
               type="button"
               className="retry-button"
+              disabled={cargando}
+              aria-busy={cargando}
               onClick={() => void refrescar()}
             >
-              Reintentar
+              {cargando ? 'Reintentando…' : 'Reintentar'}
             </button>
           </section>
+        ) : cargando && sinDatos ? (
+          <EsqueletoDashboard />
         ) : (
           <>
+            {error && (
+              <section className="refresh-error" role="status">
+                <div className="refresh-error__body">
+                  {actualizadoEn ? (
+                    <p>
+                      No se pudo actualizar; mostrando datos de{' '}
+                      <TiempoRelativo ts={actualizadoEn.toISOString()} />.
+                    </p>
+                  ) : (
+                    <p>No se pudo actualizar.</p>
+                  )}
+                  <p className="refresh-error__detail">{error}</p>
+                </div>
+                <button
+                  type="button"
+                  className="retry-button retry-button--sm"
+                  onClick={() => void refrescar()}
+                >
+                  Reintentar
+                </button>
+              </section>
+            )}
+
             <OnboardingBanner />
 
             <section className="section" aria-labelledby="resumen-title">
@@ -125,7 +147,6 @@ function App() {
                       key={camara.id}
                       camara={camara}
                       serie={series[camara.id] ?? []}
-                      ahora={ahora}
                     />
                   ))}
                 </div>
@@ -140,17 +161,13 @@ function App() {
 
             <SecurityPanel
               alertas={alertasSeguridad}
-              ahora={ahora}
               nota="Datos de ejemplo: el detector SIEM todavía no está conectado."
             />
           </>
         )}
       </main>
 
-      <footer className="site-footer">
-        <p>Datos en vivo · FríoTrack</p>
-        {actualizadoEn && <p>Actualizado hace {actualizadoHaceSegundos} s</p>}
-      </footer>
+      <PieEstado actualizadoEn={actualizadoEn} error={error} />
 
       {notificacion && (
         <NotificationToast
@@ -160,6 +177,44 @@ function App() {
         />
       )}
     </div>
+  )
+}
+
+/**
+ * El reloj del pie vive aquí y no en `App`: los segundos no re-renderizan el
+ * dashboard completo.
+ */
+function PieEstado({
+  actualizadoEn,
+  error,
+}: {
+  actualizadoEn: Date | null
+  error: string | null
+}) {
+  const ahora = useReloj()
+  const segundos = actualizadoEn
+    ? Math.max(
+        0,
+        Math.floor((ahora.getTime() - actualizadoEn.getTime()) / 1000),
+      )
+    : null
+  const viejos = segundos !== null && segundos * 1000 > UMBRAL_DATOS_VIEJOS_MS
+
+  const estado = error
+    ? actualizadoEn
+      ? 'Datos desactualizados'
+      : 'Sin conexión'
+    : actualizadoEn
+      ? viejos
+        ? 'Datos desactualizados'
+        : 'Datos en vivo'
+      : 'Conectando'
+
+  return (
+    <footer className="site-footer">
+      <p>{estado} · FríoTrack</p>
+      {segundos !== null && <p>Actualizado hace {segundos} s</p>}
+    </footer>
   )
 }
 

@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AlertaSeguridad } from '../types'
 import { SecurityPanel } from './SecurityPanel'
 
@@ -14,14 +14,13 @@ const alerta: AlertaSeguridad = {
   accion: 'bloquear_ip',
 }
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('SecurityPanel', () => {
   it('deriva título, severidad, acción y resumen del detalle', () => {
-    render(
-      <SecurityPanel
-        alertas={[alerta]}
-        ahora={new Date('2026-11-12T16:45:00-06:00')}
-      />,
-    )
+    render(<SecurityPanel alertas={[alerta]} />)
 
     expect(screen.getByText('Fuerza bruta de tokens')).toBeInTheDocument()
     expect(screen.getByText('Alta')).toBeInTheDocument()
@@ -32,11 +31,19 @@ describe('SecurityPanel', () => {
     ).toBeInTheDocument()
   })
 
+  it('muestra el tiempo relativo de la alerta', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-12T16:45:00-06:00'))
+
+    render(<SecurityPanel alertas={[alerta]} />)
+
+    expect(screen.getByText('hace 3 min')).toBeInTheDocument()
+  })
+
   it('muestra la nota visible cuando se pasa', () => {
     render(
       <SecurityPanel
         alertas={[alerta]}
-        ahora={new Date('2026-11-12T16:45:00-06:00')}
         nota="Datos de ejemplo: el detector SIEM todavía no está conectado."
       />,
     )
