@@ -17,10 +17,11 @@ TAMANO_COLA = 100
 # recargue el estado completo por REST.
 EVENTO_CERRAR = "__cerrar__"
 # Transiciones de estado: si se pierden, el dashboard queda desincronizado.
-EVENTOS_DE_ESTADO = frozenset({"alerta_abierta", "alerta_cerrada", "lote_actualizado", "kpis"})
+EVENTOS_DE_ESTADO = frozenset({"alerta_abierta", "alerta_cerrada", "lote_actualizado"})
 # La notificación tampoco se puede perder: con la cola llena se le hace espacio.
 EVENTOS_IMPORTANTES = EVENTOS_DE_ESTADO | {"notificacion"}
-# Muestras que sí se pueden tirar: la próxima lectura o el próximo KPI las repone.
+# Muestras que sí se pueden tirar: `lectura` llega todo el tiempo y `kpis` se
+# repone en el próximo ciclo de 30 s.
 EVENTOS_DESCARTABLES = frozenset({"lectura", "kpis"})
 
 Evento = tuple[str, dict[str, Any]]
@@ -100,15 +101,19 @@ class EventBus:
             self._pedir_reconexion(cola)
             return
         # `notificacion`: se sacrifica la muestra más antigua y la notificación
-        # se entrega. Si no hay nada descartable, se pide reconectar.
+        # se entrega. Sin descartables, se entrega igual y luego se pide
+        # reconectar para que el cliente recargue el estado por REST.
         if _hacer_espacio(cola):
             cola.put_nowait((evento, data))
             return
         logger.warning(
-            "Cola SSE llena sin eventos descartables: se pide reconectar para no perder %s",
+            "Cola SSE llena sin eventos descartables: se entrega %s y se pide reconectar",
             evento,
         )
-        self._pedir_reconexion(cola)
+        while not cola.empty():
+            cola.get_nowait()
+        cola.put_nowait((evento, data))
+        cola.put_nowait((EVENTO_CERRAR, {}))
 
     @staticmethod
     def _pedir_reconexion(cola: ColaEventos) -> None:

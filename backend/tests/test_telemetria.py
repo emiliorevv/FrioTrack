@@ -18,7 +18,6 @@ from app.realtime.bus import bus
 from app.routers import telemetria as router_telemetria
 from app.schemas.telemetria import TelemetriaIn
 from app.services import telemetria as servicio
-from app.services.notificaciones import esperar_notificaciones
 from app.services.telemetria import procesar_telemetria
 
 AHORA = datetime(2026, 11, 18, 19, 0, tzinfo=UTC)
@@ -552,7 +551,6 @@ async def _eventos_de(accion: Callable[[], object]) -> list[tuple[str, dict[str,
     cola = bus.suscribir()
     try:
         accion()
-        esperar_notificaciones()  # los envíos van en segundo plano
         await asyncio.sleep(0)  # deja correr el `call_soon_threadsafe` del bus
         eventos: list[tuple[str, dict[str, object]]] = []
         while not cola.empty():

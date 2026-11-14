@@ -1,9 +1,8 @@
 """Pruebas del canal simulado de notificaciones; sin base ni red."""
 
-import threading
+import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from time import monotonic
 
 import pytest
 
@@ -76,11 +75,10 @@ def _notificar(
     lotes: list[Lote],
     lotes_a_merma: list[Lote],
 ) -> None:
-    """Llama al canal y espera los envíos agendados en el executor."""
+    """Llama al canal; en pruebas el executor corre el envío inline."""
     notificaciones.notificar_cambios(
         camara, alertas_nuevas, lotes, lotes_a_merma, AHORA, SETTINGS
     )
-    notificaciones.esperar_notificaciones()
 
 
 # --- Mensajes ---------------------------------------------------------------
@@ -112,15 +110,14 @@ def test_alerta_de_temperatura_usa_minutos_escalados_y_el_monto_en_riesgo(
     )
 
 
-def test_alerta_de_temperatura_sin_maximo_reporta_cero(notificador_falso):
+def test_alerta_de_temperatura_sin_maximo_no_notifica(notificador_falso, caplog):
     camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=20))
 
-    _notificar(camara, [_alerta("temperatura")], [_lote("3240.00")], [])
+    with caplog.at_level(logging.ERROR):
+        _notificar(camara, [_alerta("temperatura")], [_lote("3240.00")], [])
 
-    assert notificador_falso.enviadas[0].mensaje == (
-        "FríoTrack: Cámara Pescados y mariscos a 0.0 °C hace 10 min. "
-        "$3,240 en riesgo."
-    )
+    assert notificador_falso.enviadas == []
+    assert "sin temperatura_max_c" in caplog.text
 
 
 def test_alerta_de_temperatura_incluye_lotes_que_pasan_a_merma(notificador_falso):
@@ -129,7 +126,6 @@ def test_alerta_de_temperatura_incluye_lotes_que_pasan_a_merma(notificador_falso
 
     _notificar(camara, [_alerta("temperatura", Decimal("3.6"))], [lote], [lote])
 
-    # Los envíos van en paralelo: se busca por tipo, no por orden de llegada.
     enviadas = {notificacion.tipo: notificacion for notificacion in notificador_falso.enviadas}
     assert enviadas["alerta_temperatura"].mensaje == (
         "FríoTrack: Cámara Pescados y mariscos a 3.6 °C hace 65 min. "
@@ -138,6 +134,19 @@ def test_alerta_de_temperatura_incluye_lotes_que_pasan_a_merma(notificador_falso
     assert enviadas["merma"].mensaje == (
         "FríoTrack: Cámara Pescados y mariscos: 1 lote pasó a merma ($1,610)."
     )
+
+
+def test_notificaciones_conservan_el_orden_de_agendado(notificador_falso):
+    """Un solo hilo del executor mantiene temperatura antes que merma."""
+    camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=130))
+    lote = _lote("1610.00", estado="merma")
+
+    _notificar(camara, [_alerta("temperatura", Decimal("3.6"))], [lote], [lote])
+
+    assert [notificacion.tipo for notificacion in notificador_falso.enviadas] == [
+        "alerta_temperatura",
+        "merma",
+    ]
 
 
 def test_alerta_de_puerta_no_incluye_dinero(notificador_falso):
@@ -247,38 +256,7 @@ def test_sin_timestamp_reporta_un_minuto(notificador_falso):
     assert "hace 1 min." in notificador_falso.enviadas[0].mensaje
 
 
-# --- Segundo plano y robustez ----------------------------------------------
-
-
-def test_notificar_cambios_no_bloquea(monkeypatch):
-    liberar = threading.Event()
-    enviadas: list[Notificacion] = []
-
-    class NotificadorLento:
-        def enviar(self, notificacion: Notificacion) -> None:
-            liberar.wait(timeout=2)
-            enviadas.append(notificacion)
-
-    monkeypatch.setattr(notificaciones, "notificador", NotificadorLento())
-    camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=20))
-    inicio = monotonic()
-
-    notificaciones.notificar_cambios(
-        camara,
-        [_alerta("temperatura", Decimal("3.4"))],
-        [_lote("3240.00")],
-        [],
-        AHORA,
-        SETTINGS,
-    )
-    transcurrido = monotonic() - inicio
-
-    assert transcurrido < 1  # no espera al canal lento
-    assert enviadas == []  # el envío sigue pendiente en el executor
-
-    liberar.set()
-    notificaciones.esperar_notificaciones()
-    assert len(enviadas) == 1
+# --- Robustez ---------------------------------------------------------------
 
 
 def test_un_fallo_del_notificador_no_se_propaga(monkeypatch):

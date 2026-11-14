@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Sequence
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -34,9 +34,10 @@ NOTIFICACION_PUERTA = "alerta_puerta"
 NOTIFICACION_MERMA = "merma"
 
 # El envío va en segundo plano (ADR-0008): la ingesta no espera al canal ni se
-# cae si este falla. Dos hilos alcanzan para la demo; Twilio podrá reusarlos.
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="notificaciones")
-_futuros_pendientes: set[Future[None]] = set()
+# cae si este falla. Un solo hilo conserva el orden de agendado (temperatura
+# antes que merma); el volumen de la demo es mínimo.
+_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="notificaciones")
+_pendientes = 0
 _lock_pendientes = threading.Lock()
 
 
@@ -91,21 +92,6 @@ def _a_pesos(total: Decimal) -> int:
     return int(total.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def _suma_lotes(lotes: Sequence[Lote]) -> Decimal:
-    """Costo total de la lista recibida, sin filtrar por estado."""
-    return sum((lote.costo_total_mxn for lote in lotes), start=Decimal("0"))
-
-
-def _monto_en_riesgo(lotes: Sequence[Lote]) -> int:
-    """Valor en riesgo en pesos, con la misma regla que usan los KPIs."""
-    return _a_pesos(calcular_valor_en_riesgo(lotes))
-
-
-def _monto_lotes(lotes: Sequence[Lote]) -> int:
-    """Costo total de una lista concreta de lotes (por ejemplo, la merma)."""
-    return _a_pesos(_suma_lotes(lotes))
-
-
 def _pesos(monto: int) -> str:
     """Formato del contrato: `$4,850`."""
     return f"${monto:,}"
@@ -147,26 +133,29 @@ def _enviar(notificacion: Notificacion) -> None:
 
 
 def _programar(notificacion: Notificacion) -> None:
-    """Encola el envío y registra el futuro para poder esperarlo en pruebas."""
-    futuro = _executor.submit(_enviar, notificacion)
+    """Agenda el envío y cuenta los que todavía no terminan."""
+    global _pendientes
     with _lock_pendientes:
-        _futuros_pendientes.add(futuro)
-    futuro.add_done_callback(_olvidar_futuro)
+        _pendientes += 1
+    _executor.submit(_ejecutar, notificacion)
 
 
-def _olvidar_futuro(futuro: Future[None]) -> None:
-    with _lock_pendientes:
-        _futuros_pendientes.discard(futuro)
-
-
-def esperar_notificaciones() -> None:
-    """Espera los envíos agendados; lo usan las pruebas."""
-    while True:
+def _ejecutar(notificacion: Notificacion) -> None:
+    """Envía y descuenta el pendiente aunque el canal falle."""
+    global _pendientes
+    try:
+        _enviar(notificacion)
+    finally:
         with _lock_pendientes:
-            pendientes = [futuro for futuro in _futuros_pendientes if not futuro.done()]
-        if not pendientes:
-            return
-        wait(pendientes)
+            _pendientes -= 1
+
+
+def cerrar_notificaciones() -> None:
+    """Cierra el executor al apagar la app sin esperar los envíos pendientes."""
+    with _lock_pendientes:
+        pendientes = _pendientes
+    logger.info("Cerrando notificaciones: %s pendientes", pendientes)
+    _executor.shutdown(wait=False, cancel_futures=True)
 
 
 def notificar_cambios(
@@ -183,16 +172,23 @@ def notificar_cambios(
     al marcarse la merma, nunca una vez por lectura. Los envíos se agendan en
     segundo plano, así que la función no espera al canal.
     """
-    monto_en_riesgo = _monto_en_riesgo(lotes)
-    monto_merma = _monto_lotes(lotes_a_merma)
+    monto_en_riesgo = _a_pesos(calcular_valor_en_riesgo(lotes))
+    monto_merma = _a_pesos(
+        sum((lote.costo_total_mxn for lote in lotes_a_merma), start=Decimal("0"))
+    )
     url = settings.dashboard_url
 
     for alerta in alertas_nuevas:
         if alerta.tipo == TIPO_ALERTA_TEMPERATURA:
+            if alerta.temperatura_max_c is None:
+                logger.error(
+                    "Alerta %s sin temperatura_max_c; no se notifica", alerta.id
+                )
+                continue
             tipo = NOTIFICACION_TEMPERATURA
             mensaje = _mensaje_temperatura(
                 camara.nombre,
-                alerta.temperatura_max_c or Decimal("0"),
+                alerta.temperatura_max_c,
                 minutos_demo(
                     camara.fuera_de_rango_desde, ahora, settings.escala_tiempo
                 ),

@@ -163,7 +163,27 @@ def test_notificacion_solo_descarta_el_primer_evento_descartable():
     assert eventos[-1] == ("notificacion", {"camara_id": 1})
 
 
-def test_cola_llena_sin_descartables_pide_reconectar_para_la_notificacion():
+def test_cola_llena_descarta_kpis_sin_pedir_reconexion():
+    """`kpis` es una foto periódica, no un evento de estado."""
+    bus = EventBus()
+
+    async def escenario():
+        cola = bus.suscribir()
+        try:
+            for indice in range(TAMANO_COLA):
+                cola.put_nowait(("lectura", {"indice": indice}))
+            bus.publicar("kpis", {"alertas_activas": 1})
+            await asyncio.sleep(0)
+            return cola.qsize(), cola.get_nowait()
+        finally:
+            bus.desuscribir(cola)
+
+    tamano, primero = asyncio.run(escenario())
+    assert tamano == TAMANO_COLA
+    assert primero == ("lectura", {"indice": 0})
+
+
+def test_cola_llena_sin_descartables_entrega_la_notificacion_y_reconecta():
     bus = EventBus()
 
     async def escenario():
@@ -173,11 +193,17 @@ def test_cola_llena_sin_descartables_pide_reconectar_para_la_notificacion():
                 cola.put_nowait(("alerta_abierta", {"id": indice}))
             bus.publicar("notificacion", {"camara_id": 1})
             await asyncio.sleep(0)
-            return cola.qsize(), cola.get_nowait()
+            eventos = []
+            while not cola.empty():
+                eventos.append(cola.get_nowait())
+            return eventos
         finally:
             bus.desuscribir(cola)
 
-    assert asyncio.run(escenario()) == (1, (EVENTO_CERRAR, {}))
+    assert asyncio.run(escenario()) == [
+        ("notificacion", {"camara_id": 1}),
+        (EVENTO_CERRAR, {}),
+    ]
 
 
 def test_publicar_reparte_a_colas_de_loops_distintos():
