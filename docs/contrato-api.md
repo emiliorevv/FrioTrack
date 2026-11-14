@@ -45,7 +45,7 @@ Respuesta `202`:
 Errores: `401` token inválido, `403` el token no corresponde a ese `sensor_id` o a esa cámara, `422` datos fuera de lo físicamente posible (por ejemplo temperatura menor a −40 o mayor a 60).
 
 #### `POST /simulador/tick`
-Lo llama el Cloudflare Worker cada minuto. Genera una lectura por cámara con el escenario normal y la procesa igual que `POST /telemetria`, con `sensor_id = "SIM-CRON"`. Se salta las cámaras que recibieron una lectura del simulador en los últimos 2 minutos, para no tapar una falla provocada en la demo. Solo genera lecturas en modo demo (`ESCALA_TIEMPO > 1`); en producción solo mantiene despierta la API y responde `{ "lecturas": 0, "saltadas": [] }`. Respuesta `202` con `{ "lecturas": 4, "saltadas": [1] }`.
+Lo llama el Cloudflare Worker cada minuto. Genera una lectura por cámara con el escenario normal y la procesa igual que `POST /telemetria`, con `sensor_id = "SIM-CRON"`. Se salta las cámaras que recibieron una lectura del simulador en los últimos 2 minutos, para no tapar una falla provocada en la demo, y también las que ya recibieron un tick en los últimos 30 segundos, para no duplicar lecturas si dos ejecuciones se solapan. Solo genera lecturas en modo demo (`ESCALA_TIEMPO > 1`); en producción solo mantiene despierta la API y responde `{ "lecturas": 0, "saltadas": [] }`. Respuesta `202` con `{ "lecturas": 4, "saltadas": [1] }`.
 
 #### `GET /health`
 Sin autenticación. Regresa `{ "ok": true, "escala_tiempo": 30 }`. Sirve para despertar Render antes de la demo y para que el dashboard muestre la etiqueta de modo demo.
