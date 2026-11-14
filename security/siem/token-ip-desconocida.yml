@@ -1,0 +1,33 @@
+title: Token de sensor usado desde una IP desconocida
+id: e26aa409-804c-47fb-b852-1786ddaa172d
+status: experimental
+description: Un token de sensor válido autenticó una lectura desde una IP que no está en la lista de confianza del restaurante
+author: Equipo FríoTrack
+date: 2026-11-14
+references:
+  - docs/adr/0007-reglas-siem-sigma.md
+logsource:
+  product: friotrack
+  service: api_access
+detection:
+  selection:
+    credencial: sensor
+    ruta: /api/telemetria
+    status: 202
+  # Ejemplo de la lista de confianza. La lista real la define IPS_RESTAURANTE
+  # (variable de entorno) o --ips-permitidas en el detector; aquí solo se deja
+  # documentado el formato para que la regla se entienda sola.
+  filter:
+    ip_origen:
+      - "127.0.0.1"
+      - "::1"
+  condition: selection and not filter
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1078
+falsepositives:
+  - Cambio de red del restaurante sin actualizar IPS_RESTAURANTE
+  - Pruebas locales contra la API desde una IP que no está en la lista
+# Acción de respuesta (no es parte del estándar Sigma, la ejecuta el detector):
+# revocar el token del sensor (sensores.activo = false) y avisar al responsable.

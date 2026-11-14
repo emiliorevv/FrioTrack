@@ -40,6 +40,10 @@ jobs:
         run: ruff check .
       - name: Pruebas con pytest
         run: pytest -q
+      - name: Lint del detector SIEM
+        run: ruff check ../security --config pyproject.toml
+      - name: Pruebas del detector SIEM
+        run: cd .. && PYTHONPATH=. pytest -q security/detector/tests
 
   dashboard:
     name: Dashboard (lint + tests + build)

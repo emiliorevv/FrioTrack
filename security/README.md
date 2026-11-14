@@ -6,7 +6,7 @@ Diseño de red IDMZ / Zero Trust y reglas SIEM sobre los logs de acceso de la AP
 
 ## Tareas
 - [ ] Diagrama de segmentación en draw.io (`diagramas/idmz.drawio` + PNG exportado) con las zonas, VLANs y flujos de puertos de ADR-0006.
-- [ ] Reglas en formato Sigma en `siem/` (las tres de ADR-0007): fuerza bruta de tokens, token de sensor desde IP desconocida y lecturas imposibles.
-- [ ] Detector en Python (`detector/`) que lee `logs_acceso` cada minuto, aplica las reglas y registra la alerta con su severidad y acción.
-- [ ] Script de ataque para la demo: manda 15 peticiones con tokens falsos y dispara la regla.
+- [x] Reglas en formato Sigma en `siem/` (las tres de ADR-0007): fuerza bruta de tokens, token de sensor desde IP desconocida y lecturas imposibles.
+- [x] Detector en Python (`detector/`) que lee `logs_acceso` cada minuto, aplica las reglas y registra la alerta con su severidad y acción.
+- [x] Script de ataque para la demo: manda 15 peticiones con tokens falsos y dispara la regla.
 - [ ] Texto de la sección de seguridad para el reporte PDF.
