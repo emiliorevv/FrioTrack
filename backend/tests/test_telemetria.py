@@ -18,6 +18,7 @@ from app.realtime.bus import bus
 from app.routers import telemetria as router_telemetria
 from app.schemas.telemetria import TelemetriaIn
 from app.services import telemetria as servicio
+from app.services.notificaciones import esperar_notificaciones
 from app.services.telemetria import procesar_telemetria
 
 AHORA = datetime(2026, 11, 18, 19, 0, tzinfo=UTC)
@@ -480,15 +481,14 @@ def test_servicio_notifica_al_abrir_una_alerta(monkeypatch):
     procesar_telemetria(sesion, _datos(temperatura_c=3.0), token=TOKEN)
 
     assert len(llamadas) == 1
-    camara_recibida, alertas, lotes, lotes_a_merma, ahora, escala, temperatura = llamadas[0]
+    camara_recibida, alertas, lotes, lotes_a_merma, ahora, settings = llamadas[0]
     assert camara_recibida is camara
     assert [alerta.tipo for alerta in alertas] == ["temperatura"]
     assert alertas[0].sms_enviados == 0  # el canal simulado no cuenta como SMS
     assert lotes == [lote]
     assert lotes_a_merma == []
     assert ahora == AHORA
-    assert escala == 30
-    assert temperatura == 3.0
+    assert settings.escala_tiempo == 30
     assert lote.estado == "en_riesgo"  # ya se notifica el estado confirmado
 
 
@@ -552,6 +552,7 @@ async def _eventos_de(accion: Callable[[], object]) -> list[tuple[str, dict[str,
     cola = bus.suscribir()
     try:
         accion()
+        esperar_notificaciones()  # los envíos van en segundo plano
         await asyncio.sleep(0)  # deja correr el `call_soon_threadsafe` del bus
         eventos: list[tuple[str, dict[str, object]]] = []
         while not cola.empty():

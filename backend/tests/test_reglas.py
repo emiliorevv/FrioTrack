@@ -14,6 +14,7 @@ from app.erp.reglas import (
     debe_marcar_merma,
     esta_en_rango,
     estado_camara,
+    minutos_demo,
     segundos_efectivos,
 )
 
@@ -172,6 +173,18 @@ def test_valor_en_riesgo_suma_solo_lotes_en_riesgo():
 
 def test_valor_en_riesgo_sin_lotes_es_cero():
     assert calcular_valor_en_riesgo([]) == Decimal("0")
+
+
+def test_minutos_demo_escala_los_segundos():
+    assert minutos_demo(AHORA, AHORA + timedelta(seconds=20), 30) == 10
+
+
+def test_minutos_demo_sin_fecha_reporta_uno():
+    assert minutos_demo(None, AHORA, 30) == 1
+
+
+def test_minutos_demo_cero_segundos_reporta_uno():
+    assert minutos_demo(AHORA, AHORA, 30) == 1
 
 
 def test_asegurar_utc_asume_utc_en_datetime_naive():

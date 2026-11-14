@@ -9,16 +9,18 @@ muestre. `Notificador` es la interfaz que después puede implementar Twilio
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Sequence
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Protocol
 
-from app.config import get_settings
+from app.config import Settings
 from app.db.models import Alerta, Camara, Lote
 from app.erp.procesador import TIPO_ALERTA_PUERTA, TIPO_ALERTA_TEMPERATURA
-from app.erp.reglas import asegurar_utc
+from app.erp.reglas import calcular_valor_en_riesgo, minutos_demo
 from app.realtime.bus import bus
 from app.schemas.utils import iso
 
@@ -30,6 +32,12 @@ CANAL_SIMULADO = "simulado"
 NOTIFICACION_TEMPERATURA = "alerta_temperatura"
 NOTIFICACION_PUERTA = "alerta_puerta"
 NOTIFICACION_MERMA = "merma"
+
+# El envío va en segundo plano (ADR-0008): la ingesta no espera al canal ni se
+# cae si este falla. Dos hilos alcanzan para la demo; Twilio podrá reusarlos.
+_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="notificaciones")
+_futuros_pendientes: set[Future[None]] = set()
+_lock_pendientes = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -78,23 +86,29 @@ class NotificadorSimulado:
 notificador: Notificador = NotificadorSimulado()
 
 
-def _monto(lotes: Sequence[Lote]) -> int:
-    """Costo total en pesos, redondeado y sin decimales."""
-    total = sum((lote.costo_total_mxn for lote in lotes), start=Decimal("0"))
-    return int(round(total))
+def _a_pesos(total: Decimal) -> int:
+    """Pesos enteros con redondeo half-up (el dinero no se trunca)."""
+    return int(total.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _suma_lotes(lotes: Sequence[Lote]) -> Decimal:
+    """Costo total de la lista recibida, sin filtrar por estado."""
+    return sum((lote.costo_total_mxn for lote in lotes), start=Decimal("0"))
+
+
+def _monto_en_riesgo(lotes: Sequence[Lote]) -> int:
+    """Valor en riesgo en pesos, con la misma regla que usan los KPIs."""
+    return _a_pesos(calcular_valor_en_riesgo(lotes))
+
+
+def _monto_lotes(lotes: Sequence[Lote]) -> int:
+    """Costo total de una lista concreta de lotes (por ejemplo, la merma)."""
+    return _a_pesos(_suma_lotes(lotes))
 
 
 def _pesos(monto: int) -> str:
     """Formato del contrato: `$4,850`."""
     return f"${monto:,}"
-
-
-def _minutos(desde: datetime | None, ahora: datetime, escala: float) -> int:
-    """Minutos de demo transcurridos desde `desde`; sin fecha, reporta 1."""
-    if desde is None:
-        return 1
-    segundos = (asegurar_utc(ahora) - asegurar_utc(desde)).total_seconds()
-    return max(1, round(segundos * escala / 60))
 
 
 def _mensaje_temperatura(
@@ -105,10 +119,9 @@ def _mensaje_temperatura(
     return f"{base} {_pesos(monto)} en riesgo." if monto else base
 
 
-def _mensaje_puerta(camara: str, minutos: int, monto: int) -> str:
-    """Mensaje de una alerta de puerta, con el dinero solo si hay riesgo."""
-    base = f"FríoTrack: Puerta abierta en Cámara {camara} hace {minutos} min."
-    return f"{base} {_pesos(monto)} en riesgo." if monto else base
+def _mensaje_puerta(camara: str, minutos: int) -> str:
+    """Mensaje de una alerta de puerta; no incluye dinero en riesgo."""
+    return f"FríoTrack: Puerta abierta en Cámara {camara} hace {minutos} min."
 
 
 def _mensaje_merma(camara: str, cantidad: int, monto: int) -> str:
@@ -133,47 +146,69 @@ def _enviar(notificacion: Notificacion) -> None:
         )
 
 
+def _programar(notificacion: Notificacion) -> None:
+    """Encola el envío y registra el futuro para poder esperarlo en pruebas."""
+    futuro = _executor.submit(_enviar, notificacion)
+    with _lock_pendientes:
+        _futuros_pendientes.add(futuro)
+    futuro.add_done_callback(_olvidar_futuro)
+
+
+def _olvidar_futuro(futuro: Future[None]) -> None:
+    with _lock_pendientes:
+        _futuros_pendientes.discard(futuro)
+
+
+def esperar_notificaciones() -> None:
+    """Espera los envíos agendados; lo usan las pruebas."""
+    while True:
+        with _lock_pendientes:
+            pendientes = [futuro for futuro in _futuros_pendientes if not futuro.done()]
+        if not pendientes:
+            return
+        wait(pendientes)
+
+
 def notificar_cambios(
     camara: Camara,
     alertas_nuevas: Sequence[Alerta],
     lotes: Sequence[Lote],
     lotes_a_merma: Sequence[Lote],
     ahora: datetime,
-    escala: float,
-    temperatura: float,
+    settings: Settings,
 ) -> None:
     """Notifica las alertas recién abiertas y los lotes que pasaron a merma.
 
     Se llama después del commit y solo por transiciones: al abrir una alerta o
-    al marcarse la merma, nunca una vez por lectura.
+    al marcarse la merma, nunca una vez por lectura. Los envíos se agendan en
+    segundo plano, así que la función no espera al canal.
     """
-    url = get_settings().dashboard_url
-    monto_en_riesgo = _monto([lote for lote in lotes if lote.estado == "en_riesgo"])
+    monto_en_riesgo = _monto_en_riesgo(lotes)
+    monto_merma = _monto_lotes(lotes_a_merma)
+    url = settings.dashboard_url
 
     for alerta in alertas_nuevas:
         if alerta.tipo == TIPO_ALERTA_TEMPERATURA:
-            grados = (
-                alerta.temperatura_max_c
-                if alerta.temperatura_max_c is not None
-                else temperatura
-            )
             tipo = NOTIFICACION_TEMPERATURA
             mensaje = _mensaje_temperatura(
                 camara.nombre,
-                grados,
-                _minutos(camara.fuera_de_rango_desde, ahora, escala),
-                monto_en_riesgo,
+                alerta.temperatura_max_c or Decimal("0"),
+                minutos_demo(
+                    camara.fuera_de_rango_desde, ahora, settings.escala_tiempo
+                ),
+                monto_en_riesgo + monto_merma,
             )
         elif alerta.tipo == TIPO_ALERTA_PUERTA:
             tipo = NOTIFICACION_PUERTA
             mensaje = _mensaje_puerta(
                 camara.nombre,
-                _minutos(camara.puerta_abierta_desde, ahora, escala),
-                monto_en_riesgo,
+                minutos_demo(
+                    camara.puerta_abierta_desde, ahora, settings.escala_tiempo
+                ),
             )
         else:
             continue
-        _enviar(
+        _programar(
             Notificacion(
                 tipo=tipo,
                 camara_id=camara.id,
@@ -184,13 +219,11 @@ def notificar_cambios(
         )
 
     if lotes_a_merma:
-        _enviar(
+        _programar(
             Notificacion(
                 tipo=NOTIFICACION_MERMA,
                 camara_id=camara.id,
-                mensaje=_mensaje_merma(
-                    camara.nombre, len(lotes_a_merma), _monto(lotes_a_merma)
-                ),
+                mensaje=_mensaje_merma(camara.nombre, len(lotes_a_merma), monto_merma),
                 ts=ahora,
                 url=url,
             )

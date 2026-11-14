@@ -1,25 +1,19 @@
 """Pruebas del canal simulado de notificaciones; sin base ni red."""
 
+import threading
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from time import monotonic
 
 import pytest
 
-from app.config import limpiar_cache_settings
+from app.config import Settings
 from app.db.models import Alerta, Camara, Lote
 from app.services import notificaciones
 from app.services.notificaciones import Notificacion
 
 AHORA = datetime(2026, 11, 18, 19, 0, tzinfo=UTC)
-
-
-@pytest.fixture(autouse=True)
-def _url_de_dashboard(monkeypatch):
-    """Fija la URL del contrato y refresca la configuración cacheada."""
-    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:5173")
-    limpiar_cache_settings()
-    yield
-    limpiar_cache_settings()
+SETTINGS = Settings(escala_tiempo=30, dashboard_url="http://localhost:5173")
 
 
 class NotificadorFalso:
@@ -76,6 +70,19 @@ def _lote(costo: str, estado: str = "en_riesgo", lote_id: int = 1) -> Lote:
     )
 
 
+def _notificar(
+    camara: Camara,
+    alertas_nuevas: list[Alerta],
+    lotes: list[Lote],
+    lotes_a_merma: list[Lote],
+) -> None:
+    """Llama al canal y espera los envíos agendados en el executor."""
+    notificaciones.notificar_cambios(
+        camara, alertas_nuevas, lotes, lotes_a_merma, AHORA, SETTINGS
+    )
+    notificaciones.esperar_notificaciones()
+
+
 # --- Mensajes ---------------------------------------------------------------
 
 
@@ -90,9 +97,7 @@ def test_alerta_de_temperatura_usa_minutos_escalados_y_el_monto_en_riesgo(
         _lote("500.00", estado="merma", lote_id=4),
     ]
 
-    notificaciones.notificar_cambios(
-        camara, [_alerta("temperatura", Decimal("3.4"))], lotes, [], AHORA, 30, 3.9
-    )
+    _notificar(camara, [_alerta("temperatura", Decimal("3.4"))], lotes, [])
 
     assert len(notificador_falso.enviadas) == 1
     enviada = notificador_falso.enviadas[0]
@@ -107,31 +112,43 @@ def test_alerta_de_temperatura_usa_minutos_escalados_y_el_monto_en_riesgo(
     )
 
 
-def test_alerta_de_temperatura_sin_maximo_usa_la_lectura_actual(notificador_falso):
+def test_alerta_de_temperatura_sin_maximo_reporta_cero(notificador_falso):
     camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=20))
 
-    notificaciones.notificar_cambios(
-        camara, [_alerta("temperatura")], [_lote("3240.00")], [], AHORA, 30, 3.9
-    )
+    _notificar(camara, [_alerta("temperatura")], [_lote("3240.00")], [])
 
     assert notificador_falso.enviadas[0].mensaje == (
-        "FríoTrack: Cámara Pescados y mariscos a 3.9 °C hace 10 min. "
+        "FríoTrack: Cámara Pescados y mariscos a 0.0 °C hace 10 min. "
         "$3,240 en riesgo."
     )
 
 
-def test_alerta_de_puerta(notificador_falso):
+def test_alerta_de_temperatura_incluye_lotes_que_pasan_a_merma(notificador_falso):
+    camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=130))
+    lote = _lote("1610.00", estado="merma")
+
+    _notificar(camara, [_alerta("temperatura", Decimal("3.6"))], [lote], [lote])
+
+    # Los envíos van en paralelo: se busca por tipo, no por orden de llegada.
+    enviadas = {notificacion.tipo: notificacion for notificacion in notificador_falso.enviadas}
+    assert enviadas["alerta_temperatura"].mensaje == (
+        "FríoTrack: Cámara Pescados y mariscos a 3.6 °C hace 65 min. "
+        "$1,610 en riesgo."
+    )
+    assert enviadas["merma"].mensaje == (
+        "FríoTrack: Cámara Pescados y mariscos: 1 lote pasó a merma ($1,610)."
+    )
+
+
+def test_alerta_de_puerta_no_incluye_dinero(notificador_falso):
     camara = _camara(puerta_abierta_desde=AHORA - timedelta(seconds=6))
 
-    notificaciones.notificar_cambios(
-        camara, [_alerta("puerta")], [_lote("3240.00")], [], AHORA, 30, 1.5
-    )
+    _notificar(camara, [_alerta("puerta")], [_lote("3240.00")], [])
 
     enviada = notificador_falso.enviadas[0]
     assert enviada.tipo == "alerta_puerta"
     assert enviada.mensaje == (
-        "FríoTrack: Puerta abierta en Cámara Pescados y mariscos hace 3 min. "
-        "$3,240 en riesgo."
+        "FríoTrack: Puerta abierta en Cámara Pescados y mariscos hace 3 min."
     )
 
 
@@ -150,9 +167,7 @@ def test_alerta_de_puerta(notificador_falso):
     ids=["singular", "plural"],
 )
 def test_merma_respeta_singular_y_plural(notificador_falso, lotes, esperado):
-    notificaciones.notificar_cambios(
-        _camara(), [], [], lotes, AHORA, 30, 1.5
-    )
+    _notificar(_camara(), [], [], lotes)
 
     enviada = notificador_falso.enviadas[0]
     assert enviada.tipo == "merma"
@@ -162,9 +177,7 @@ def test_merma_respeta_singular_y_plural(notificador_falso, lotes, esperado):
 def test_monto_cero_omite_la_clausula_de_dinero(notificador_falso):
     camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=20))
 
-    notificaciones.notificar_cambios(
-        camara, [_alerta("temperatura", Decimal("3.4"))], [], [], AHORA, 30, 3.9
-    )
+    _notificar(camara, [_alerta("temperatura", Decimal("3.4"))], [], [])
 
     mensaje = notificador_falso.enviadas[0].mensaje
     assert mensaje == "FríoTrack: Cámara Pescados y mariscos a 3.4 °C hace 10 min."
@@ -173,11 +186,20 @@ def test_monto_cero_omite_la_clausula_de_dinero(notificador_falso):
 
 
 def test_sin_cambios_no_notifica(notificador_falso):
-    notificaciones.notificar_cambios(
-        _camara(), [], [_lote("3240.00")], [], AHORA, 30, 1.5
-    )
+    _notificar(_camara(), [], [_lote("3240.00")], [])
 
     assert notificador_falso.enviadas == []
+
+
+# --- Redondeo ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("total", "esperado"),
+    [(Decimal("4850.50"), 4851), (Decimal("4851.50"), 4852)],
+)
+def test_a_pesos_redondea_half_up(total: Decimal, esperado: int):
+    assert notificaciones._a_pesos(total) == esperado
 
 
 # --- Notificador simulado ---------------------------------------------------
@@ -220,14 +242,43 @@ def test_notificador_simulado_publica_el_evento_del_contrato(monkeypatch):
 
 
 def test_sin_timestamp_reporta_un_minuto(notificador_falso):
-    notificaciones.notificar_cambios(
-        _camara(), [_alerta("puerta")], [], [], AHORA, 30, 1.5
-    )
+    _notificar(_camara(), [_alerta("puerta")], [], [])
 
     assert "hace 1 min." in notificador_falso.enviadas[0].mensaje
 
 
-# --- Robustez ---------------------------------------------------------------
+# --- Segundo plano y robustez ----------------------------------------------
+
+
+def test_notificar_cambios_no_bloquea(monkeypatch):
+    liberar = threading.Event()
+    enviadas: list[Notificacion] = []
+
+    class NotificadorLento:
+        def enviar(self, notificacion: Notificacion) -> None:
+            liberar.wait(timeout=2)
+            enviadas.append(notificacion)
+
+    monkeypatch.setattr(notificaciones, "notificador", NotificadorLento())
+    camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=20))
+    inicio = monotonic()
+
+    notificaciones.notificar_cambios(
+        camara,
+        [_alerta("temperatura", Decimal("3.4"))],
+        [_lote("3240.00")],
+        [],
+        AHORA,
+        SETTINGS,
+    )
+    transcurrido = monotonic() - inicio
+
+    assert transcurrido < 1  # no espera al canal lento
+    assert enviadas == []  # el envío sigue pendiente en el executor
+
+    liberar.set()
+    notificaciones.esperar_notificaciones()
+    assert len(enviadas) == 1
 
 
 def test_un_fallo_del_notificador_no_se_propaga(monkeypatch):
@@ -237,14 +288,12 @@ def test_un_fallo_del_notificador_no_se_propaga(monkeypatch):
 
     monkeypatch.setattr(notificaciones, "notificador", NotificadorRoto())
     camara = _camara(fuera_de_rango_desde=AHORA - timedelta(seconds=20))
+    lote = _lote("3240.00", estado="merma")
 
     # No debe lanzar: la ingesta ya quedó confirmada antes de notificar.
-    notificaciones.notificar_cambios(
+    _notificar(
         camara,
         [_alerta("temperatura", Decimal("3.4"))],
-        [_lote("3240.00")],
-        [_lote("3240.00", estado="merma", lote_id=2)],
-        AHORA,
-        30,
-        3.9,
+        [lote],
+        [lote],
     )

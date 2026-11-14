@@ -144,6 +144,7 @@ def procesar_lectura(
     Se llama después de validar el sensor o desde el tick del cron (`SIM-CRON`).
     """
     ahora = utcnow()
+    settings = get_settings()
     lectura = Lectura(
         camara_id=camara.id,
         sensor_id=datos.sensor_id,
@@ -184,7 +185,7 @@ def procesar_lectura(
         temperatura_c=datos.temperatura_c,
         puerta_abierta=datos.puerta_abierta,
         ahora=ahora,
-        escala=get_settings().escala_tiempo,
+        escala=settings.escala_tiempo,
         lotes=lotes,
         alertas_abiertas=alertas_abiertas,
     )
@@ -266,8 +267,7 @@ def procesar_lectura(
                 lotes,
                 resultado.lotes_a_merma,
                 ahora,
-                get_settings().escala_tiempo,
-                datos.temperatura_c,
+                settings,
             )
         except Exception:
             logger.exception(
