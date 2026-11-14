@@ -117,7 +117,7 @@ def _validar_sensor(
 def procesar_telemetria(
     session: Session, datos: TelemetriaIn, token: str
 ) -> tuple[int, str]:
-    """Persiste una lectura, aplica las reglas ERP y regresa `(lectura_id, estado)`."""
+    """Autentica el sensor y delega la ingesta de la lectura."""
     camara = session.get(Camara, datos.camara_id)
     if camara is None:
         raise HTTPException(
@@ -126,6 +126,21 @@ def procesar_telemetria(
         )
 
     _validar_sensor(session, datos.sensor_id, camara.id, token)
+    return procesar_lectura(session, datos)
+
+
+def procesar_lectura(session: Session, datos: TelemetriaIn) -> tuple[int, str]:
+    """Persiste una lectura, aplica las reglas ERP y regresa `(lectura_id, estado)`.
+
+    No autentica: solo se llama después de validar el sensor con
+    `procesar_telemetria` o desde el tick del cron, que usa `SIM-CRON`.
+    """
+    camara = session.get(Camara, datos.camara_id)
+    if camara is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No existe la cámara {datos.camara_id}.",
+        )
 
     ahora = utcnow()
     lectura = Lectura(
