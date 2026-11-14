@@ -56,7 +56,13 @@ export interface AlertaSeguridad {
   accion: AccionSeguridad
 }
 
-export type TipoNotificacion = 'alerta_temperatura' | 'alerta_puerta' | 'merma'
+export const TIPOS_NOTIFICACION = [
+  'alerta_temperatura',
+  'alerta_puerta',
+  'merma',
+] as const
+
+export type TipoNotificacion = (typeof TIPOS_NOTIFICACION)[number]
 
 /** Payload del evento `notificacion` de `GET /api/stream`. */
 export interface Notificacion {

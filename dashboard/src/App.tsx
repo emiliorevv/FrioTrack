@@ -117,8 +117,8 @@ function App() {
 
       {notificacion && (
         <NotificationToast
-          key={notificacion.ts}
-          notificacion={notificacion}
+          key={notificacion.id}
+          notificacion={notificacion.datos}
           onCerrar={cerrar}
         />
       )}

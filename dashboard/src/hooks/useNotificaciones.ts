@@ -1,71 +1,56 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Notificacion } from '../types'
+import { useCallback, useRef, useState } from 'react'
+import { useStreamEvent } from '../realtime/StreamProvider'
+import { TIPOS_NOTIFICACION, type Notificacion } from '../types'
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000/api'
+/** Tope de la cola: si llegan más, se descartan las más viejas. */
+export const MAX_NOTIFICACIONES = 5
 
-/** Tiempo que el toast permanece visible antes de descartarse solo. */
-export const DURACION_NOTIFICACION_MS = 10_000
-
-const TIPOS = new Set(['alerta_temperatura', 'alerta_puerta', 'merma'])
+export interface NotificacionEnCola {
+  /** Id local incremental; sirve como `key` aunque dos eventos compartan `ts`. */
+  id: number
+  datos: Notificacion
+}
 
 /**
- * Escucha el evento `notificacion` de `GET /api/stream` y guarda la última.
- * El resto de eventos del stream (`kpis`, `lectura`, …) se ignoran.
+ * Cola FIFO de notificaciones simuladas.
+ *
+ * El evento `notificacion` lo publica el backend en `GET /api/stream`; su
+ * contrato vive en `docs/contrato-api.md` (PR #37, dependencia de este PR).
+ * La conexión, la reconexión y el JWT son responsabilidad de `StreamProvider`.
  */
 export function useNotificaciones() {
-  const [notificacion, setNotificacion] = useState<Notificacion | null>(null)
-  const timerRef = useRef<number | null>(null)
+  const [cola, setCola] = useState<NotificacionEnCola[]>([])
+  const siguienteId = useRef(0)
 
-  const limpiarTimer = useCallback(() => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
-  }, [])
-
-  const cerrar = useCallback(() => {
-    limpiarTimer()
-    setNotificacion(null)
-  }, [limpiarTimer])
-
-  useEffect(() => {
-    // En SSR y en jsdom no hay EventSource: la vista sigue funcionando sin SSE.
-    if (typeof EventSource === 'undefined') {
+  useStreamEvent('notificacion', (evento) => {
+    const notificacion = leerNotificacion(evento.data)
+    if (!notificacion) {
       return
     }
 
-    const fuente = new EventSource(`${API_URL}/stream`)
-
-    const alRecibir = (evento: MessageEvent<string>) => {
-      let datos: unknown
-      try {
-        datos = JSON.parse(evento.data)
-      } catch {
-        return
-      }
-      if (!esNotificacion(datos)) {
-        return
-      }
-
-      limpiarTimer()
-      setNotificacion(datos)
-      timerRef.current = window.setTimeout(() => {
-        timerRef.current = null
-        setNotificacion(null)
-      }, DURACION_NOTIFICACION_MS)
+    siguienteId.current += 1
+    const enCola: NotificacionEnCola = {
+      id: siguienteId.current,
+      datos: notificacion,
     }
+    setCola((actual) => [...actual, enCola].slice(-MAX_NOTIFICACIONES))
+  })
 
-    fuente.addEventListener('notificacion', alRecibir)
+  const cerrar = useCallback(() => {
+    setCola((actual) => actual.slice(1))
+  }, [])
 
-    return () => {
-      // En `onerror` no se cierra: EventSource reintenta por su cuenta.
-      fuente.removeEventListener('notificacion', alRecibir)
-      fuente.close()
-      limpiarTimer()
-    }
-  }, [limpiarTimer])
+  return { notificacion: cola[0] ?? null, cerrar }
+}
 
-  return { notificacion, cerrar }
+function leerNotificacion(texto: string): Notificacion | null {
+  let datos: unknown
+  try {
+    datos = JSON.parse(texto)
+  } catch {
+    return null
+  }
+  return esNotificacion(datos) ? datos : null
 }
 
 function esNotificacion(valor: unknown): valor is Notificacion {
@@ -73,11 +58,12 @@ function esNotificacion(valor: unknown): valor is Notificacion {
     return false
   }
   const datos = valor as Record<string, unknown>
+  const { mensaje, camara_id: camaraId, ts, tipo } = datos
   return (
-    typeof datos.mensaje === 'string' &&
-    typeof datos.tipo === 'string' &&
-    TIPOS.has(datos.tipo) &&
-    typeof datos.camara_id === 'number' &&
-    typeof datos.ts === 'string'
+    typeof mensaje === 'string' &&
+    typeof camaraId === 'number' &&
+    typeof ts === 'string' &&
+    typeof tipo === 'string' &&
+    TIPOS_NOTIFICACION.some((conocido) => conocido === tipo)
   )
 }

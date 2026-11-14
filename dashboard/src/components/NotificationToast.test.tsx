@@ -1,7 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Notificacion, TipoNotificacion } from '../types'
-import { NotificationToast } from './NotificationToast'
+import {
+  DURACION_NOTIFICACION_MS,
+  NotificationToast,
+} from './NotificationToast'
 
 const MENSAJE =
   'FríoTrack: Cámara Pescados y mariscos a 3.4 °C hace 10 min. $4,850 en riesgo.'
@@ -19,14 +22,23 @@ function crearNotificacion(
   }
 }
 
+function renderizar(onCerrar = vi.fn()) {
+  render(
+    <NotificationToast
+      notificacion={crearNotificacion()}
+      onCerrar={onCerrar}
+    />,
+  )
+  return screen.getByRole('alert')
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('NotificationToast', () => {
   it('muestra la etiqueta, el título y el mensaje de la notificación', () => {
-    render(
-      <NotificationToast
-        notificacion={crearNotificacion()}
-        onCerrar={() => {}}
-      />,
-    )
+    renderizar()
 
     expect(screen.getByText('Notificación simulada')).toBeInTheDocument()
     expect(screen.getByText('Alerta de temperatura')).toBeInTheDocument()
@@ -48,16 +60,11 @@ describe('NotificationToast', () => {
     expect(screen.getByText(titulo)).toBeInTheDocument()
   })
 
-  it('se anuncia como status polite sin robar el foco', () => {
-    render(
-      <NotificationToast
-        notificacion={crearNotificacion()}
-        onCerrar={() => {}}
-      />,
-    )
+  it('se anuncia como alert atómico sin robar el foco', () => {
+    renderizar()
 
-    const toast = screen.getByRole('status')
-    expect(toast).toHaveAttribute('aria-live', 'polite')
+    const toast = screen.getByRole('alert')
+    expect(toast).toHaveAttribute('aria-atomic', 'true')
     expect(
       screen.getByRole('button', { name: 'Cerrar notificación' }),
     ).not.toHaveFocus()
@@ -65,15 +72,61 @@ describe('NotificationToast', () => {
 
   it('cierra con el botón', () => {
     const onCerrar = vi.fn()
-    render(
-      <NotificationToast
-        notificacion={crearNotificacion()}
-        onCerrar={onCerrar}
-      />,
-    )
+    renderizar(onCerrar)
 
     fireEvent.click(screen.getByRole('button', { name: 'Cerrar notificación' }))
 
+    expect(onCerrar).toHaveBeenCalledTimes(1)
+  })
+
+  it('se cierra solo a los 10 segundos', () => {
+    vi.useFakeTimers()
+    const onCerrar = vi.fn()
+    renderizar(onCerrar)
+
+    act(() => vi.advanceTimersByTime(DURACION_NOTIFICACION_MS - 1))
+    expect(onCerrar).not.toHaveBeenCalled()
+
+    act(() => vi.advanceTimersByTime(1))
+    expect(onCerrar).toHaveBeenCalledTimes(1)
+  })
+
+  it('pausa el auto-cierre con el mouse encima y lo reanuda al salir', () => {
+    vi.useFakeTimers()
+    const onCerrar = vi.fn()
+    const toast = renderizar(onCerrar)
+
+    act(() => vi.advanceTimersByTime(4_000))
+    fireEvent.mouseEnter(toast)
+
+    act(() => vi.advanceTimersByTime(20_000))
+    expect(onCerrar).not.toHaveBeenCalled()
+
+    fireEvent.mouseLeave(toast)
+    act(() => vi.advanceTimersByTime(DURACION_NOTIFICACION_MS - 4_000 - 1))
+    expect(onCerrar).not.toHaveBeenCalled()
+
+    act(() => vi.advanceTimersByTime(1))
+    expect(onCerrar).toHaveBeenCalledTimes(1)
+  })
+
+  it('pausa el auto-cierre mientras el foco está dentro', () => {
+    vi.useFakeTimers()
+    const onCerrar = vi.fn()
+    renderizar(onCerrar)
+    const boton = screen.getByRole('button', { name: 'Cerrar notificación' })
+
+    act(() => vi.advanceTimersByTime(4_000))
+    fireEvent.focusIn(boton)
+
+    act(() => vi.advanceTimersByTime(20_000))
+    expect(onCerrar).not.toHaveBeenCalled()
+
+    fireEvent.focusOut(boton)
+    act(() => vi.advanceTimersByTime(DURACION_NOTIFICACION_MS - 4_000 - 1))
+    expect(onCerrar).not.toHaveBeenCalled()
+
+    act(() => vi.advanceTimersByTime(1))
     expect(onCerrar).toHaveBeenCalledTimes(1)
   })
 })

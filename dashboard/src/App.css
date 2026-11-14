@@ -801,21 +801,40 @@
 
 .toast {
   position: fixed;
-  top: 16px;
+  top: 96px;
   right: 16px;
-  left: auto;
-  width: min(420px, calc(100vw - 32px));
   z-index: 50;
+  width: min(340px, calc(100vw - 32px));
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 13px 12px 13px 14px;
+  gap: 8px;
+  padding: 10px 10px 10px 12px;
   border: 1px solid var(--line);
   border-left: 4px solid var(--danger);
-  border-radius: var(--radius);
+  border-radius: 14px;
   background: var(--surface);
   box-shadow: var(--shadow-2);
   animation: toast-entrar 220ms var(--ease);
+}
+
+/*
+ * Móvil: 96px deja libre el header sticky, que en pantallas angostas puede
+ * ocupar dos filas (marca + meta). Desktop: 72px basta para el header de una
+ * sola fila.
+ */
+@media (min-width: 640px) {
+  .toast {
+    top: 72px;
+    right: 24px;
+    width: min(340px, calc(100vw - 48px));
+  }
+}
+
+/* A partir de 1024 px el header crece a ~74 px: dejamos aire debajo. */
+@media (min-width: 1024px) {
+  .toast {
+    top: 80px;
+  }
 }
 
 .toast--merma {
@@ -828,7 +847,7 @@
 }
 
 .toast__eyebrow {
-  font-size: 0.58rem;
+  font-size: 0.56rem;
   font-weight: 600;
   line-height: 1.3;
   letter-spacing: 0.07em;
@@ -837,11 +856,11 @@
 }
 
 .toast__title {
-  margin-top: 3px;
-  font-size: 0.9rem;
+  margin-top: 2px;
+  font-size: 0.85rem;
   font-weight: 600;
   line-height: 1.3;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
 
@@ -854,34 +873,28 @@
 }
 
 .toast__message {
-  margin-top: 4px;
-  font-size: 0.82rem;
-  line-height: 1.45;
+  margin-top: 3px;
+  font-size: 0.78rem;
+  line-height: 1.4;
   color: var(--muted);
   text-wrap: pretty;
 }
 
 .toast__close {
+  width: 26px;
+  height: 26px;
   margin-top: -2px;
 }
 
 @keyframes toast-entrar {
   from {
     opacity: 0;
-    transform: translateY(-12px);
+    transform: translateY(-10px);
   }
 
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@media (min-width: 640px) {
-  .toast {
-    top: 24px;
-    right: 24px;
-    width: min(420px, calc(100vw - 48px));
   }
 }
 

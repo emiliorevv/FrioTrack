@@ -1,48 +1,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Notificacion } from '../types'
 import { NotificationToast } from '../components/NotificationToast'
-import {
-  DURACION_NOTIFICACION_MS,
-  useNotificaciones,
-} from './useNotificaciones'
-
-type Oyente = (evento: MessageEvent<string>) => void
-
-/** EventSource mínimo: guarda oyentes y permite emitir eventos desde el test. */
-class EventSourceFalso {
-  static instancias: EventSourceFalso[] = []
-
-  readonly url: string
-  cerrado = false
-  private oyentes = new Map<string, Set<Oyente>>()
-
-  constructor(url: string) {
-    this.url = url
-    EventSourceFalso.instancias.push(this)
-  }
-
-  addEventListener(tipo: string, oyente: Oyente) {
-    const conjunto = this.oyentes.get(tipo) ?? new Set<Oyente>()
-    conjunto.add(oyente)
-    this.oyentes.set(tipo, conjunto)
-  }
-
-  removeEventListener(tipo: string, oyente: Oyente) {
-    this.oyentes.get(tipo)?.delete(oyente)
-  }
-
-  close() {
-    this.cerrado = true
-  }
-
-  emitir(tipo: string, datos: unknown) {
-    const evento = new MessageEvent(tipo, { data: JSON.stringify(datos) })
-    for (const oyente of this.oyentes.get(tipo) ?? []) {
-      oyente(evento)
-    }
-  }
-}
+import { StreamProvider } from '../realtime/StreamProvider'
+import { EventSourceFalso } from '../test/EventSourceFalso'
+import type { Notificacion } from '../types'
+import { MAX_NOTIFICACIONES, useNotificaciones } from './useNotificaciones'
 
 const NOTIFICACION: Notificacion = {
   canal: 'simulado',
@@ -54,29 +16,42 @@ const NOTIFICACION: Notificacion = {
   url: 'http://localhost:5173',
 }
 
+function conMensaje(mensaje: string): Notificacion {
+  return { ...NOTIFICACION, mensaje }
+}
+
 function Prueba() {
   const { notificacion, cerrar } = useNotificaciones()
 
   return (
     <div>
-      <button type="button" onClick={cerrar}>
-        cerrar desde la prueba
-      </button>
       {notificacion && (
-        <NotificationToast notificacion={notificacion} onCerrar={cerrar} />
+        <NotificationToast
+          key={notificacion.id}
+          notificacion={notificacion.datos}
+          onCerrar={cerrar}
+        />
       )}
     </div>
   )
 }
 
-function emitirNotificacion() {
+function renderizar() {
+  return render(
+    <StreamProvider>
+      <Prueba />
+    </StreamProvider>,
+  )
+}
+
+function emitir(notificacion: Notificacion) {
   act(() => {
-    EventSourceFalso.instancias[0]?.emitir('notificacion', NOTIFICACION)
+    EventSourceFalso.instancias[0]?.emitir('notificacion', notificacion)
   })
 }
 
 beforeEach(() => {
-  EventSourceFalso.instancias = []
+  EventSourceFalso.reiniciar()
   vi.stubGlobal('EventSource', EventSourceFalso)
 })
 
@@ -86,28 +61,42 @@ afterEach(() => {
 })
 
 describe('useNotificaciones', () => {
-  it('abre el stream en la URL de la API', () => {
-    render(<Prueba />)
+  it('muestra la primera notificación y al cerrar pasa a la siguiente', () => {
+    renderizar()
 
-    const base = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000/api'
-    expect(EventSourceFalso.instancias).toHaveLength(1)
-    expect(EventSourceFalso.instancias[0]?.url).toBe(`${base}/stream`)
-  })
+    emitir(conMensaje('primera'))
+    expect(screen.getByRole('alert')).toHaveTextContent('primera')
 
-  it('muestra el toast al recibir una notificación y lo quita con cerrar', () => {
-    render(<Prueba />)
-    emitirNotificacion()
-
-    expect(screen.getByRole('status')).toBeInTheDocument()
-    expect(screen.getByText(NOTIFICACION.mensaje)).toBeInTheDocument()
+    emitir(conMensaje('segunda'))
+    expect(screen.getByRole('alert')).toHaveTextContent('primera')
+    expect(screen.queryByText('segunda')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Cerrar notificación' }))
 
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('segunda')
+  })
+
+  it(`conserva como máximo ${MAX_NOTIFICACIONES} en la cola FIFO`, () => {
+    renderizar()
+
+    for (const mensaje of ['A', 'B', 'C', 'D', 'E', 'F']) {
+      emitir(conMensaje(mensaje))
+    }
+
+    expect(screen.getByText('B')).toBeInTheDocument()
+    expect(screen.queryByText('A')).not.toBeInTheDocument()
+
+    for (let cierre = 0; cierre < MAX_NOTIFICACIONES - 1; cierre += 1) {
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Cerrar notificación' }),
+      )
+    }
+
+    expect(screen.getByText('F')).toBeInTheDocument()
   })
 
   it('ignora una notificación con un tipo desconocido', () => {
-    render(<Prueba />)
+    renderizar()
 
     act(() => {
       EventSourceFalso.instancias[0]?.emitir('notificacion', {
@@ -116,46 +105,23 @@ describe('useNotificaciones', () => {
       })
     })
 
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('ignora eventos que no son notificacion', () => {
-    render(<Prueba />)
+    renderizar()
 
     act(() => {
       EventSourceFalso.instancias[0]?.emitir('kpis', { alertas_activas: 2 })
       EventSourceFalso.instancias[0]?.emitir('lectura', { temperatura_c: 3.4 })
     })
 
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
-  })
-
-  it('cierra el EventSource al desmontar', () => {
-    const { unmount } = render(<Prueba />)
-    const fuente = EventSourceFalso.instancias[0]
-
-    unmount()
-
-    expect(fuente?.cerrado).toBe(true)
-  })
-
-  it('descarta el toast a los 10 segundos', () => {
-    vi.useFakeTimers()
-    render(<Prueba />)
-    emitirNotificacion()
-
-    expect(screen.getByRole('status')).toBeInTheDocument()
-
-    act(() => {
-      vi.advanceTimersByTime(DURACION_NOTIFICACION_MS)
-    })
-
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('no revienta si no hay EventSource', () => {
     vi.stubGlobal('EventSource', undefined)
 
-    expect(() => render(<Prueba />)).not.toThrow()
+    expect(() => renderizar()).not.toThrow()
   })
 })
