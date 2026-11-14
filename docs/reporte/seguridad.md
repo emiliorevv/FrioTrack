@@ -34,9 +34,9 @@ Los flujos permitidos son pocos y explícitos:
 
 Todo lo demás se niega. **IT no puede entrar a OT** (flujo denegado): la PC del gerente y el punto de venta no tienen ruta a los sensores, así que un equipo infectado no llega a la operación. La OT no acepta conexiones entrantes; solo inicia el flujo al gateway y al proxy. Las VLANs microsegmentan y el proxy reduce la salida a un destino y un endpoint.
 
-Controles: token por sensor (solo su cámara), `CRON_TOKEN` (solo `/api/simulador/tick`), JWT (lectura y alertas) y `logs_acceso` con IP, ruta, estado y sujeto; TLS en los saltos externos y firewall que niega por omisión.
+El diseño prevé: token por sensor (solo su cámara), `CRON_TOKEN` (solo `/api/simulador/tick`), JWT (lectura y alertas) y `logs_acceso` con IP, ruta, estado y sujeto; TLS en los saltos externos y firewall que niega por omisión.
 
-En el prototipo las VLANs y el firewall son de diseño; el código implementa tokens, roles, TLS y logs. El diagrama es la referencia para instalar un router con VLANs, la única inversión de red real.
+En el prototipo las VLANs y el firewall son de diseño; el código implementa el token por sensor, el `CRON_TOKEN`, TLS y los logs. El diagrama es la referencia para instalar un router con VLANs, la única inversión de red real.
 
 ![Diagrama IDMZ y Zero Trust](../../security/diagramas/idmz.png)
 
@@ -78,13 +78,13 @@ Con la API local arriba y la base migrada, se lanza el ataque:
 PYTHONPATH=. backend/.venv/bin/python security/ataque.py --intentos 15 --espera 20
 ```
 
-El script manda 15 `POST /api/telemetria` con tokens `token-falso-N`; la API responde `401`. Con `--espera 20` manda una extra para ver el bloqueo. Luego se ejecuta el detector:
+El comando documentado usa `127.0.0.2`; en la prueba local no se creó el alias y se atacó desde la IP LAN `192.168.0.4` contra una segunda instancia, con `--ip-local 192.168.0.4`. El script manda 15 `POST /api/telemetria` con tokens `token-falso-N`; las 15 respuestas fueron `401`. Con `--espera 20` manda una extra para ver el bloqueo. Luego se ejecuta el detector:
 
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m security.detector --once
 ```
 
-El resultado esperado es una alerta **alta** por fuerza bruta desde `127.0.0.2`, el bloqueo de esa IP durante **60 minutos** y, pasados los 15 segundos de caché del middleware, un **403** para la petición extra. El dashboard en `127.0.0.1` sigue intacto porque está en la lista de IPs de confianza. Antes conviene correr `--dry-run`.
+El resultado **medido** fue: alerta `high` de fuerza bruta desde `192.168.0.4`, bloqueo de esa IP durante **60 minutos** y, pasados los 15 segundos de caché del middleware, **403** para la petición extra. El dashboard en `127.0.0.1` quedó intacto porque está en la lista de IPs de confianza. Antes conviene correr `--dry-run`.
 
 Si no se puede crear el alias (por ejemplo, sin permisos de administrador), la alternativa es levantar una segunda instancia de la API y atacar desde la IP LAN. El detector se apunta a esa base con `--database-url` y se ajusta `--ips-permitidas` para incluir la IP del dashboard y no la del atacante. El flujo es el mismo: 401, alerta, bloqueo y 403.
 
@@ -96,6 +96,6 @@ Las ventanas y umbrales son de prototipo (10 intentos en 5 minutos, 8 °C en 60 
 
 El bloqueo es local: `ips_bloqueadas` lo consulta esta API, no el router ni un WAF; en producción hay que empujarlo al firewall. En la demo depende del alias de loopback; sin él, usar la IP LAN y la segunda instancia.
 
-Las VLANs y la IDMZ son diseño; el prototipo no configura un switch administrado. Lo implementado es tokens, JWT, roles, TLS, logs y respuesta; el diagrama es la referencia para desplegar la red.
+Las VLANs y la IDMZ son diseño; el prototipo no configura un switch administrado. Lo implementado es el token por sensor, el `CRON_TOKEN`, TLS en los saltos externos, los logs de acceso y la respuesta del detector; el JWT de usuario y los roles quedan en la fase de autenticación. El diagrama es la referencia para desplegar la red.
 
 Con esos límites, el módulo evita que una lectura falsa pase desapercibida y permite reaccionar antes de perder producto.
