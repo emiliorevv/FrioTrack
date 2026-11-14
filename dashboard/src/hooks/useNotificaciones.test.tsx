@@ -106,6 +106,19 @@ describe('useNotificaciones', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
+  it('ignora una notificación con un tipo desconocido', () => {
+    render(<Prueba />)
+
+    act(() => {
+      EventSourceFalso.instancias[0]?.emitir('notificacion', {
+        ...NOTIFICACION,
+        tipo: 'otro',
+      })
+    })
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('ignora eventos que no son notificacion', () => {
     render(<Prueba />)
 

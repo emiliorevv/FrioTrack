@@ -6,6 +6,8 @@ const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000/api'
 /** Tiempo que el toast permanece visible antes de descartarse solo. */
 export const DURACION_NOTIFICACION_MS = 10_000
 
+const TIPOS = new Set(['alerta_temperatura', 'alerta_puerta', 'merma'])
+
 /**
  * Escucha el evento `notificacion` de `GET /api/stream` y guarda la última.
  * El resto de eventos del stream (`kpis`, `lectura`, …) se ignoran.
@@ -74,6 +76,8 @@ function esNotificacion(valor: unknown): valor is Notificacion {
   return (
     typeof datos.mensaje === 'string' &&
     typeof datos.tipo === 'string' &&
-    typeof datos.camara_id === 'number'
+    TIPOS.has(datos.tipo) &&
+    typeof datos.camara_id === 'number' &&
+    typeof datos.ts === 'string'
   )
 }
