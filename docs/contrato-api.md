@@ -15,9 +15,9 @@ Hay tres tipos de credencial, una por zona. Ninguna sirve para lo que le toca a 
 |---|---|---|
 | Sensor o gateway del restaurante | `Authorization: Bearer <token_sensor>`, un token por sensor | Solo `POST /telemetria` |
 | Cloudflare Worker (cron) | `Authorization: Bearer <token_cron>` | Solo `POST /simulador/tick` |
-| Usuario del dashboard | `Authorization: Bearer <jwt>` que da `POST /auth/login`, dura 8 horas | Lecturas, alertas, lotes, KPIs y stream |
+| Usuario del dashboard | `Authorization: Bearer <jwt>` que da `POST /auth/login` o `POST /auth/registro`, dura 8 horas | Lecturas, alertas, lotes, KPIs y stream |
 
-Roles de usuario: `jefe_cocina` (ve todo y atiende alertas) y `gerente` (ve todo, no atiende alertas).
+Roles de usuario: `dueno` (ve y opera todo el restaurante y atiende alertas), `jefe_cocina` (ve todo y atiende alertas) y `gerente` (solo consulta, no atiende).
 
 ### `POST /auth/login`
 
@@ -33,6 +33,31 @@ Respuesta `200`:
 ```
 
 El JWT usa HS256 y lleva `sub` (usuario), `uid` (id del usuario), `rol`, `pwd` (huella corta del hash de la contraseña), `restaurante_id` (tenant del usuario), `iat` y `exp`; `JWT_EXPIRA_HORAS` define su vigencia (8 h por defecto). Un cambio de contraseña invalida los tokens anteriores, igual que un usuario borrado o recreado. Si el usuario no existe o la contraseña no coincide, la respuesta es `401` con el mismo mensaje (`Usuario o contraseña incorrectos.`) y `WWW-Authenticate: Bearer`, sin revelar cuál de los dos falló. Tras 10 intentos por IP en 5 minutos el login responde `429` con `Retry-After`.
+
+### `POST /auth/registro`
+
+Alta pública de un restaurante y su usuario dueño. No requiere JWT y funciona con `AUTH_REQUERIDA` prendida o apagada: es la puerta de entrada del producto.
+
+```json
+{ "restaurante": "Taquería Norte", "usuario": "dueno@norte.mx", "password": "..." }
+```
+
+`restaurante` va de 2 a 120 caracteres y `usuario` de 3 a 64; a ambos se les recortan los espacios de los extremos y un valor que queda vacío es inválido. `usuario` además se guarda en **minúsculas** (`Dueno@Norte.mx` y `dueno@norte.mx` son el mismo login) y es el **identificador de login**, único a nivel global: el dashboard puede pedirlo como correo, pero todavía no existe el campo `email` ni la verificación de correo, así que no se agrega un dato que aún no se valida. `password` va de 8 a 128 caracteres y se guarda hasheada con PBKDF2.
+
+Respuesta `201`, con el mismo formato que el login:
+```json
+{ "access_token": "<jwt>", "token_type": "bearer", "expira_en_segundos": 28800 }
+```
+
+El alta crea el `restaurante` y, en la misma transacción, un `usuario` con rol `dueno` y `restaurante_id` apuntando al tenant recién creado. El restaurante nace **sin cámaras** y el JWT ya trae el `restaurante_id`, así que el dueño entra directo al dashboard de su tenant. Errores:
+
+| Código | Cuándo |
+|---|---|
+| `409` | El alta no procedió (`No se pudo completar el registro.`), también si dos altas compiten y la unicidad la detecta la base. El mensaje es genérico a propósito: no confirma si el usuario existe; la verificación por correo será la solución completa y, mientras tanto, el rate limit y la regla SIEM de fuerza bruta cubren el abuso |
+| `422` | Campos fuera de rango, vacíos o con tipo incorrecto |
+| `429` | Más de 5 intentos por IP en una hora, con `Retry-After`; cuentan todos los intentos, también las altas exitosas |
+
+Los `409` y `429` de este endpoint alimentan la regla SIEM de fuerza bruta, que bloquea la IP tras 10 eventos en 5 minutos.
 
 Las rutas de consulta y el stream exigen este JWT cuando `AUTH_REQUERIDA=1`, que es **obligatorio en producción** (la API no arranca en Render sin él). Con `AUTH_REQUERIDA=0`, permitido solo en local y pruebas, quedan abiertas como antes sobre el restaurante demo. Los datos se aíslan por `restaurante_id`: un recurso de otro restaurante responde `404`, igual que uno inexistente. Un token sin el claim `restaurante_id`, o con un tenant distinto al de la fila del usuario, responde `401`; los tokens emitidos antes de este cambio dejan de servir (vigencia máxima 8 h). `POST /telemetria` y `POST /simulador/tick` conservan sus tokens de sensor y de cron, y `GET /health` sigue sin autenticación. Un token ausente, inválido o expirado devuelve `401` con `WWW-Authenticate: Bearer`; un rol sin permiso devuelve `403`.
 
@@ -117,7 +142,7 @@ Lista de lecturas de una cámara para la gráfica. Si no se manda rango, regresa
 `tipo` puede ser `temperatura` o `puerta`.
 
 #### `POST /alertas/{id}/atender`
-Solo rol `jefe_cocina`. Body `{ "nota": "Se cerró la puerta" }`. Marca quién la atendió y cuánto tardó. Con `AUTH_REQUERIDA=1` se atribuye al usuario del JWT y un `gerente` recibe `403`; con la bandera apagada se atribuye al primer `jefe_cocina` del restaurante de la petición (en la demo, `jefe`). Una alerta de otro restaurante responde `404`.
+Solo roles `jefe_cocina` o `dueno`. Body `{ "nota": "Se cerró la puerta" }`. Marca quién la atendió y cuánto tardó. Con `AUTH_REQUERIDA=1` se atribuye al usuario del JWT y un `gerente` recibe `403`; con la bandera apagada se atribuye al primer `jefe_cocina` del restaurante de la petición (en la demo, `jefe`). Una alerta de otro restaurante responde `404`.
 
 #### `GET /kpis`
 ```json
@@ -181,6 +206,6 @@ La API escribe una línea JSON por petición en la salida estándar (Render la g
 }
 ```
 
-`credencial` es `sensor`, `cron`, `usuario` o `ninguna`. `sujeto` es el `sensor_id`, el usuario o `null`.
+`credencial` es `sensor`, `cron`, `usuario`, `registro` o `ninguna`. `sujeto` es el `sensor_id`, el usuario o `null`.
 
 En producción el access log de uvicorn se desactiva (`--no-access-log`, coordinado con el `render.yaml` del PR #42): el middleware de la API es el único que registra y nunca incluye el query string, así que el JWT de `?token=` no aparece en los logs. `GET /health` queda fuera del middleware: no escribe en `logs_acceso` ni consulta o aplica bloqueos de IP.

@@ -34,7 +34,7 @@ from app.services.kpis import calcular_kpis
 router = APIRouter(prefix="/api", tags=["operacion"], dependencies=[Depends(get_current_user)])
 
 SesionDb = Annotated[Session, Depends(get_db)]
-JefeCocina = Annotated[Usuario | None, Depends(require_rol("jefe_cocina"))]
+JefeCocina = Annotated[Usuario | None, Depends(require_rol("jefe_cocina", "dueno"))]
 
 
 class AtenderEntrada(BaseModel):
@@ -80,8 +80,8 @@ def atender_alerta(
 
     Es idempotente: si la alerta ya estaba atendida conserva `atendida_en` y
     `atendida_por` (para no empeorar el KPI de tiempo de respuesta) y solo
-    actualiza la nota cuando viene en el cuerpo. Solo puede llamarlo el rol
-    `jefe_cocina` cuando la autenticación está activa. Una alerta de otro
+    actualiza la nota cuando viene en el cuerpo. Solo pueden llamarlo los roles
+    `jefe_cocina` o `dueno` cuando la autenticación está activa. Una alerta de otro
     restaurante responde 404, igual que una inexistente.
     """
     alerta = db.get(Alerta, alerta_id)
