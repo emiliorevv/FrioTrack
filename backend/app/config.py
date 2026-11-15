@@ -3,6 +3,7 @@
 import json
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -10,6 +11,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 JWT_SECRET_POR_DEFECTO = "cambia-esto-en-produccion"
 SEED_PASSWORD_DEMO = "friotrack-demo"
 LONGITUD_MINIMA_SECRETO = 32
+# Ruta absoluta: el `.env` vive en backend/ aunque el comando corra desde la raíz.
+RUTA_ENV = Path(__file__).resolve().parent.parent / ".env"
 # Mismos IDs que app/db/seed.py; se duplican aquí para no crear un ciclo de imports.
 SENSORES_ESPERADOS = ("S-PES-01", "S-CAR-01", "S-LAC-01", "S-VER-01", "S-CON-01")
 
@@ -17,7 +20,9 @@ SENSORES_ESPERADOS = ("S-PES-01", "S-CAR-01", "S-LAC-01", "S-VER-01", "S-CON-01"
 class Settings(BaseSettings):
     """Valores de configuración; las variables de entorno los sobrescriben."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(RUTA_ENV), env_file_encoding="utf-8", extra="ignore"
+    )
 
     app_name: str = "FríoTrack API"
     # `local` relaja las validaciones; Render se detecta además con RENDER=true.

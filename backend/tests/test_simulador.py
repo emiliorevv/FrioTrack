@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from app.config import limpiar_cache_settings
+from app.config import Settings, limpiar_cache_settings
 from app.db.seed import SENSORES
 from simulator.cli import (
     ESPERA_REINTENTO_SEGUNDOS,
@@ -280,13 +280,16 @@ def test_token_de_camara_sale_del_sensor_correspondiente(camara_id, sensor_id):
 
 def test_token_de_camara_lee_sensor_tokens_de_backend_env(tmp_path, monkeypatch):
     """El README indica SENSOR_TOKENS en `backend/.env`; no hay que exportarlo."""
-    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("SENSOR_TOKENS", raising=False)
-    (tmp_path / ".env").write_text(
-        f"SENSOR_TOKENS='{json.dumps(TOKENS)}'\n", encoding="utf-8"
-    )
+    env = tmp_path / ".env"
+    env.write_text(f"SENSOR_TOKENS='{json.dumps(TOKENS)}'\n", encoding="utf-8")
+    monkeypatch.setitem(Settings.model_config, "env_file", str(env))
+    limpiar_cache_settings()
 
-    assert token_de_camara(1) == "token-pes"
+    try:
+        assert token_de_camara(1) == "token-pes"
+    finally:
+        limpiar_cache_settings()
 
 
 def test_token_manual_sobreescribe_el_entorno():

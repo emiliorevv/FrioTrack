@@ -55,16 +55,17 @@ Guía para llevar el prototipo a la nube con los planes gratuitos: API en **Rend
    ```bash
    python3 -m venv .venv
    .venv/bin/pip install -r requirements-dev.txt
-   .venv/bin/alembic upgrade head
+   .venv/bin/python -m app.db.migrar
    .venv/bin/python -m app.db.init_db
    ```
 
-   `alembic upgrade head` aplica el baseline `0001` y deja el historial en la
+   `python -m app.db.migrar` aplica el baseline `0001` y deja el historial en la
    tabla `alembic_version`; el detalle está en [migraciones.md](migraciones.md).
-   Si la base **ya existía** con las tablas creadas por `create_all`, no corras
-   `upgrade`: ejecuta `.venv/bin/alembic stamp head` una sola vez y verifica con
-   `.venv/bin/alembic check`. `init_db` solo carga el seed (ya no crea tablas) y
-   es idempotente: si la base ya tiene cámaras, no inserta nada. **No rota tokens ni contraseñas**: si ya sembraste con los tokens de ejemplo en una base de prueba, recréala y vuelve a sembrar; si tiene datos que conservar, actualiza a mano `sensores.token_hash` con el SHA-256 del token nuevo y el `password_hash` de `usuarios` (puedes generarlo con `hash_password()` de `app.core.security`).
+   Si la base **ya existía** con las tablas creadas por `create_all`, el
+   entrypoint la marca automáticamente **solo si el esquema coincide**; si hay
+   drift falla sin tocar nada (no hace falta un `stamp` manual). `init_db` solo
+   carga el seed (ya no crea tablas), exige que la revisión sea head y es
+   idempotente: si la base ya tiene cámaras, no inserta nada. **No rota tokens ni contraseñas**: si ya sembraste con los tokens de ejemplo en una base de prueba, recréala y vuelve a sembrar; si tiene datos que conservar, actualiza a mano `sensores.token_hash` con el SHA-256 del token nuevo y el `password_hash` de `usuarios` (puedes generarlo con `hash_password()` de `app.core.security`).
 
 5. Verifica en el **SQL Editor** de Supabase:
 
@@ -79,7 +80,7 @@ Guía para llevar el prototipo a la nube con los planes gratuitos: API en **Rend
 
 ### Con el blueprint
 
-El repo incluye [`render.yaml`](../render.yaml). En Render: **New → Blueprint**, conecta el repo y aplica el blueprint `friotrack-api`. Al crearlo, Render pide los valores de las variables marcadas con `sync: false`; esas variables quedan bajo control del panel y el blueprint **no** las pisa en las siguientes sincronizaciones. Las que llevan `value:` (por ejemplo `ESCALA_TIEMPO`) sí se toman de `render.yaml`: para cambiarlas, edita el archivo, no solo el panel. El `startCommand` corre `alembic upgrade head` antes de uvicorn porque Render Free no tiene `preDeployCommand`; en un plan pago conviene moverlo ahí (ver [migraciones.md](migraciones.md)).
+El repo incluye [`render.yaml`](../render.yaml). En Render: **New → Blueprint**, conecta el repo y aplica el blueprint `friotrack-api`. Al crearlo, Render pide los valores de las variables marcadas con `sync: false`; esas variables quedan bajo control del panel y el blueprint **no** las pisa en las siguientes sincronizaciones. Las que llevan `value:` (por ejemplo `ESCALA_TIEMPO`) sí se toman de `render.yaml`: para cambiarlas, edita el archivo, no solo el panel. El `startCommand` corre `python -m app.db.migrar` antes de uvicorn porque Render Free no tiene `preDeployCommand`; el entrypoint verifica la revisión y no ejecuta DDL si ya está al día (ver [migraciones.md](migraciones.md)).
 
 ### Manual
 
@@ -90,7 +91,7 @@ Si prefieres crearlo a mano: **New → Web Service**, conecta el repo y usa:
 | Runtime | Python |
 | Root Directory | `backend` |
 | Build Command | `pip install -r requirements.txt` |
-| Start Command | `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-access-log` |
+| Start Command | `python -m app.db.migrar && uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-access-log` |
 | Health Check Path | `/api/health` |
 | Plan | Free |
 
@@ -295,7 +296,7 @@ Todos los equipos del restaurante salen por el mismo NAT, así que una sola IP p
 ## Checklist de despliegue
 
 - [ ] Proyecto de Supabase creado y cadena Session Pooler anotada.
-- [ ] Esquema aplicado: `alembic upgrade head` en una base nueva o `alembic stamp head` una sola vez si ya existía; `alembic current` y `alembic check` limpios.
+- [ ] Esquema aplicado con `python -m app.db.migrar` (base nueva o legada); `alembic current` = `0001 (head)` y `alembic check` limpio.
 - [ ] `SENSOR_TOKENS` y `SEED_PASSWORD` nuevos generados; el **mismo** JSON de sensores quedó en el seed y en Render (no los de `.env.example`).
 - [ ] `python -m app.db.init_db` ejecutado; 5 cámaras, 15 lotes (3 por cámara), sensores y 2 usuarios verificados. Si la base ya estaba sembrada con tokens de ejemplo, se rotaron a mano.
 - [ ] Servicio `friotrack-api` en Render con `PYTHON_VERSION=3.13.7`, `--no-access-log`, todas las variables y `/api/health` en verde.

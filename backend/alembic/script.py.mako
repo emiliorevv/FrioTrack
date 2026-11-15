@@ -6,11 +6,15 @@ Create Date: ${create_date}
 
 """
 from collections.abc import Sequence
+% if upgrades or downgrades or imports:
 
 import sqlalchemy as sa
 ${imports if imports else ""}
+% if imports:
 
+% endif
 from alembic import op
+% endif
 
 # revision identifiers, used by Alembic.
 revision: str = ${repr(up_revision)}

@@ -50,7 +50,7 @@ Desde `backend/`:
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt   # runtime + pytest y ruff
 cp .env.example .env   # pega aquí la URI de Supabase, ver abajo
-.venv/bin/alembic upgrade head   # crea/actualiza el esquema con las migraciones
+.venv/bin/python -m app.db.migrar   # aplica el esquema (seguro en bases legadas)
 .venv/bin/uvicorn app.main:app --reload
 ```
 
@@ -120,22 +120,21 @@ El runtime habla directo con el Postgres de Supabase; no hay base local.
    DATABASE_URL=postgresql+psycopg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
    ```
 
-3. Desde `backend/`, crea el esquema con Alembic y carga los datos semilla:
+3. Desde `backend/`, crea el esquema y carga los datos semilla:
 
    ```bash
-   .venv/bin/alembic upgrade head
+   .venv/bin/python -m app.db.migrar
    .venv/bin/python -m app.db.init_db
    ```
 
-   El esquema se crea solo con las migraciones (ver
-   [docs/migraciones.md](../docs/migraciones.md)); `init_db` ya no hace
-   `create_all` y falla con “Falta el esquema: ejecuta `alembic upgrade head`
-   antes de cargar el seed.” si la tabla `camaras` no existe. El seed es
-   idempotente: si la base ya tiene cámaras, no vuelve a insertar nada.
-
-   Si la base **ya existía** (creada antes con `create_all`), no corras
-   `upgrade`: marca el baseline una sola vez con
-   `.venv/bin/alembic stamp head` y verifica con `.venv/bin/alembic check`.
+   `app.db.migrar` aplica el baseline `0001` en una base vacía y, si la base es
+   legada (creada con `create_all`, sin `alembic_version`), la marca solo cuando
+   el esquema coincide. Ver
+   [docs/migraciones.md](../docs/migraciones.md). `init_db` ya no hace
+   `create_all`: falla con “Falta el esquema o está desactualizado: ejecuta
+   `python -m app.db.migrar` (o `alembic upgrade head`).” si la revisión no es
+   head. El seed es idempotente: si la base ya tiene cámaras, no vuelve a
+   insertar nada.
 
 Si `DATABASE_URL` falta o está vacía, `crear_engine()` falla con un `RuntimeError` que
 explica cómo crear `backend/.env`. La aplicación no se conecta a la base al importarse.

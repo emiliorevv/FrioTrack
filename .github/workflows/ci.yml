@@ -20,9 +20,6 @@ jobs:
     defaults:
       run:
         working-directory: backend
-    env:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/friotrack
-      ENTORNO: local
     services:
       postgres:
         image: postgres:16
@@ -56,6 +53,9 @@ jobs:
       - name: Lint con Ruff
         run: ruff check .
       - name: Migraciones de Alembic
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/friotrack
+          ENTORNO: local
         run: |
           alembic upgrade head
           alembic check

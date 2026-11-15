@@ -1,32 +1,43 @@
-"""Verifica el esquema y carga los datos semilla.
+"""Verifica la revisión de Alembic y carga los datos semilla.
 
-El esquema lo crean las migraciones de Alembic; este módulo ya no llama a
-`create_all`. Uso desde `backend/`:
+El esquema lo administran las migraciones; este módulo no migra ni crea tablas.
+Uso desde cualquier cwd:
 
-    alembic upgrade head
+    python -m app.db.migrar
     python -m app.db.init_db
 """
 
-from sqlalchemy import inspect
+from pathlib import Path
+
+from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Engine
 
 from app.db.seed import cargar_seed
 from app.db.session import SessionLocal, get_engine
 
+RUTA_ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
+
 MENSAJE_FALTA_ESQUEMA = (
-    "Falta el esquema: ejecuta `alembic upgrade head` antes de cargar el seed."
+    "Falta el esquema o está desactualizado: ejecuta `python -m app.db.migrar` "
+    "(o `alembic upgrade head`)."
 )
 
 
-def esquema_existe(engine: Engine) -> bool:
-    """Indica si la tabla `camaras` ya existe (la crea el baseline de Alembic)."""
-    return inspect(engine).has_table("camaras")
+def esquema_actualizado(engine: Engine) -> bool:
+    """Indica si la base está en la última revisión de Alembic."""
+    config = Config(str(RUTA_ALEMBIC_INI))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    with engine.connect() as conn:
+        actual = MigrationContext.configure(conn).get_current_revision()
+    return actual == head
 
 
 def inicializar_db() -> bool:
     """Carga el seed sobre un esquema migrado. Regresa False si ya había datos."""
     engine = get_engine()
-    if not esquema_existe(engine):
+    if not esquema_actualizado(engine):
         raise RuntimeError(MENSAJE_FALTA_ESQUEMA)
     with SessionLocal(bind=engine) as session:
         return cargar_seed(session)

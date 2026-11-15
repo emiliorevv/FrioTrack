@@ -22,9 +22,11 @@ services:
     # --no-access-log: el JWT del stream viaja en ?token= y uvicorn no debe
     # escribirlo en su access log. AccesoLogMiddleware sigue auditando método,
     # ruta (sin query string) y status.
-    # Render Free no tiene preDeployCommand: las migraciones corren al iniciar
-    # (son idempotentes). En un plan pago conviene moverlas a preDeployCommand.
-    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-access-log
+    # Render Free no tiene preDeployCommand: `python -m app.db.migrar` verifica
+    # la revisión y solo corre DDL si hace falta (también marca una base legada
+    # sin alembic_version si su esquema coincide). En un plan pago conviene
+    # moverlo a preDeployCommand.
+    startCommand: python -m app.db.migrar && uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-access-log
     healthCheckPath: /api/health
     envVars:
       # Fija el intérprete igual que CI (3.13) para que las dependencias con
