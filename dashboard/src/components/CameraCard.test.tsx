@@ -66,16 +66,18 @@ describe('CameraCard', () => {
     ).toBeInTheDocument()
   })
 
-  it('usa $0 si la API vieja no manda valor_inventario_mxn', () => {
+  it('muestra “Sin dato” si la API vieja no manda valor_inventario_mxn', () => {
     const sinInventario = {
       ...camaraSinLecturas,
       valor_inventario_mxn: undefined,
-    } as unknown as Camara
+    }
 
     render(<CameraCard camara={sinInventario} serie={[]} />)
 
     const metrica = screen.getByText('Inventario').closest('div')
     expect(metrica).not.toBeNull()
-    expect(within(metrica as HTMLElement).getByText('$0')).toBeInTheDocument()
+    expect(
+      within(metrica as HTMLElement).getByText('Sin dato'),
+    ).toBeInTheDocument()
   })
 })

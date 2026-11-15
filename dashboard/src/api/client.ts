@@ -347,6 +347,7 @@ function normalizarAlertaSeguridad(valor: unknown): AlertaSeguridad | null {
     ip_origen: ipOrigen,
     detalle,
     accion,
+    descripcion,
   } = valor
 
   if (
@@ -371,5 +372,8 @@ function normalizarAlertaSeguridad(valor: unknown): AlertaSeguridad | null {
     ip_origen: typeof ipOrigen === 'string' ? ipOrigen : null,
     detalle,
     accion,
+    ...(typeof descripcion === 'string' && descripcion.trim()
+      ? { descripcion }
+      : {}),
   }
 }

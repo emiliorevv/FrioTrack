@@ -261,7 +261,7 @@ describe('vista general', () => {
 
     expect(details).toHaveAttribute('open')
     expect(
-      screen.getByText(/Es el resumen de las últimas 24 horas del turno/),
+      screen.getByText(/El % en rango cubre las últimas 24 horas/),
     ).toBeInTheDocument()
   })
 
@@ -358,7 +358,7 @@ describe('vista general', () => {
     expect(screen.getByText('192.168.0.4 · IP bloqueada')).toBeInTheDocument()
     fireEvent.click(screen.getByText('¿Qué pasó?'))
     expect(
-      screen.getByText(/Detectamos varios intentos fallidos/),
+      screen.getByText(/Detectamos muchos intentos rechazados/),
     ).toBeInTheDocument()
     expect(screen.queryByText(/Datos de ejemplo/)).not.toBeInTheDocument()
     expect(

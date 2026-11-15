@@ -145,11 +145,10 @@ function App({ usuario, rol, onLogout }: AppProps) {
                     <summary>¿Qué es esto?</summary>
                     <div className="explicacion__cuerpo">
                       <p>
-                        Es el resumen de las últimas 24 horas del turno: qué
-                        tanto tiempo estuvieron las cámaras en su temperatura
-                        ideal, cuántas alertas siguen pendientes, cuánto tardó
-                        el equipo en atenderlas, cuánto producto está en riesgo
-                        y cuánto se perdió por merma hoy y en el mes.
+                        El % en rango cubre las últimas 24 horas. Las alertas
+                        activas y el valor en riesgo son del momento actual. El
+                        tiempo de respuesta es el promedio de las alertas ya
+                        atendidas. La merma es de hoy y del mes en curso.
                       </p>
                     </div>
                   </details>

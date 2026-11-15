@@ -33,10 +33,11 @@ export function KpiStrip({ kpis }: KpiStripProps) {
       valor: String(kpis.alertas_activas),
       nota:
         kpis.alertas_activas === 1
-          ? '1 pendiente de atender'
-          : `${kpis.alertas_activas} pendientes de atender`,
+          ? '1 abierta ahora'
+          : `${kpis.alertas_activas} abiertas ahora`,
       tono: 'warn',
-      ayuda: 'Alertas que siguen abiertas y todavía no se han atendido.',
+      ayuda:
+        'Alertas que siguen abiertas. Pueden estar pendientes o ya atendidas; se cierran cuando la cámara vuelve a su rango.',
     },
     {
       id: 'tiempo_respuesta_promedio_min',
@@ -57,7 +58,7 @@ export function KpiStrip({ kpis }: KpiStripProps) {
           : 'Sin producto en riesgo',
       tono: 'warn',
       ayuda:
-        'Costo del producto que está ahora en cámaras fuera de rango o con la puerta abierta demasiado tiempo.',
+        'Costo del inventario que las reglas marcaron como en riesgo por temperatura o puerta. No es el valor total de la cámara.',
     },
     {
       id: 'merma_hoy_mxn',

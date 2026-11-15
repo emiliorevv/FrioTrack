@@ -14,15 +14,17 @@ const kpisBase: Kpis = {
 
 const AYUDA_TIEMPO =
   'Promedio de minutos entre que se abre una alerta y el jefe la marca como atendida. No mide la recuperación de la cámara.'
+const AYUDA_ALERTAS =
+  'Alertas que siguen abiertas. Pueden estar pendientes o ya atendidas; se cierran cuando la cámara vuelve a su rango.'
 const AYUDA_RIESGO =
-  'Costo del producto que está ahora en cámaras fuera de rango o con la puerta abierta demasiado tiempo.'
+  'Costo del inventario que las reglas marcaron como en riesgo por temperatura o puerta. No es el valor total de la cámara.'
 
 describe('KpiStrip', () => {
   it('deriva las notas de los valores y no compara contra periodos', () => {
     render(<KpiStrip kpis={kpisBase} />)
 
     expect(screen.getByText('Últimas 24 h')).toBeInTheDocument()
-    expect(screen.getByText('1 pendiente de atender')).toBeInTheDocument()
+    expect(screen.getByText('1 abierta ahora')).toBeInTheDocument()
     expect(screen.getByText('Promedio del día')).toBeInTheDocument()
     expect(screen.getByText('Producto en riesgo')).toBeInTheDocument()
     expect(screen.getByText('Sin pérdidas hoy')).toBeInTheDocument()
@@ -44,7 +46,7 @@ describe('KpiStrip', () => {
       />,
     )
 
-    expect(screen.getByText('3 pendientes de atender')).toBeInTheDocument()
+    expect(screen.getByText('3 abiertas ahora')).toBeInTheDocument()
     expect(screen.getByText('Sin producto en riesgo')).toBeInTheDocument()
     expect(screen.getByText('Pérdida registrada hoy')).toBeInTheDocument()
   })
@@ -68,6 +70,7 @@ describe('KpiStrip', () => {
     }
 
     expect(screen.getByText(AYUDA_TIEMPO)).toBeInTheDocument()
+    expect(screen.getByText(AYUDA_ALERTAS)).toBeInTheDocument()
     expect(screen.getByText(AYUDA_RIESGO)).toBeInTheDocument()
     expect(
       screen.getByRole('button', {

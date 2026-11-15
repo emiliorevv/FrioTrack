@@ -857,13 +857,17 @@
   color: var(--muted);
 }
 
+.camera-card__meta > div {
+  min-width: 0;
+}
+
 .camera-card__meta dd {
   font-size: 0.76rem;
   font-weight: 500;
   line-height: 1.25;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .camera-card__meta .is-warn {
@@ -1308,6 +1312,7 @@
   line-height: 1.25;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .security__time {
@@ -1534,10 +1539,6 @@
   .kpi-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
-  }
-
-  .camera-card__meta {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .filter-bar {

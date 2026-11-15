@@ -64,8 +64,8 @@ export interface Camara {
   /** Nulo cuando la cámara todavía no tiene lecturas (recién sembrada la base). */
   ultima_lectura: UltimaLectura | null
   valor_en_riesgo_mxn: number
-  /** Suma de lotes no merma; 0 si la API vieja no lo manda. */
-  valor_inventario_mxn: number
+  /** Suma de lotes no merma; la API vieja puede no mandarlo. */
+  valor_inventario_mxn?: number
 }
 
 export interface Kpis {
@@ -98,6 +98,8 @@ export interface AlertaSeguridad {
   detalle: Record<string, unknown>
   /** String libre del backend; el panel usa “Sin acción” si no la conoce. */
   accion: string
+  /** Descripción opcional enviada por el backend; fuente principal si existe. */
+  descripcion?: string
 }
 
 /** Alerta operativa de `GET /alertas` y de los eventos del stream. */
