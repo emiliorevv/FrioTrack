@@ -64,13 +64,25 @@ def _resumen_lectura(lectura: Lectura | None) -> dict[str, Any] | None:
 
 @router.get("/camaras")
 def listar_camaras(db: Db) -> list[dict[str, Any]]:
-    """Lista las cámaras con su última lectura y el valor de sus lotes en riesgo."""
+    """Lista las cámaras con su última lectura y el valor de sus lotes.
+
+    `valor_en_riesgo_mxn` solo suma los lotes `en_riesgo`;
+    `valor_inventario_mxn` suma todo el inventario salvo lo que ya es merma.
+    """
     camaras = db.execute(select(Camara).order_by(Camara.id)).scalars().all()
     riesgo = {
         camara_id: float(total or 0)
         for camara_id, total in db.execute(
             select(Lote.camara_id, func.sum(Lote.costo_total_mxn))
             .where(Lote.estado == "en_riesgo")
+            .group_by(Lote.camara_id)
+        ).all()
+    }
+    inventario = {
+        camara_id: float(total or 0)
+        for camara_id, total in db.execute(
+            select(Lote.camara_id, func.sum(Lote.costo_total_mxn))
+            .where(Lote.estado != "merma")
             .group_by(Lote.camara_id)
         ).all()
     }
@@ -86,6 +98,7 @@ def listar_camaras(db: Db) -> list[dict[str, Any]]:
             "estado": camara.estado,
             "ultima_lectura": _resumen_lectura(_ultima_lectura(db, camara)),
             "valor_en_riesgo_mxn": riesgo.get(camara.id, 0.0),
+            "valor_inventario_mxn": inventario.get(camara.id, 0.0),
         }
         for camara in camaras
     ]

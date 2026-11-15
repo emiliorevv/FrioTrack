@@ -65,7 +65,7 @@ class SesionFalsa:
         self.consultas.append(stmt)
 
         if "group by" in sql:
-            return _Resultado(self._sumas_en_riesgo(params))
+            return _Resultado(self._sumas_por_estado(sql, params))
         if "from lotes" in sql:
             return _Resultado(self._lotes(params))
         if "from lecturas" in sql:
@@ -76,11 +76,14 @@ class SesionFalsa:
             return _Resultado(sorted(self.camaras, key=lambda camara: camara.id))
         raise AssertionError(f"Consulta no soportada por la sesión falsa:\n{stmt}")
 
-    def _sumas_en_riesgo(self, params: dict[str, Any]) -> list[tuple[int, Decimal]]:
+    def _sumas_por_estado(self, sql: str, params: dict[str, Any]) -> list[tuple[int, Decimal]]:
+        """Imita las sumas por cámara: `= estado` o `!= estado` según el WHERE."""
         estado = params.get("estado_1", "en_riesgo")
+        excluir = "!=" in sql or "<>" in sql
         totales: dict[int, Decimal] = {}
         for lote in self.lotes:
-            if lote.estado == estado:
+            coincide = lote.estado != estado if excluir else lote.estado == estado
+            if coincide:
                 totales[lote.camara_id] = totales.get(lote.camara_id, Decimal(0)) + (
                     lote.costo_total_mxn
                 )
@@ -233,7 +236,7 @@ def mundo() -> dict[str, Any]:
     }
 
 
-def test_camaras_devuelve_cinco_con_ultima_lectura_y_valor_en_riesgo(mundo):
+def test_camaras_devuelve_cinco_con_ultima_lectura_y_valores_de_lotes(mundo):
     with _cliente(mundo["sesion"]) as cliente:
         respuesta = cliente.get("/api/camaras")
 
@@ -255,19 +258,26 @@ def test_camaras_devuelve_cinco_con_ultima_lectura_y_valor_en_riesgo(mundo):
             "puerta_abierta": True,
         },
         "valor_en_riesgo_mxn": 4850.0,
+        "valor_inventario_mxn": 5970.0,
     }
     # Cámara 2 no tiene ultima_lectura_id: se usa la lectura más reciente por recibida_en.
     assert camaras[1]["ultima_lectura"]["ts"] == (
         mundo["ahora"] - timedelta(minutes=2)
     ).isoformat()
     assert camaras[1]["valor_en_riesgo_mxn"] == 3100.0
+    assert camaras[1]["valor_inventario_mxn"] == 4750.0
+    assert camaras[2]["valor_inventario_mxn"] == 420.0
     assert camaras[3]["valor_en_riesgo_mxn"] == 300.0
+    assert camaras[3]["valor_inventario_mxn"] == 300.0
+    # La cámara 5 solo tiene un lote en merma: inventario cero.
     assert camaras[4]["valor_en_riesgo_mxn"] == 0.0
+    assert camaras[4]["valor_inventario_mxn"] == 0.0
 
     assert all(isinstance(camara["id"], int) for camara in camaras)
     assert all(isinstance(camara["rango_min_c"], float) for camara in camaras)
     assert all(isinstance(camara["rango_max_c"], float) for camara in camaras)
     assert all(isinstance(camara["valor_en_riesgo_mxn"], float) for camara in camaras)
+    assert all(isinstance(camara["valor_inventario_mxn"], float) for camara in camaras)
     ultima = camaras[0]["ultima_lectura"]
     assert isinstance(ultima["temperatura_c"], float)
     assert isinstance(ultima["humedad_pct"], float)
@@ -279,6 +289,31 @@ def test_camara_sin_lecturas_devuelve_ultima_lectura_null(mundo):
         camaras = cliente.get("/api/camaras").json()
 
     assert camaras[4]["ultima_lectura"] is None
+
+
+def test_camaras_suman_ok_y_en_riesgo_excluyen_merma_y_cero_sin_lotes():
+    camaras = [
+        _camara(1, "Pescados y mariscos", "0.0", "2.0", 10, 60, "en_rango", None),
+        _camara(2, "Carnes y aves", "0.0", "4.0", 15, 120, "en_rango", None),
+    ]
+    lotes = [
+        _lote(1, 1, "Robalo fresco", "12.00", "1000.00", "ok", date(2026, 11, 20)),
+        _lote(2, 1, "Camarón", "5.00", "500.00", "en_riesgo", date(2026, 11, 21)),
+        _lote(3, 1, "Pulpo", "4.00", "900.00", "merma", date(2026, 11, 22)),
+    ]
+    sesion = SesionFalsa(camaras=camaras, lotes=lotes)
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.get("/api/camaras")
+
+    assert respuesta.status_code == 200
+    por_id = {camara["id"]: camara for camara in respuesta.json()}
+    # ok + en_riesgo suman al inventario; el lote en merma queda fuera.
+    assert por_id[1]["valor_inventario_mxn"] == 1500.0
+    # El valor en riesgo no cambia: solo cuenta el lote `en_riesgo`.
+    assert por_id[1]["valor_en_riesgo_mxn"] == 500.0
+    # Sin lotes, el inventario de la cámara es cero.
+    assert por_id[2]["valor_inventario_mxn"] == 0.0
 
 
 def test_lecturas_de_camara_inexistente_devuelve_404(mundo):

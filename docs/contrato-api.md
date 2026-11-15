@@ -86,10 +86,13 @@ Usuario con cualquier rol. Lista las últimas 20 filas de `alertas_seguridad` pa
     "min_para_merma": 60,
     "estado": "alerta",
     "ultima_lectura": { "ts": "...", "temperatura_c": 3.1, "humedad_pct": 85, "puerta_abierta": true },
-    "valor_en_riesgo_mxn": 4850.00
+    "valor_en_riesgo_mxn": 4850.00,
+    "valor_inventario_mxn": 5970.00
   }
 ]
 ```
+
+`valor_en_riesgo_mxn` suma el costo de los lotes `en_riesgo` de la cámara; `valor_inventario_mxn` suma todos sus lotes vigentes, es decir, todos menos los que ya están en `merma`.
 
 #### `GET /camaras/{id}/lecturas?desde=&hasta=`
 Lista de lecturas de una cámara para la gráfica. Si no se manda rango, regresa las últimas 2 horas.
