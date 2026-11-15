@@ -32,6 +32,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -137,14 +138,22 @@ describe('pedir', () => {
   })
 
   it('corta la petición cuando la API tarda más de 10 s', async () => {
-    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(AbortSignal.abort())
+    vi.useFakeTimers()
     fetchFalso.mockImplementation((_url: string, init?: RequestInit) => {
-      expect(init?.signal?.aborted).toBe(true)
-      return Promise.reject(
-        new DOMException('The operation timed out.', 'TimeoutError'),
-      )
+      return new Promise((_resolver, rechazar) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => rechazar(new DOMException('abortado', 'AbortError')),
+          { once: true },
+        )
+      })
     })
 
-    await expect(obtenerHealth()).rejects.toThrow('tardó más de 10 s')
+    const peticion = obtenerHealth().catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(10_000)
+    const error = await peticion
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('tardó más de 10 s')
   })
 })

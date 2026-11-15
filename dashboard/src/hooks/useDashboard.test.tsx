@@ -6,9 +6,14 @@ import {
   obtenerKpis,
   obtenerLecturas,
 } from '../api/client'
-import { useStreamEvent } from '../realtime/StreamProvider'
-import type { Camara, Kpis, Lectura } from '../types'
-import { fusionarCamaras, useDashboard } from './useDashboard'
+import { useStreamEvent, useStreamReconexion } from '../realtime/StreamProvider'
+import type { Camara, Health, Kpis, Lectura, PuntoSerie } from '../types'
+import {
+  fusionarCamaras,
+  fusionarSeries,
+  MAX_PUNTOS_SERIE,
+  useDashboard,
+} from './useDashboard'
 
 vi.mock('../api/client', () => ({
   obtenerHealth: vi.fn(),
@@ -19,6 +24,7 @@ vi.mock('../api/client', () => ({
 
 vi.mock('../realtime/StreamProvider', () => ({
   useStreamEvent: vi.fn(),
+  useStreamReconexion: vi.fn(() => 0),
 }))
 
 type Oyente = (evento: MessageEvent<string>) => void
@@ -71,10 +77,14 @@ function crearCamaras(): Camara[] {
   ]
 }
 
-function crearLectura(camaraId: number, temperatura: number): Lectura {
+function crearLectura(
+  camaraId: number,
+  temperatura: number,
+  ts = '2026-11-14T10:00:00+00:00',
+): Lectura {
   return {
     id: camaraId * 100,
-    ts: '2026-11-14T10:00:00+00:00',
+    ts,
     recibida_en: '2026-11-14T10:00:01+00:00',
     temperatura_c: temperatura,
     humedad_pct: 80,
@@ -97,6 +107,7 @@ beforeEach(() => {
   vi.mocked(useStreamEvent).mockImplementation((evento, oyente) => {
     oyentes.set(evento, oyente)
   })
+  vi.mocked(useStreamReconexion).mockReturnValue(0)
   vi.mocked(obtenerHealth).mockResolvedValue({ ok: true, escala_tiempo: 30 })
   vi.mocked(obtenerCamaras).mockResolvedValue(crearCamaras())
   vi.mocked(obtenerKpis).mockResolvedValue(kpis)
@@ -126,8 +137,9 @@ describe('useDashboard', () => {
     expect(result.current.camaras).toHaveLength(2)
     expect(result.current.kpis).toEqual(kpis)
     expect(result.current.cargando).toBe(false)
-    expect(result.current.error).toBeNull()
-    expect(result.current.actualizadoEn).toBeInstanceOf(Date)
+    expect(result.current.errorResumen).toBeNull()
+    expect(result.current.ultimoExitoHttp).toBeInstanceOf(Date)
+    expect(result.current.ultimaActividadSse).toBeNull()
     expect(obtenerLecturas).toHaveBeenCalledTimes(2)
   })
 
@@ -143,7 +155,7 @@ describe('useDashboard', () => {
     expect(result.current.health).toBeNull()
     expect(result.current.kpis).toEqual(kpis)
     expect(result.current.cargando).toBe(false)
-    expect(result.current.error).toBeNull()
+    expect(result.current.errorResumen).toBeNull()
   })
 
   it('solo reintenta /health si sigue en null', async () => {
@@ -186,7 +198,7 @@ describe('useDashboard', () => {
     })
 
     expect(obtenerHealth).toHaveBeenCalledTimes(1)
-    expect(result.current.error).toBe('sin red')
+    expect(result.current.errorResumen).toBe('sin red')
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60_000)
@@ -207,6 +219,156 @@ describe('useDashboard', () => {
     expect(obtenerLecturas).toHaveBeenCalledTimes(2)
   })
 
+  it('fusiona los puntos SSE que llegan mientras se carga el historial', async () => {
+    let resolverHttp!: (lecturas: Lectura[]) => void
+    const httpPendiente = new Promise<Lectura[]>((resolver) => {
+      resolverHttp = resolver
+    })
+    vi.mocked(obtenerLecturas).mockImplementation((id) => {
+      if (id === 1) {
+        return httpPendiente
+      }
+      return Promise.resolve([crearLectura(id, 3)])
+    })
+
+    const { result } = renderHook(() => useDashboard())
+    await waitFor(() => expect(result.current.camaras).toHaveLength(2))
+    await waitFor(() => expect(obtenerLecturas).toHaveBeenCalledTimes(2))
+
+    act(() => {
+      emitir('lectura', {
+        camara_id: 1,
+        ts: '2026-11-14T10:05:00+00:00',
+        temperatura_c: 4.2,
+        humedad_pct: 81,
+        puerta_abierta: true,
+        estado_camara: 'critica',
+      })
+    })
+
+    await act(async () => {
+      resolverHttp([
+        crearLectura(1, 1, '2026-11-14T10:00:00+00:00'),
+        crearLectura(1, 1.1, '2026-11-14T10:01:00+00:00'),
+      ])
+    })
+
+    await waitFor(() => expect(result.current.series[1]).toEqual([1, 1.1, 4.2]))
+  })
+
+  it('pide las series de una cámara nueva en el polling', async () => {
+    const { result } = renderHook(() => useDashboard())
+    await waitFor(() => expect(result.current.series[2]).toEqual([3]))
+    expect(obtenerLecturas).toHaveBeenCalledTimes(2)
+
+    const [, carnes] = crearCamaras()
+    const tercera: Camara = { ...carnes, id: 3, nombre: 'Lácteos' }
+    vi.mocked(obtenerCamaras).mockResolvedValueOnce([
+      ...crearCamaras(),
+      tercera,
+    ])
+
+    await act(async () => {
+      await result.current.refrescar()
+    })
+
+    await waitFor(() => expect(result.current.series[3]).toEqual([4]))
+    expect(obtenerLecturas).toHaveBeenCalledTimes(3)
+  })
+
+  it('vuelve a pedir las series al reconectar el SSE', async () => {
+    const { result, rerender } = renderHook(() => useDashboard())
+    await waitFor(() => expect(result.current.series[1]).toEqual([2]))
+    expect(obtenerLecturas).toHaveBeenCalledTimes(2)
+
+    vi.mocked(useStreamReconexion).mockReturnValue(1)
+    rerender()
+
+    await waitFor(() => expect(obtenerLecturas).toHaveBeenCalledTimes(4))
+  })
+
+  it('no cancela un refresco completo con un evento de alerta', async () => {
+    const { result } = renderHook(() => useDashboard())
+    await waitFor(() => expect(result.current.camaras).toHaveLength(2))
+
+    let resolver!: (camaras: Camara[]) => void
+    const pendiente = new Promise<Camara[]>((resolve) => {
+      resolver = resolve
+    })
+    vi.mocked(obtenerCamaras).mockImplementationOnce(() => pendiente)
+
+    let refresco!: Promise<void>
+    act(() => {
+      refresco = result.current.refrescar()
+    })
+    await waitFor(() => expect(obtenerCamaras).toHaveBeenCalledTimes(2))
+
+    vi.useFakeTimers()
+    act(() => {
+      emitir('alerta_abierta', { id: 1 })
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(obtenerCamaras).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      resolver(crearCamaras())
+      await refresco
+    })
+  })
+
+  it('no pierde /health si arranca un refresco por evento', async () => {
+    vi.useFakeTimers()
+    let resolverSalud!: (salud: Health) => void
+    const saludPendiente = new Promise<Health>((resolve) => {
+      resolverSalud = resolve
+    })
+    vi.mocked(obtenerHealth).mockReturnValueOnce(saludPendiente)
+
+    const { result } = renderHook(() => useDashboard())
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(result.current.camaras).toHaveLength(2)
+    expect(result.current.health).toBeNull()
+
+    act(() => {
+      emitir('alerta_abierta', { id: 1 })
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      resolverSalud({ ok: true, escala_tiempo: 30 })
+    })
+
+    expect(result.current.health).toEqual({ ok: true, escala_tiempo: 30 })
+  })
+
+  it('mantiene el error de resumen aunque el SSE siga enviando datos', async () => {
+    const { result } = renderHook(() => useDashboard())
+    await waitFor(() => expect(result.current.camaras).toHaveLength(2))
+
+    vi.mocked(obtenerKpis).mockRejectedValueOnce(new Error('kpis caído'))
+    await act(async () => {
+      await result.current.refrescar()
+    })
+    expect(result.current.errorResumen).toBe('kpis caído')
+
+    act(() => {
+      emitir('kpis', { ...kpis, alertas_activas: 4 })
+    })
+
+    expect(result.current.ultimaActividadSse).toBeInstanceOf(Date)
+    expect(result.current.errorResumen).toBe('kpis caído')
+    expect(result.current.kpis?.alertas_activas).toBe(4)
+  })
+
   it('deja sin sparkline la cámara cuya serie falla', async () => {
     vi.mocked(obtenerLecturas).mockImplementation(async (id) => {
       if (id === 1) {
@@ -220,7 +382,7 @@ describe('useDashboard', () => {
     await waitFor(() => expect(result.current.series[2]).toEqual([5]))
 
     expect(result.current.series[1]).toBeUndefined()
-    expect(result.current.error).toBeNull()
+    expect(result.current.errorResumen).toBeNull()
     expect(result.current.cargando).toBe(false)
   })
 
@@ -231,7 +393,9 @@ describe('useDashboard', () => {
 
     const { result } = renderHook(() => useDashboard())
 
-    await waitFor(() => expect(result.current.error).toBe('La API no responde'))
+    await waitFor(() =>
+      expect(result.current.errorResumen).toBe('La API no responde'),
+    )
     expect(result.current.cargando).toBe(false)
     expect(result.current.camaras).toEqual([])
     expect(obtenerLecturas).not.toHaveBeenCalled()
@@ -240,7 +404,7 @@ describe('useDashboard', () => {
       await result.current.refrescar()
     })
 
-    expect(result.current.error).toBeNull()
+    expect(result.current.errorResumen).toBeNull()
     expect(result.current.camaras).toHaveLength(2)
     expect(result.current.kpis).toEqual(kpis)
     expect(obtenerLecturas).toHaveBeenCalledTimes(2)
@@ -256,7 +420,7 @@ describe('useDashboard', () => {
       await result.current.refrescar()
     })
 
-    expect(result.current.error).toBe('sin red')
+    expect(result.current.errorResumen).toBe('sin red')
     expect(result.current.camaras).toHaveLength(2)
     expect(result.current.kpis).toEqual(kpis)
   })
@@ -342,7 +506,7 @@ describe('useDashboard', () => {
   it('actualiza la cámara y la serie con el evento lectura', async () => {
     const { result } = renderHook(() => useDashboard())
     await waitFor(() => expect(result.current.series[1]).toEqual([2]))
-    const anterior = result.current.actualizadoEn
+    const anterior = result.current.ultimaActividadSse
 
     act(() => {
       emitir('lectura', {
@@ -365,7 +529,8 @@ describe('useDashboard', () => {
       },
     })
     expect(result.current.series[1]).toEqual([2, 4.2])
-    expect(result.current.actualizadoEn).not.toBe(anterior)
+    expect(result.current.ultimaActividadSse).not.toBe(anterior)
+    expect(result.current.ultimaActividadSse).toBeInstanceOf(Date)
   })
 
   it('reemplaza los KPIs con el evento kpis', async () => {
@@ -480,5 +645,46 @@ describe('fusionarCamaras', () => {
     )
 
     expect(resultado).toEqual([nueva, httpCarnes])
+  })
+})
+
+describe('fusionarSeries', () => {
+  const punto = (ts: string, valor: number): PuntoSerie => ({ ts, valor })
+
+  it('mezcla el HTTP con los puntos SSE posteriores y deduplica por ts', () => {
+    const http = {
+      1: [punto('2026-11-14T10:00:00Z', 1), punto('2026-11-14T10:01:00Z', 1.1)],
+    }
+    const actuales = {
+      1: [
+        punto('2026-11-14T10:00:00Z', 0.9),
+        punto('2026-11-14T10:05:00Z', 4.2),
+      ],
+    }
+
+    expect(fusionarSeries(actuales, http)[1]).toEqual([
+      punto('2026-11-14T10:00:00Z', 1),
+      punto('2026-11-14T10:01:00Z', 1.1),
+      punto('2026-11-14T10:05:00Z', 4.2),
+    ])
+  })
+
+  it('conserva los puntos actuales si el HTTP no trae historial', () => {
+    const actuales = { 1: [punto('2026-11-14T10:05:00Z', 4.2)] }
+
+    expect(fusionarSeries(actuales, { 1: [] })[1]).toEqual(actuales[1])
+  })
+
+  it('recorta el resultado al tope de puntos', () => {
+    const http = {
+      1: Array.from({ length: MAX_PUNTOS_SERIE + 5 }, (_, indice) =>
+        punto(`2026-11-14T10:${String(indice).padStart(2, '0')}:00Z`, indice),
+      ),
+    }
+
+    const resultado = fusionarSeries({}, http)[1]
+
+    expect(resultado).toHaveLength(MAX_PUNTOS_SERIE)
+    expect(resultado.at(-1)?.valor).toBe(MAX_PUNTOS_SERIE + 4)
   })
 })

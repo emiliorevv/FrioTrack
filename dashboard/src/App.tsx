@@ -17,6 +17,23 @@ import type { FiltroCamaras } from './types'
 /** Pasado este tiempo sin datos nuevos, el pie deja de decir "en vivo". */
 const UMBRAL_DATOS_VIEJOS_MS = 90_000
 
+function fechaMasReciente(a: Date | null, b: Date | null): Date | null {
+  if (!a) {
+    return b
+  }
+  if (!b) {
+    return a
+  }
+  return a.getTime() >= b.getTime() ? a : b
+}
+
+function estaVigente(fecha: Date | null, ahora: Date): boolean {
+  return (
+    fecha !== null &&
+    ahora.getTime() - fecha.getTime() <= UMBRAL_DATOS_VIEJOS_MS
+  )
+}
+
 function normalizar(texto: string): string {
   return texto
     .normalize('NFD')
@@ -34,8 +51,9 @@ function App() {
     kpis,
     series,
     cargando,
-    error,
-    actualizadoEn,
+    errorResumen,
+    ultimoExitoHttp,
+    ultimaActividadSse,
     refrescar,
   } = useDashboard()
 
@@ -55,6 +73,7 @@ function App() {
 
   const equiposEnAlerta = conteos.alerta + conteos.critica
   const sinDatos = camaras.length === 0 && kpis === null
+  const actualizadoEn = fechaMasReciente(ultimoExitoHttp, ultimaActividadSse)
 
   return (
     <div className="app">
@@ -68,10 +87,10 @@ function App() {
       />
 
       <main id="contenido" className="app-main" tabIndex={-1}>
-        {error && sinDatos ? (
+        {errorResumen && sinDatos ? (
           <section className="error-panel" role="alert">
             <h2>No se pudo cargar el dashboard</h2>
-            <p>{error}</p>
+            <p>{errorResumen}</p>
             <button
               type="button"
               className="retry-button"
@@ -86,27 +105,13 @@ function App() {
           <EsqueletoDashboard />
         ) : (
           <>
-            {error && (
-              <section className="refresh-error" role="status">
-                <div className="refresh-error__body">
-                  {actualizadoEn ? (
-                    <p>
-                      No se pudo actualizar; mostrando datos de{' '}
-                      <TiempoRelativo ts={actualizadoEn.toISOString()} />.
-                    </p>
-                  ) : (
-                    <p>No se pudo actualizar.</p>
-                  )}
-                  <p className="refresh-error__detail">{error}</p>
-                </div>
-                <button
-                  type="button"
-                  className="retry-button retry-button--sm"
-                  onClick={() => void refrescar()}
-                >
-                  Reintentar
-                </button>
-              </section>
+            {errorResumen && (
+              <AvisoResumen
+                error={errorResumen}
+                ultimoExitoHttp={ultimoExitoHttp}
+                ultimaActividadSse={ultimaActividadSse}
+                onReintentar={() => void refrescar()}
+              />
             )}
 
             <OnboardingBanner />
@@ -167,7 +172,11 @@ function App() {
         )}
       </main>
 
-      <PieEstado actualizadoEn={actualizadoEn} error={error} />
+      <PieEstado
+        ultimoExitoHttp={ultimoExitoHttp}
+        ultimaActividadSse={ultimaActividadSse}
+        errorResumen={errorResumen}
+      />
 
       {notificacion && (
         <NotificationToast
@@ -180,35 +189,78 @@ function App() {
   )
 }
 
-/**
- * El reloj del pie vive aquí y no en `App`: los segundos no re-renderizan el
- * dashboard completo.
- */
-function PieEstado({
-  actualizadoEn,
+/** Aviso no bloqueante: el SSE puede seguir vivo aunque falle el HTTP. */
+function AvisoResumen({
   error,
+  ultimoExitoHttp,
+  ultimaActividadSse,
+  onReintentar,
 }: {
-  actualizadoEn: Date | null
-  error: string | null
+  error: string
+  ultimoExitoHttp: Date | null
+  ultimaActividadSse: Date | null
+  onReintentar: () => void
 }) {
   const ahora = useReloj()
-  const segundos = actualizadoEn
-    ? Math.max(
-        0,
-        Math.floor((ahora.getTime() - actualizadoEn.getTime()) / 1000),
-      )
-    : null
-  const viejos = segundos !== null && segundos * 1000 > UMBRAL_DATOS_VIEJOS_MS
+  const sseVivo = estaVigente(ultimaActividadSse, ahora)
 
-  const estado = error
-    ? actualizadoEn
-      ? 'Datos desactualizados'
-      : 'Sin conexión'
-    : actualizadoEn
-      ? viejos
-        ? 'Datos desactualizados'
-        : 'Datos en vivo'
+  return (
+    <section className="refresh-error" role="status">
+      <div className="refresh-error__body">
+        {sseVivo ? (
+          <p>
+            No se pudo actualizar el resumen HTTP; los eventos en vivo siguen
+            llegando.
+          </p>
+        ) : ultimoExitoHttp ? (
+          <p>
+            No se pudo actualizar; mostrando datos de{' '}
+            <TiempoRelativo ts={ultimoExitoHttp.toISOString()} />.
+          </p>
+        ) : (
+          <p>No se pudo actualizar el resumen HTTP.</p>
+        )}
+        <p className="refresh-error__detail">{error}</p>
+      </div>
+      <button
+        type="button"
+        className="retry-button retry-button--sm"
+        onClick={onReintentar}
+      >
+        Reintentar
+      </button>
+    </section>
+  )
+}
+
+/**
+ * El reloj del pie vive aquí y no en `App`; usa el store compartido para no
+ * crear un intervalo por componente.
+ */
+function PieEstado({
+  ultimoExitoHttp,
+  ultimaActividadSse,
+  errorResumen,
+}: {
+  ultimoExitoHttp: Date | null
+  ultimaActividadSse: Date | null
+  errorResumen: string | null
+}) {
+  const ahora = useReloj()
+  const httpVivo = estaVigente(ultimoExitoHttp, ahora)
+  const sseVivo = estaVigente(ultimaActividadSse, ahora)
+  const referencia = fechaMasReciente(ultimoExitoHttp, ultimaActividadSse)
+  const segundos = referencia
+    ? Math.max(0, Math.floor((ahora.getTime() - referencia.getTime()) / 1000))
+    : null
+
+  const estado = !referencia
+    ? errorResumen
+      ? 'Sin conexión'
       : 'Conectando'
+    : httpVivo || sseVivo
+      ? 'Datos en vivo'
+      : 'Datos desactualizados'
 
   return (
     <footer className="site-footer">

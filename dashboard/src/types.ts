@@ -40,6 +40,12 @@ export interface LecturaStream {
 /** Temperaturas para el sparkline, de la más vieja a la más reciente. */
 export type SerieCamara = number[]
 
+/** Punto interno de la serie: conserva `ts` para fusionar HTTP + SSE. */
+export interface PuntoSerie {
+  ts: string
+  valor: number
+}
+
 export interface UltimaLectura {
   ts: string
   temperatura_c: number

@@ -8,7 +8,11 @@ import {
   RECONEXION_MAX_MS,
   type EventoStream,
 } from './stream'
-import { StreamProvider, useStreamEvent } from './StreamProvider'
+import {
+  StreamProvider,
+  useStreamEvent,
+  useStreamReconexion,
+} from './StreamProvider'
 
 const API = 'https://api.prueba.mx/api'
 
@@ -16,6 +20,10 @@ function Escucha({ evento, nombre }: { evento: EventoStream; nombre: string }) {
   const [ultimo, setUltimo] = useState('')
   useStreamEvent(evento, (mensaje) => setUltimo(mensaje.data))
   return <p data-testid={nombre}>{ultimo}</p>
+}
+
+function MuestraReconexiones() {
+  return <p data-testid="reconexiones">{useStreamReconexion()}</p>
 }
 
 beforeEach(() => {
@@ -127,6 +135,27 @@ describe('StreamProvider', () => {
     act(() => vi.advanceTimersByTime(RECONEXION_MAX_MS))
 
     expect(EventSourceFalso.instancias).toHaveLength(1)
+  })
+
+  it('cuenta las reconexiones a partir de la segunda apertura', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+
+    render(
+      <StreamProvider>
+        <MuestraReconexiones />
+      </StreamProvider>,
+    )
+
+    const primera = EventSourceFalso.instancias[0]
+    act(() => primera?.simularApertura())
+    expect(screen.getByTestId('reconexiones')).toHaveTextContent('0')
+
+    act(() => primera?.simularError(EventSourceFalso.CLOSED))
+    act(() => vi.advanceTimersByTime(RECONEXION_BASE_MS))
+    act(() => EventSourceFalso.instancias[1]?.simularApertura())
+
+    expect(screen.getByTestId('reconexiones')).toHaveTextContent('1')
   })
 
   it('cierra la conexión y cancela la reconexión pendiente al desmontar', () => {
