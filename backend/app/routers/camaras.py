@@ -6,12 +6,14 @@ Exigen el JWT de usuario cuando `AUTH_REQUERIDA=1`; con la bandera apagada
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -31,23 +33,39 @@ def _flotante(valor: Decimal | None) -> float | None:
     return None if valor is None else float(valor)
 
 
-def _ultima_lectura(db: Session, camara: Camara) -> Lectura | None:
-    """Usa el atajo de la cámara y, si falta, busca por recibida_en."""
-    lectura = None
-    if camara.ultima_lectura_id is not None:
-        lectura = db.get(Lectura, camara.ultima_lectura_id)
-    if lectura is None:
-        lectura = (
+def _ultimas_lecturas(db: Session, camaras: Sequence[Camara]) -> dict[int, Lectura]:
+    """Resuelve la última lectura de todas las cámaras en dos consultas como máximo.
+
+    Primero usa los atajos `ultima_lectura_id` de las cámaras y, para las que
+    quedan sin lectura, trae la más reciente por cámara con `DISTINCT ON`.
+    """
+    ids = [camara.ultima_lectura_id for camara in camaras if camara.ultima_lectura_id]
+    por_id: dict[int, Lectura] = {}
+    if ids:
+        por_id = {
+            lectura.id: lectura
+            for lectura in db.execute(select(Lectura).where(Lectura.id.in_(ids))).scalars().all()
+        }
+    lecturas = {
+        camara.id: por_id[camara.ultima_lectura_id]
+        for camara in camaras
+        if camara.ultima_lectura_id in por_id
+    }
+
+    sin_lectura = [camara.id for camara in camaras if camara.id not in lecturas]
+    if sin_lectura:
+        recientes = (
             db.execute(
                 select(Lectura)
-                .where(Lectura.camara_id == camara.id)
-                .order_by(Lectura.recibida_en.desc())
-                .limit(1)
+                .where(Lectura.camara_id.in_(sin_lectura))
+                .order_by(Lectura.camara_id, Lectura.recibida_en.desc())
+                .ext(distinct_on(Lectura.camara_id))
             )
             .scalars()
-            .first()
+            .all()
         )
-    return lectura
+        lecturas.update({lectura.camara_id: lectura for lectura in recientes})
+    return lecturas
 
 
 def _resumen_lectura(lectura: Lectura | None) -> dict[str, Any] | None:
@@ -64,16 +82,22 @@ def _resumen_lectura(lectura: Lectura | None) -> dict[str, Any] | None:
 
 @router.get("/camaras")
 def listar_camaras(db: Db) -> list[dict[str, Any]]:
-    """Lista las cámaras con su última lectura y el valor de sus lotes en riesgo."""
+    """Lista las cámaras con su última lectura y el valor de sus lotes.
+
+    `valor_en_riesgo_mxn` solo suma los lotes `en_riesgo`;
+    `valor_inventario_mxn` suma todo el inventario salvo lo que ya es merma.
+    """
     camaras = db.execute(select(Camara).order_by(Camara.id)).scalars().all()
-    riesgo = {
-        camara_id: float(total or 0)
-        for camara_id, total in db.execute(
-            select(Lote.camara_id, func.sum(Lote.costo_total_mxn))
-            .where(Lote.estado == "en_riesgo")
-            .group_by(Lote.camara_id)
-        ).all()
-    }
+    filas = db.execute(
+        select(
+            Lote.camara_id,
+            func.sum(case((Lote.estado == "en_riesgo", Lote.costo_total_mxn), else_=0)),
+            func.sum(case((Lote.estado != "merma", Lote.costo_total_mxn), else_=0)),
+        ).group_by(Lote.camara_id)
+    ).all()
+    riesgo = {camara_id: float(total or 0) for camara_id, total, _ in filas}
+    inventario = {camara_id: float(total or 0) for camara_id, _, total in filas}
+    lecturas = _ultimas_lecturas(db, camaras)
 
     return [
         {
@@ -84,8 +108,9 @@ def listar_camaras(db: Db) -> list[dict[str, Any]]:
             "min_para_riesgo": camara.min_para_riesgo,
             "min_para_merma": camara.min_para_merma,
             "estado": camara.estado,
-            "ultima_lectura": _resumen_lectura(_ultima_lectura(db, camara)),
+            "ultima_lectura": _resumen_lectura(lecturas.get(camara.id)),
             "valor_en_riesgo_mxn": riesgo.get(camara.id, 0.0),
+            "valor_inventario_mxn": inventario.get(camara.id, 0.0),
         }
         for camara in camaras
     ]

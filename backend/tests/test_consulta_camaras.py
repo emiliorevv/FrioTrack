@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.sql import operators, visitors
+from sqlalchemy.sql.elements import Case
 
 from app.config import limpiar_cache_settings
 from app.db.models import Camara, Lectura, Lote
@@ -65,7 +67,7 @@ class SesionFalsa:
         self.consultas.append(stmt)
 
         if "group by" in sql:
-            return _Resultado(self._sumas_en_riesgo(params))
+            return _Resultado(self._sumas_por_camara(self._condiciones_agregadas(stmt)))
         if "from lotes" in sql:
             return _Resultado(self._lotes(params))
         if "from lecturas" in sql:
@@ -76,22 +78,64 @@ class SesionFalsa:
             return _Resultado(sorted(self.camaras, key=lambda camara: camara.id))
         raise AssertionError(f"Consulta no soportada por la sesión falsa:\n{stmt}")
 
-    def _sumas_en_riesgo(self, params: dict[str, Any]) -> list[tuple[int, Decimal]]:
-        estado = params.get("estado_1", "en_riesgo")
-        totales: dict[int, Decimal] = {}
-        for lote in self.lotes:
-            if lote.estado == estado:
-                totales[lote.camara_id] = totales.get(lote.camara_id, Decimal(0)) + (
-                    lote.costo_total_mxn
+    @staticmethod
+    def _condiciones_agregadas(stmt: Any) -> list[tuple[Any, Any]]:
+        """Lee los `sum(case(...))` reales: devuelve `(operador, estado)` por columna."""
+        columnas = list(stmt.selected_columns)[1:]
+        condiciones: list[tuple[Any, Any]] = []
+        for columna in columnas:
+            casos = [nodo for nodo in visitors.iterate(columna) if isinstance(nodo, Case)]
+            if len(casos) != 1:
+                raise AssertionError(
+                    f"Se esperaba un solo Case por columna agregada: {columna!r}"
                 )
-        return list(totales.items())
+            whens = casos[0].whens
+            if len(whens) != 1:
+                raise AssertionError(f"Se esperaba un solo WHEN por Case, hay {len(whens)}")
+            condicion = whens[0][0]
+            if condicion.operator not in (operators.eq, operators.ne):
+                raise AssertionError(f"Condición no soportada en el Case: {condicion!r}")
+            if not hasattr(condicion.right, "value"):
+                raise AssertionError(
+                    f"El estado debe venir ligado como parámetro: {condicion.right!r}"
+                )
+            condiciones.append((condicion.operator, condicion.right.value))
+        if not condiciones:
+            raise AssertionError(f"GROUP BY sin columnas agregadas reconocibles:\n{stmt}")
+        return condiciones
+
+    def _sumas_por_camara(
+        self, condiciones: list[tuple[Any, Any]]
+    ) -> list[tuple[int, ...]]:
+        """Evalúa cada condición del `Case` y suma los costos por cámara."""
+        totales: dict[int, list[Decimal]] = {}
+        for lote in self.lotes:
+            for indice, (operador, estado) in enumerate(condiciones):
+                coincide = (
+                    lote.estado == estado
+                    if operador is operators.eq
+                    else lote.estado != estado
+                )
+                if coincide:
+                    sumas = totales.setdefault(lote.camara_id, [Decimal(0)] * len(condiciones))
+                    sumas[indice] += lote.costo_total_mxn
+        return [(camara_id, *sumas) for camara_id, sumas in totales.items()]
+
+    @staticmethod
+    def _coincide(valor: Any, esperado: Any) -> bool:
+        """Compara con igualdad o con membresía cuando el parámetro es un IN."""
+        if isinstance(esperado, (list, tuple, set, frozenset)):
+            return valor in esperado
+        return valor == esperado
 
     def _lotes(self, params: dict[str, Any]) -> list[Lote]:
         filas = list(self.lotes)
         if "camara_id_1" in params:
-            filas = [lote for lote in filas if lote.camara_id == params["camara_id_1"]]
+            filas = [
+                lote for lote in filas if self._coincide(lote.camara_id, params["camara_id_1"])
+            ]
         if "estado_1" in params:
-            filas = [lote for lote in filas if lote.estado == params["estado_1"]]
+            filas = [lote for lote in filas if self._coincide(lote.estado, params["estado_1"])]
         return sorted(filas, key=lambda lote: lote.id)
 
     def _lecturas(
@@ -102,15 +146,27 @@ class SesionFalsa:
     ) -> list[Lectura]:
         filas = list(self.lecturas)
         if "camara_id_1" in params:
-            filas = [lectura for lectura in filas if lectura.camara_id == params["camara_id_1"]]
+            filas = [
+                lectura
+                for lectura in filas
+                if self._coincide(lectura.camara_id, params["camara_id_1"])
+            ]
         if "id_1" in params:
-            filas = [lectura for lectura in filas if lectura.id == params["id_1"]]
+            filas = [lectura for lectura in filas if self._coincide(lectura.id, params["id_1"])]
 
         cotas = sorted(valor for clave, valor in params.items() if clave.startswith("recibida_en_"))
         if cotas:
             filas = [lectura for lectura in filas if lectura.recibida_en >= cotas[0]]
         if len(cotas) > 1:
             filas = [lectura for lectura in filas if lectura.recibida_en <= cotas[-1]]
+
+        if "distinct on" in sql:
+            # Una fila por cámara: la de `recibida_en` más reciente.
+            recientes: dict[int, Lectura] = {}
+            for lectura in sorted(filas, key=lambda lectura: lectura.recibida_en, reverse=True):
+                recientes.setdefault(lectura.camara_id, lectura)
+            filas = sorted(recientes.values(), key=lambda lectura: lectura.camara_id)
+            return filas[:limite] if limite is not None else filas
 
         descendente = " desc" in sql
         filas = sorted(filas, key=lambda lectura: lectura.recibida_en, reverse=descendente)
@@ -233,7 +289,7 @@ def mundo() -> dict[str, Any]:
     }
 
 
-def test_camaras_devuelve_cinco_con_ultima_lectura_y_valor_en_riesgo(mundo):
+def test_camaras_devuelve_cinco_con_ultima_lectura_y_valores_de_lotes(mundo):
     with _cliente(mundo["sesion"]) as cliente:
         respuesta = cliente.get("/api/camaras")
 
@@ -255,19 +311,26 @@ def test_camaras_devuelve_cinco_con_ultima_lectura_y_valor_en_riesgo(mundo):
             "puerta_abierta": True,
         },
         "valor_en_riesgo_mxn": 4850.0,
+        "valor_inventario_mxn": 5970.0,
     }
     # Cámara 2 no tiene ultima_lectura_id: se usa la lectura más reciente por recibida_en.
     assert camaras[1]["ultima_lectura"]["ts"] == (
         mundo["ahora"] - timedelta(minutes=2)
     ).isoformat()
     assert camaras[1]["valor_en_riesgo_mxn"] == 3100.0
+    assert camaras[1]["valor_inventario_mxn"] == 4750.0
+    assert camaras[2]["valor_inventario_mxn"] == 420.0
     assert camaras[3]["valor_en_riesgo_mxn"] == 300.0
+    assert camaras[3]["valor_inventario_mxn"] == 300.0
+    # La cámara 5 solo tiene un lote en merma: inventario cero.
     assert camaras[4]["valor_en_riesgo_mxn"] == 0.0
+    assert camaras[4]["valor_inventario_mxn"] == 0.0
 
     assert all(isinstance(camara["id"], int) for camara in camaras)
     assert all(isinstance(camara["rango_min_c"], float) for camara in camaras)
     assert all(isinstance(camara["rango_max_c"], float) for camara in camaras)
     assert all(isinstance(camara["valor_en_riesgo_mxn"], float) for camara in camaras)
+    assert all(isinstance(camara["valor_inventario_mxn"], float) for camara in camaras)
     ultima = camaras[0]["ultima_lectura"]
     assert isinstance(ultima["temperatura_c"], float)
     assert isinstance(ultima["humedad_pct"], float)
@@ -279,6 +342,78 @@ def test_camara_sin_lecturas_devuelve_ultima_lectura_null(mundo):
         camaras = cliente.get("/api/camaras").json()
 
     assert camaras[4]["ultima_lectura"] is None
+
+
+def test_camaras_suman_ok_y_en_riesgo_excluyen_merma_y_cero_sin_lotes():
+    camaras = [
+        _camara(1, "Pescados y mariscos", "0.0", "2.0", 10, 60, "en_rango", None),
+        _camara(2, "Carnes y aves", "0.0", "4.0", 15, 120, "en_rango", None),
+    ]
+    lotes = [
+        _lote(1, 1, "Robalo fresco", "12.00", "1000.00", "ok", date(2026, 11, 20)),
+        _lote(2, 1, "Camarón", "5.00", "500.00", "en_riesgo", date(2026, 11, 21)),
+        _lote(3, 1, "Pulpo", "4.00", "900.00", "merma", date(2026, 11, 22)),
+    ]
+    sesion = SesionFalsa(camaras=camaras, lotes=lotes)
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.get("/api/camaras")
+
+    assert respuesta.status_code == 200
+    por_id = {camara["id"]: camara for camara in respuesta.json()}
+    # ok + en_riesgo suman al inventario; el lote en merma queda fuera.
+    assert por_id[1]["valor_inventario_mxn"] == 1500.0
+    # El valor en riesgo no cambia: solo cuenta el lote `en_riesgo`.
+    assert por_id[1]["valor_en_riesgo_mxn"] == 500.0
+    # Sin lotes, el inventario de la cámara es cero.
+    assert por_id[2]["valor_inventario_mxn"] == 0.0
+
+
+def test_camaras_no_hace_n_mas_uno_con_las_ultimas_lecturas():
+    ahora = datetime.now(UTC)
+    camaras = [
+        _camara(id, f"Cámara {id}", "0.0", "4.0", 15, 120, "en_rango", None)
+        for id in range(1, 7)
+    ]
+    lecturas = [_lectura(id * 10, id, ahora - timedelta(minutes=id)) for id in range(1, 7)]
+    sesion = SesionFalsa(camaras=camaras, lecturas=lecturas)
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.get("/api/camaras")
+
+    assert respuesta.status_code == 200
+    consultas_lecturas = [
+        stmt for stmt in sesion.consultas if "from lecturas" in str(stmt).lower()
+    ]
+    # Seis cámaras sin atajo: una sola consulta DISTINCT ON en vez de una por cámara.
+    assert len(consultas_lecturas) == 1
+    assert "distinct on" in str(consultas_lecturas[0]).lower()
+    # Y una sola query agregada para riesgo e inventario.
+    assert len([stmt for stmt in sesion.consultas if "from lotes" in str(stmt).lower()]) == 1
+    assert [camara["ultima_lectura"]["ts"] for camara in respuesta.json()] == [
+        (ahora - timedelta(minutes=id)).isoformat() for id in range(1, 7)
+    ]
+
+    con_atajo = SesionFalsa(
+        camaras=[
+            _camara(1, "Uno", "0.0", "4.0", 15, 120, "en_rango", 10),
+            _camara(2, "Dos", "0.0", "4.0", 15, 120, "en_rango", None),
+            _camara(3, "Tres", "0.0", "4.0", 15, 120, "en_rango", None),
+        ],
+        lecturas=[
+            _lectura(10, 1, ahora - timedelta(minutes=1)),
+            _lectura(20, 2, ahora - timedelta(minutes=2)),
+            _lectura(30, 3, ahora - timedelta(minutes=3)),
+        ],
+    )
+    with _cliente(con_atajo) as cliente:
+        cliente.get("/api/camaras")
+
+    consultas_lecturas = [
+        stmt for stmt in con_atajo.consultas if "from lecturas" in str(stmt).lower()
+    ]
+    # Una consulta para los atajos por id y una de fallback para las demás.
+    assert len(consultas_lecturas) == 2
 
 
 def test_lecturas_de_camara_inexistente_devuelve_404(mundo):
