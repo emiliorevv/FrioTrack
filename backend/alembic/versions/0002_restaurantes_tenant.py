@@ -62,9 +62,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Quita el tenant; las filas y el resto de sus datos quedan intactos."""
+    """Quita el tenant; las filas y el resto de sus datos quedan intactos.
+
+    No se nombran las FKs: `DROP COLUMN` elimina la restricción dependiente, así
+    que el downgrade también funciona sobre un esquema creado con `create_all`,
+    donde las FKs llevan el nombre automático de Postgres.
+    """
     for tabla in reversed(TABLAS_CON_TENANT):
         op.drop_index(f'ix_{tabla}_restaurante_id', table_name=tabla)
-        op.drop_constraint(f'fk_{tabla}_restaurante_id', tabla, type_='foreignkey')
         op.drop_column(tabla, 'restaurante_id')
     op.drop_table('restaurantes')
