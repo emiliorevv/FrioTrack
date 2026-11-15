@@ -81,11 +81,11 @@ describe('Header', () => {
     expect(screen.getByText('Gerente')).toBeInTheDocument()
   })
 
-  it('el botón Cerrar sesión llama al logout', () => {
+  it('el botón Salir llama al logout y su nombre accesible coincide', () => {
     const onLogout = vi.fn()
     render(<Header actualizadoEn={null} {...sesion} onLogout={onLogout} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Salir' }))
 
     expect(onLogout).toHaveBeenCalledTimes(1)
   })

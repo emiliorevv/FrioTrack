@@ -17,20 +17,29 @@ export class ErrorApi extends Error {
   readonly status: number
   /** Segundos de `Retry-After` en un 429, si el backend lo manda. */
   readonly retryAfterSegundos: number | null
+  /** `detail` real del backend; `null` si solo había un status HTTP. */
+  readonly detalle: string | null
 
   constructor(
     mensaje: string,
     status: number,
     retryAfterSegundos: number | null = null,
+    detalle: string | null = null,
   ) {
     super(mensaje)
     this.name = 'ErrorApi'
     this.status = status
     this.retryAfterSegundos = retryAfterSegundos
+    this.detalle = detalle
   }
 }
 
-async function leerDetalle(respuesta: Response): Promise<string> {
+interface DetalleError {
+  mensaje: string
+  detalle: string | null
+}
+
+async function leerDetalle(respuesta: Response): Promise<DetalleError> {
   try {
     const datos: unknown = await respuesta.json()
     if (
@@ -40,14 +49,17 @@ async function leerDetalle(respuesta: Response): Promise<string> {
       typeof datos.detail === 'string' &&
       datos.detail.trim()
     ) {
-      return datos.detail
+      return { mensaje: datos.detail, detalle: datos.detail }
     }
   } catch {
     // El cuerpo no era JSON; se usa el status como mensaje.
   }
 
   const sufijo = respuesta.statusText ? ` ${respuesta.statusText}` : ''
-  return `La API respondió ${respuesta.status}${sufijo}`
+  return {
+    mensaje: `La API respondió ${respuesta.status}${sufijo}`,
+    detalle: null,
+  }
 }
 
 /**
@@ -129,10 +141,12 @@ export async function pedir<T>(
       notificarNoAutorizado()
     }
 
+    const { mensaje, detalle } = await leerDetalle(respuesta)
     throw new ErrorApi(
-      await leerDetalle(respuesta),
+      mensaje,
       respuesta.status,
       leerRetryAfter(respuesta.headers.get('Retry-After')),
+      detalle,
     )
   }
 
@@ -182,11 +196,21 @@ export async function iniciarSesion(
 }
 
 function leerRetryAfter(valor: string | null): number | null {
-  if (!valor) {
+  const limpio = valor?.trim()
+  if (!limpio) {
     return null
   }
-  const segundos = Number(valor)
-  return Number.isFinite(segundos) && segundos >= 0 ? Math.ceil(segundos) : null
+
+  if (/^\d+$/.test(limpio)) {
+    const segundos = Number(limpio)
+    return Number.isFinite(segundos) && segundos >= 0 ? segundos : null
+  }
+
+  const fecha = Date.parse(limpio)
+  if (Number.isNaN(fecha)) {
+    return null
+  }
+  return Math.max(0, Math.ceil((fecha - Date.now()) / 1000))
 }
 
 export function obtenerHealth(senal?: AbortSignal): Promise<Health> {

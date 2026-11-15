@@ -12,7 +12,7 @@ function leerDeSesion(): string | null {
   }
 }
 
-let tokenActual: string | null = leerDeSesion()
+let tokenActual: string | null = null
 
 /** Token vigente en memoria, listo para el cliente HTTP. */
 export function getToken(): string | null {

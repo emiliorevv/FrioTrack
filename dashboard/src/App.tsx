@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import './App.css'
-import { useAuth } from './auth/AuthProvider'
+import { puedeAtenderAlertas } from './auth/roles'
 import { AlertasActivas } from './components/AlertasActivas'
 import { CameraCard } from './components/CameraCard'
 import { FilterBar } from './components/FilterBar'
@@ -42,13 +42,16 @@ function normalizar(texto: string): string {
     .toLowerCase()
 }
 
-function App() {
+interface AppProps {
+  usuario: string
+  rol: string
+  onLogout: () => void
+}
+
+function App({ usuario, rol, onLogout }: AppProps) {
   const [filtro, setFiltro] = useState<FiltroCamaras>('todas')
   const [busqueda, setBusqueda] = useState('')
   const { notificacion, cerrar } = useNotificaciones()
-  const auth = useAuth()
-  const usuario = auth.usuario ?? 'Usuario'
-  const rol = auth.rol ?? ''
   const {
     health,
     camaras,
@@ -100,7 +103,7 @@ function App() {
         escalaTiempo={health?.escala_tiempo}
         usuario={usuario}
         rol={rol}
-        onLogout={auth.logout}
+        onLogout={onLogout}
       />
 
       <main id="contenido" className="app-main" tabIndex={-1}>
@@ -150,7 +153,7 @@ function App() {
               error={errorAlertas}
               errorAtender={errorAtender}
               atendiendo={atendiendo}
-              puedeAtender={rol === 'jefe_cocina'}
+              puedeAtender={puedeAtenderAlertas(rol)}
               onAtender={(id) => void atenderAlerta(id)}
               onLimpiarErrorAtender={limpiarErrorAtender}
             />

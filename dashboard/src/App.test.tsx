@@ -36,20 +36,24 @@ vi.mock('./api/client', () => ({
   obtenerLecturas: vi.fn(),
 }))
 
-const auth = vi.hoisted(() => ({
-  usuario: 'jefe',
-  rol: 'jefe_cocina',
-  logout: vi.fn(),
-}))
-
-vi.mock('./auth/AuthProvider', () => ({
-  useAuth: () => auth,
-}))
-
 vi.mock('./realtime/StreamProvider', () => ({
   useStreamEvent: vi.fn(),
   useStreamReconexion: vi.fn(() => 0),
 }))
+
+const onLogout = vi.fn()
+
+function renderizarApp(
+  props: Partial<{
+    usuario: string
+    rol: string
+    onLogout: () => void
+  }> = {},
+) {
+  return render(
+    <App usuario="jefe" rol="jefe_cocina" onLogout={onLogout} {...props} />,
+  )
+}
 
 type Oyente = (evento: MessageEvent<string>) => void
 
@@ -194,8 +198,6 @@ function crearSerie(camaraId: number): Lectura[] {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  auth.usuario = 'jefe'
-  auth.rol = 'jefe_cocina'
   oyentes.clear()
   window.localStorage.clear()
   vi.mocked(useStreamEvent).mockImplementation((evento, oyente) => {
@@ -219,7 +221,7 @@ afterEach(() => {
 
 describe('vista general', () => {
   it('muestra los KPIs y las cinco cámaras de la API', async () => {
-    render(<App />)
+    renderizarApp()
 
     expect(await screen.findAllByRole('article')).toHaveLength(5)
     expect(screen.getByText('97.3%')).toBeInTheDocument()
@@ -236,13 +238,13 @@ describe('vista general', () => {
   })
 
   it('muestra la etiqueta de modo demo con la escala de /health', async () => {
-    render(<App />)
+    renderizarApp()
 
     expect(await screen.findByText('MODO DEMO ×30')).toBeInTheDocument()
   })
 
   it('el filtro Crítica deja solo Pescados y mariscos y Alerta queda vacío', async () => {
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
 
     const chipAlerta = screen.getByRole('button', { name: 'Alerta (0)' })
@@ -270,7 +272,7 @@ describe('vista general', () => {
   })
 
   it('la búsqueda congelador deja solo el Congelador', async () => {
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
 
     fireEvent.change(screen.getByLabelText('Buscar cámara'), {
@@ -287,7 +289,7 @@ describe('vista general', () => {
   })
 
   it('el banner de onboarding se puede cerrar', async () => {
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
 
     expect(
@@ -304,7 +306,7 @@ describe('vista general', () => {
   })
 
   it('el estado crítico se anuncia en texto y con estilo propio', async () => {
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
 
     const pescados = screen.getByRole('article', {
@@ -318,7 +320,7 @@ describe('vista general', () => {
   })
 
   it('muestra datos en vivo y la alerta real del detector', async () => {
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
 
     expect(screen.getByText('Datos en vivo · FríoTrack')).toBeInTheDocument()
@@ -343,7 +345,7 @@ describe('vista general', () => {
   it('muestra el estado vacío del panel de seguridad', async () => {
     vi.mocked(obtenerAlertasSeguridad).mockResolvedValueOnce([])
 
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
 
     expect(
@@ -353,7 +355,7 @@ describe('vista general', () => {
   })
 
   it('muestra la sección de alertas activas con la alerta de la API', async () => {
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
 
     const seccion = screen.getByRole('region', { name: /Alertas activas/ })
@@ -366,7 +368,7 @@ describe('vista general', () => {
   })
 
   it('atiende desde la sección y marca la alerta como atendida', async () => {
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
 
     const seccion = screen.getByRole('region', { name: /Alertas activas/ })
@@ -385,27 +387,24 @@ describe('vista general', () => {
   it('muestra el estado vacío de alertas activas', async () => {
     vi.mocked(obtenerAlertasActivas).mockResolvedValueOnce([])
 
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
 
     expect(await screen.findByText('Sin alertas activas')).toBeInTheDocument()
   })
 
   it('muestra la sesión y permite cerrar sesión', async () => {
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
 
     expect(screen.getByText('jefe')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Salir' }))
 
-    expect(auth.logout).toHaveBeenCalledTimes(1)
+    expect(onLogout).toHaveBeenCalledTimes(1)
   })
 
   it('el gerente no puede atender alertas', async () => {
-    auth.usuario = 'gerente'
-    auth.rol = 'gerente'
-
-    render(<App />)
+    renderizarApp({ usuario: 'gerente', rol: 'gerente' })
     await screen.findAllByRole('article')
 
     const seccion = screen.getByRole('region', { name: /Alertas activas/ })
@@ -423,7 +422,7 @@ describe('vista general', () => {
     vi.mocked(obtenerCamaras).mockReturnValue(new Promise<never>(() => {}))
     vi.mocked(obtenerKpis).mockReturnValue(new Promise<never>(() => {}))
 
-    const { container } = render(<App />)
+    const { container } = renderizarApp()
 
     expect(container.querySelector('[aria-busy="true"]')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent(
@@ -439,7 +438,7 @@ describe('vista general', () => {
       new Error('La API no responde'),
     )
 
-    render(<App />)
+    renderizarApp()
 
     const alerta = await screen.findByRole('alert')
     expect(alerta).toHaveTextContent('No se pudo cargar el dashboard')
@@ -471,7 +470,7 @@ describe('vista general', () => {
   })
 
   it('avisa de un refresco fallido sin ocultar los datos', async () => {
-    render(<App />)
+    renderizarApp()
     await screen.findAllByRole('article')
     expect(screen.getByText('Datos en vivo · FríoTrack')).toBeInTheDocument()
 

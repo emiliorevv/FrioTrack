@@ -8,3 +8,8 @@ export function etiquetaRol(rol: string): string {
   }
   return rol || 'Usuario'
 }
+
+/** Permiso de negocio: solo el jefe de cocina atiende alertas. */
+export function puedeAtenderAlertas(rol: string): boolean {
+  return rol === 'jefe_cocina'
+}

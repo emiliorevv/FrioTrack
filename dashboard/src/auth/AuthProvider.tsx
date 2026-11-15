@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -15,18 +16,31 @@ interface Sesion {
   token: string
   usuario: string
   rol: string
+  /** Segundos desde epoch, igual que el `exp` del JWT. */
+  exp: number
 }
 
-export interface ContextoAuth {
-  token: string | null
-  usuario: string | null
-  rol: string | null
+interface BaseAuth {
   /** `true` mientras se procesa el login. */
   cargando: boolean
   error: string | null
   login: (usuario: string, password: string) => Promise<boolean>
   logout: () => void
 }
+
+export interface Autenticado extends BaseAuth {
+  token: string
+  usuario: string
+  rol: string
+}
+
+export interface NoAutenticado extends BaseAuth {
+  token: null
+  usuario: null
+  rol: null
+}
+
+export type ContextoAuth = Autenticado | NoAutenticado
 
 const AuthContext = createContext<ContextoAuth | null>(null)
 
@@ -43,13 +57,26 @@ function restaurarSesion(): Sesion | null {
   }
 
   setToken(token)
-  return { token, usuario: payload.usuario, rol: payload.rol }
+  return {
+    token,
+    usuario: payload.usuario,
+    rol: payload.rol,
+    exp: payload.exp,
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [sesion, setSesion] = useState<Sesion | null>(restaurarSesion)
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const timerExpiracionRef = useRef<number | null>(null)
+
+  const limpiarExpiracion = useCallback(() => {
+    if (timerExpiracionRef.current !== null) {
+      window.clearTimeout(timerExpiracionRef.current)
+      timerExpiracionRef.current = null
+    }
+  }, [])
 
   const login = useCallback(async (usuario: string, password: string) => {
     setCargando(true)
@@ -69,6 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         token: respuesta.access_token,
         usuario: payload.usuario,
         rol: payload.rol,
+        exp: payload.exp,
       })
       return true
     } catch (fallo) {
@@ -80,31 +108,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(() => {
+    limpiarExpiracion()
     setToken(null)
     setSesion(null)
     setError(null)
-  }, [])
+  }, [limpiarExpiracion])
+
+  useEffect(() => {
+    limpiarExpiracion()
+    if (!sesion) {
+      return
+    }
+
+    const restante = sesion.exp * 1000 - Date.now()
+    timerExpiracionRef.current = window.setTimeout(
+      () => {
+        timerExpiracionRef.current = null
+        logout()
+        setError('Tu sesión expiró. Inicia sesión de nuevo.')
+      },
+      Math.max(0, restante),
+    )
+
+    return limpiarExpiracion
+  }, [sesion, logout, limpiarExpiracion])
 
   useEffect(() => {
     return suscribirNoAutorizado(() => {
-      setToken(null)
-      setSesion(null)
+      logout()
       setError('Tu sesión expiró. Inicia sesión de nuevo.')
     })
-  }, [])
+  }, [logout])
 
-  const valor = useMemo<ContextoAuth>(
-    () => ({
-      token: sesion?.token ?? null,
-      usuario: sesion?.usuario ?? null,
-      rol: sesion?.rol ?? null,
-      cargando,
-      error,
-      login,
-      logout,
-    }),
-    [sesion, cargando, error, login, logout],
-  )
+  const valor = useMemo<ContextoAuth>(() => {
+    const base = { cargando, error, login, logout }
+    return sesion
+      ? {
+          ...base,
+          token: sesion.token,
+          usuario: sesion.usuario,
+          rol: sesion.rol,
+        }
+      : { ...base, token: null, usuario: null, rol: null }
+  }, [sesion, cargando, error, login, logout])
 
   return <AuthContext.Provider value={valor}>{children}</AuthContext.Provider>
 }
@@ -120,15 +166,15 @@ export function useAuth(): ContextoAuth {
 function mensajeDeLogin(fallo: unknown): string {
   if (fallo instanceof ErrorApi) {
     if (fallo.status === 401) {
-      return 'Usuario o contraseña incorrectos'
+      return 'Usuario o contraseña incorrectos.'
     }
     if (fallo.status === 429) {
-      const base = fallo.message || 'Demasiados intentos de inicio de sesión.'
+      const base = 'Demasiados intentos de inicio de sesión.'
       return fallo.retryAfterSegundos !== null
         ? `${base} Intenta de nuevo en ${fallo.retryAfterSegundos} s.`
         : base
     }
-    return fallo.message || 'No se pudo iniciar sesión.'
+    return fallo.detalle ?? 'No se pudo iniciar sesión.'
   }
   return 'No se pudo iniciar sesión. Revisa tu conexión.'
 }

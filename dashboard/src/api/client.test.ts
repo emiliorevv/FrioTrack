@@ -133,15 +133,19 @@ describe('pedir', () => {
       name: 'ErrorApi',
       message: 'Cámara no encontrada',
       status: 404,
+      detalle: 'Cámara no encontrada',
     })
   })
 
   it('usa el status cuando el cuerpo del error no trae detail', async () => {
     fetchFalso.mockResolvedValue(respuesta({}, 500, 'Internal Server Error'))
 
-    await expect(obtenerKpis()).rejects.toThrow(
-      'La API respondió 500 Internal Server Error',
-    )
+    const fallo = await obtenerKpis().catch((error: unknown) => error)
+
+    expect(fallo).toMatchObject({
+      message: 'La API respondió 500 Internal Server Error',
+      detalle: null,
+    })
   })
 
   it('falla claro si no hay VITE_API_URL fuera de desarrollo', async () => {
@@ -408,6 +412,16 @@ describe('auth del cliente', () => {
     }
   })
 
+  it('no usa un token de sessionStorage antes de que el provider lo restaure', async () => {
+    sessionStorage.setItem('friotrack.token', 'token-basura')
+    fetchFalso.mockResolvedValue(respuesta([]))
+
+    await obtenerCamaras()
+
+    const [, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(new Headers(init.headers).get('Authorization')).toBeNull()
+  })
+
   it('lee Retry-After de un 429', async () => {
     fetchFalso.mockResolvedValue(
       respuesta(
@@ -427,5 +441,31 @@ describe('auth del cliente', () => {
       status: 429,
       retryAfterSegundos: 120,
     })
+  })
+
+  it('lee Retry-After en formato de fecha HTTP', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-21T07:27:00Z'))
+    fetchFalso.mockResolvedValue(
+      respuesta({ detail: 'Rate limit' }, 429, 'Too Many Requests', {
+        'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT',
+      }),
+    )
+
+    const fallo = await pedir('/prueba').catch((error: unknown) => error)
+
+    expect(fallo).toMatchObject({ retryAfterSegundos: 60 })
+  })
+
+  it('ignora un Retry-After vacío o solo con espacios', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ detail: 'Rate limit' }, 429, 'Too Many Requests', {
+        'Retry-After': '   ',
+      }),
+    )
+
+    const fallo = await pedir('/prueba').catch((error: unknown) => error)
+
+    expect(fallo).toMatchObject({ retryAfterSegundos: null })
   })
 })

@@ -68,7 +68,7 @@ export function Header({
               type="button"
               className="session__logout"
               onClick={onLogout}
-              aria-label="Cerrar sesión"
+              title="Cerrar sesión"
             >
               Salir
             </button>

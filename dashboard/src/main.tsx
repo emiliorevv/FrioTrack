@@ -7,15 +7,15 @@ import { Login } from './auth/Login.tsx'
 import { StreamProvider } from './realtime/StreamProvider.tsx'
 
 function Raiz() {
-  const { token } = useAuth()
+  const auth = useAuth()
 
-  if (!token) {
+  if (auth.token === null) {
     return <Login />
   }
 
   return (
-    <StreamProvider token={token}>
-      <App />
+    <StreamProvider token={auth.token}>
+      <App usuario={auth.usuario} rol={auth.rol} onLogout={auth.logout} />
     </StreamProvider>
   )
 }
