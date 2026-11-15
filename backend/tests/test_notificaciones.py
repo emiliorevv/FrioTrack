@@ -35,6 +35,7 @@ def notificador_falso(monkeypatch) -> NotificadorFalso:
 def _camara(**cambios: object) -> Camara:
     base = {
         "id": 1,
+        "restaurante_id": 1,
         "nombre": "Pescados y mariscos",
         "rango_min_c": Decimal("0.0"),
         "rango_max_c": Decimal("2.0"),
@@ -215,13 +216,16 @@ def test_a_pesos_redondea_half_up(total: Decimal, esperado: int):
 
 
 def test_notificador_simulado_publica_el_evento_del_contrato(monkeypatch):
-    publicados: list[tuple[str, dict[str, object]]] = []
+    publicados: list[tuple[str, dict[str, object], int]] = []
     monkeypatch.setattr(
-        notificaciones.bus, "publicar", lambda evento, data: publicados.append((evento, data))
+        notificaciones.bus,
+        "publicar",
+        lambda evento, data, tenant: publicados.append((evento, data, tenant)),
     )
     notificacion = Notificacion(
         tipo="alerta_temperatura",
         camara_id=1,
+        restaurante_id=1,
         mensaje=(
             "FríoTrack: Cámara Pescados y mariscos a 3.4 °C hace 10 min. "
             "$4,850 en riesgo."
@@ -246,6 +250,7 @@ def test_notificador_simulado_publica_el_evento_del_contrato(monkeypatch):
                 "ts": "2026-11-18T19:05:00+00:00",
                 "url": "http://localhost:5173",
             },
+            1,
         )
     ]
 

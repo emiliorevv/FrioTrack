@@ -17,9 +17,14 @@ down_revision: str | Sequence[str] | None = '0001'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-# Tablas operativas que pasan a pertenecer a un restaurante. `lecturas` y
-# `sensores` se derivan de la cámara y el SIEM sigue siendo global.
-TABLAS_CON_TENANT = ('usuarios', 'camaras', 'lotes', 'alertas')
+# Solo se guarda el tenant donde es la fuente de verdad: usuarios y cámaras.
+# `lotes` y `alertas` lo derivan de su cámara, y `lecturas`/`sensores` también.
+TABLAS_CON_TENANT = ('usuarios', 'camaras')
+
+SQL_SECUENCIA_RESTAURANTES = (
+    "SELECT setval(pg_get_serial_sequence('restaurantes', 'id'), "
+    "(SELECT MAX(id) FROM restaurantes))"
+)
 
 
 def upgrade() -> None:
@@ -38,6 +43,8 @@ def upgrade() -> None:
             "VALUES (1, 'FríoTrack Demo', now())"
         )
     )
+    # El id fue explícito: sin esto, el primer alta sin id chocaría con la PK.
+    op.execute(sa.text(SQL_SECUENCIA_RESTAURANTES))
 
     for tabla in TABLAS_CON_TENANT:
         op.add_column(tabla, sa.Column('restaurante_id', sa.Integer(), nullable=True))

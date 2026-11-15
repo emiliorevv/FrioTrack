@@ -102,12 +102,15 @@ class Lectura(Base):
 
 
 class Lote(Base):
-    """Inventario del restaurante asignado a una cámara."""
+    """Inventario del restaurante asignado a una cámara.
+
+    No guarda `restaurante_id`: el tenant se deriva de la cámara, igual que en
+    `lecturas`, para no tener dos fuentes de verdad que puedan divergir.
+    """
 
     __tablename__ = "lotes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    restaurante_id: Mapped[int] = mapped_column(ForeignKey("restaurantes.id"), index=True)
     producto: Mapped[str] = mapped_column(Text)
     camara_id: Mapped[int] = mapped_column(ForeignKey("camaras.id"))
     cantidad: Mapped[Decimal] = mapped_column(Numeric(8, 2))
@@ -121,7 +124,10 @@ class Lote(Base):
 
 
 class Alerta(Base):
-    """Alerta operativa abierta por temperatura o por puerta."""
+    """Alerta operativa abierta por temperatura o por puerta.
+
+    No guarda `restaurante_id`: el tenant se deriva de la cámara que la abrió.
+    """
 
     __tablename__ = "alertas"
     __table_args__ = (
@@ -136,7 +142,6 @@ class Alerta(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    restaurante_id: Mapped[int] = mapped_column(ForeignKey("restaurantes.id"), index=True)
     camara_id: Mapped[int] = mapped_column(ForeignKey("camaras.id"))
     tipo: Mapped[str] = mapped_column(Text)
     abierta_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

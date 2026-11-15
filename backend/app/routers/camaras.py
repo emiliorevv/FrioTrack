@@ -28,6 +28,24 @@ LIMITE_LECTURAS = 5000
 Db = Annotated[Session, Depends(get_db)]
 
 
+def camara_del_restaurante(
+    db: Session,
+    camara_id: int,
+    restaurante_id: int,
+    *,
+    detalle: str = "Cámara no encontrada",
+) -> Camara:
+    """Carga la cámara o responde 404 si no existe o es de otro restaurante.
+
+    El 404 (no 403) evita filtrar si una cámara de otro tenant existe. Vive aquí
+    para que cada endpoint nuevo reutilice la misma verificación.
+    """
+    camara = db.get(Camara, camara_id)
+    if camara is None or camara.restaurante_id != restaurante_id:
+        raise HTTPException(status_code=404, detail=detalle)
+    return camara
+
+
 def _flotante(valor: Decimal | None) -> float | None:
     """Convierte numeric de Postgres a float para que el JSON sea numérico."""
     return None if valor is None else float(valor)
@@ -102,7 +120,8 @@ def listar_camaras(db: Db, restaurante_id: RestauranteId) -> list[dict[str, Any]
             func.sum(case((Lote.estado == "en_riesgo", Lote.costo_total_mxn), else_=0)),
             func.sum(case((Lote.estado != "merma", Lote.costo_total_mxn), else_=0)),
         )
-        .where(Lote.restaurante_id == restaurante_id)
+        .join(Camara, Camara.id == Lote.camara_id)
+        .where(Camara.restaurante_id == restaurante_id)
         .group_by(Lote.camara_id)
     ).all()
     riesgo = {camara_id: float(total or 0) for camara_id, total, _ in filas}
@@ -140,9 +159,7 @@ def listar_lecturas(
     ascendente, que es como la gráfica las dibuja. Una cámara de otro restaurante
     responde 404, igual que una inexistente: no se filtra su existencia.
     """
-    camara = db.get(Camara, id)
-    if camara is None or camara.restaurante_id != restaurante_id:
-        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    camara_del_restaurante(db, id, restaurante_id)
 
     if hasta is None:
         hasta = datetime.now(UTC)
@@ -188,11 +205,13 @@ def listar_lotes(
 ) -> list[dict[str, Any]]:
     """Lotes del restaurante, opcionalmente filtrados por cámara y estado."""
     if camara_id is not None:
-        camara = db.get(Camara, camara_id)
-        if camara is None or camara.restaurante_id != restaurante_id:
-            raise HTTPException(status_code=404, detail="Cámara no encontrada")
+        camara_del_restaurante(db, camara_id, restaurante_id)
 
-    consulta = select(Lote).where(Lote.restaurante_id == restaurante_id)
+    consulta = (
+        select(Lote)
+        .join(Camara, Camara.id == Lote.camara_id)
+        .where(Camara.restaurante_id == restaurante_id)
+    )
     if camara_id is not None:
         consulta = consulta.where(Lote.camara_id == camara_id)
     if estado is not None:

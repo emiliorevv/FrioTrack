@@ -6,14 +6,22 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import RestauranteId, get_current_user, require_rol
 from app.db.base import utcnow
-from app.db.models import RESTAURANTE_DEMO_ID, Alerta, AlertaSeguridad, Usuario
+from app.db.models import (
+    RESTAURANTE_DEMO_ID,
+    Alerta,
+    AlertaSeguridad,
+    Camara,
+    Restaurante,
+    Usuario,
+)
 from app.db.session import get_db
 from app.realtime.bus import bus
+from app.routers.camaras import camara_del_restaurante
 from app.schemas.operacion import (
     AlertaSalida,
     AlertaSeguridadSalida,
@@ -50,7 +58,8 @@ def listar_alertas(
     """
     consulta = (
         select(Alerta)
-        .where(Alerta.restaurante_id == restaurante_id)
+        .join(Camara, Camara.id == Alerta.camara_id)
+        .where(Camara.restaurante_id == restaurante_id)
         .order_by(Alerta.abierta_en.desc(), Alerta.id.desc())
     )
     if activas:
@@ -76,8 +85,15 @@ def atender_alerta(
     restaurante responde 404, igual que una inexistente.
     """
     alerta = db.get(Alerta, alerta_id)
-    if alerta is None or alerta.restaurante_id != restaurante_id:
+    if alerta is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alerta no encontrada")
+    # La alerta hereda el tenant de su cámara; el helper responde 404 si es ajena.
+    camara = camara_del_restaurante(
+        db,
+        alerta.camara_id,
+        restaurante_id,
+        detalle="Alerta no encontrada",
+    )
     if alerta.cerrada_en is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="La alerta ya está cerrada"
@@ -87,7 +103,11 @@ def atender_alerta(
         if entrada.nota is not None:
             alerta.nota = entrada.nota
             db.commit()
-            bus.publicar("alerta_cerrada", alerta_salida(alerta).model_dump())
+            bus.publicar(
+                "alerta_cerrada",
+                alerta_salida(alerta).model_dump(),
+                camara.restaurante_id,
+            )
         return alerta_salida(alerta)
 
     if usuario is None:
@@ -119,7 +139,7 @@ def atender_alerta(
 
     # El contrato dice que `alerta_cerrada` también se manda cuando la atienden.
     salida = alerta_salida(alerta)
-    bus.publicar("alerta_cerrada", salida.model_dump())
+    bus.publicar("alerta_cerrada", salida.model_dump(), camara.restaurante_id)
     return salida
 
 
@@ -139,10 +159,15 @@ def listar_alertas_seguridad(
     """Devuelve las últimas 20 alertas del detector SIEM.
 
     El SIEM es de plataforma y todavía no guarda el restaurante de cada
-    hallazgo: solo la demo (tenant 1) ve el feed global. Los demás tenants
-    reciben una lista vacía hasta que el detector se aísle por restaurante.
+    hallazgo. Mientras solo exista el restaurante demo, el demo puede ver el
+    feed; en cuanto hay un segundo restaurante nadie lo ve (fail closed) para no
+    filtrar usuarios, IPs y detalles de un tenant a otro. Se aislará cuando el
+    detector sea tenant-aware.
     """
     if restaurante_id != RESTAURANTE_DEMO_ID:
+        return []
+    total_restaurantes = db.scalar(select(func.count()).select_from(Restaurante))
+    if total_restaurantes != 1:
         return []
     filas = db.scalars(
         select(AlertaSeguridad)

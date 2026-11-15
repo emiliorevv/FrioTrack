@@ -70,7 +70,7 @@ Sin autenticación. Regresa `{ "ok": true, "escala_tiempo": 30 }`. Sirve para de
 ### Seguridad
 
 #### `GET /seguridad/alertas`
-Usuario con cualquier rol. Lista las últimas 20 filas de `alertas_seguridad` para mostrarlas en el dashboard durante la demo del SIEM. El SIEM es global y todavía no guarda el restaurante de cada hallazgo: solo el restaurante demo ve el feed; los demás tenants reciben `[]` hasta que el detector se aísle por restaurante.
+Usuario con cualquier rol. Lista las últimas 20 filas de `alertas_seguridad` para mostrarlas en el dashboard durante la demo del SIEM. El SIEM es global y todavía no guarda el restaurante de cada hallazgo: mientras exista **un solo** restaurante (la demo), el demo ve el feed; en cuanto hay un segundo restaurante todos reciben `[]` hasta que el detector se aísle por restaurante.
 
 ### Consulta
 

@@ -41,7 +41,8 @@ def _publicar_eventos(
     alertas_cerradas: list[Alerta],
     lotes_actualizados: list[Lote],
 ) -> None:
-    """Publica en el bus los cambios ya confirmados en la base."""
+    """Publica en el bus los cambios ya confirmados, solo para el tenant de la cámara."""
+    restaurante_id = camara.restaurante_id
     bus.publicar(
         "lectura",
         {
@@ -52,13 +53,14 @@ def _publicar_eventos(
             "puerta_abierta": lectura.puerta_abierta,
             "estado_camara": camara.estado,
         },
+        restaurante_id,
     )
     for alerta in alertas_abiertas:
-        bus.publicar("alerta_abierta", alerta_salida(alerta).model_dump())
+        bus.publicar("alerta_abierta", alerta_salida(alerta).model_dump(), restaurante_id)
     for alerta in alertas_cerradas:
-        bus.publicar("alerta_cerrada", alerta_salida(alerta).model_dump())
+        bus.publicar("alerta_cerrada", alerta_salida(alerta).model_dump(), restaurante_id)
     for lote in lotes_actualizados:
-        bus.publicar("lote_actualizado", lote_salida(lote).model_dump())
+        bus.publicar("lote_actualizado", lote_salida(lote).model_dump(), restaurante_id)
 
 
 def _cargar_lotes(session: Session, camara_id: int) -> list[Lote]:
@@ -200,7 +202,6 @@ def procesar_lectura(
         alertas_cerradas.append(alerta_temperatura)
     if resultado.abrir_alerta_temperatura:
         alerta_temperatura = Alerta(
-            restaurante_id=camara.restaurante_id,
             camara_id=camara.id,
             tipo=TIPO_ALERTA_TEMPERATURA,
             abierta_en=ahora,
@@ -218,7 +219,6 @@ def procesar_lectura(
         alertas_cerradas.append(alerta_puerta)
     if resultado.abrir_alerta_puerta:
         alerta_puerta = Alerta(
-            restaurante_id=camara.restaurante_id,
             camara_id=camara.id,
             tipo=TIPO_ALERTA_PUERTA,
             abierta_en=ahora,

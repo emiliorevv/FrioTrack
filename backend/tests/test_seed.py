@@ -127,7 +127,6 @@ def test_construir_seed_arma_los_quince_lotes():
     assert set(por_camara) == {1, 2, 3, 4, 5}
     assert all(2 <= cantidad <= 3 for cantidad in por_camara.values())
     assert all(lote.estado == "ok" and lote.merma_en is None for lote in lotes)
-    assert all(lote.restaurante_id == RESTAURANTE_DEMO_ID for lote in lotes)
 
     hoy = date.today()
     assert all(hoy <= lote.caducidad <= hoy + timedelta(days=60) for lote in lotes)
@@ -162,17 +161,22 @@ class FakeSession:
 
     def __init__(
         self,
-        hay_camaras: bool = False,
+        hay_camaras_demo: bool = False,
         restaurante: Restaurante | None = None,
     ) -> None:
-        self.hay_camaras = hay_camaras
+        self.hay_camaras_demo = hay_camaras_demo
         self.restaurante = restaurante
         self.agregados: list[object] = []
+        self.sentencias: list[object] = []
         self.flushes = 0
         self.commits = 0
 
-    def scalar(self, _sentencia: object) -> int | None:
-        return 1 if self.hay_camaras else None
+    def scalar(self, sentencia: object) -> int | None:
+        self.sentencias.append(sentencia)
+        return 1 if self.hay_camaras_demo else None
+
+    def execute(self, sentencia: object) -> None:
+        self.sentencias.append(sentencia)
 
     def get(self, _modelo: object, _ident: int) -> Restaurante | None:
         return self.restaurante
@@ -215,10 +219,31 @@ def test_cargar_seed_no_duplica_el_restaurante_demo():
     assert sesion.flushes == 1
 
 
-def test_cargar_seed_es_idempotente_si_ya_hay_camaras():
-    sesion = FakeSession(hay_camaras=True)
+def test_cargar_seed_es_idempotente_si_el_demo_ya_tiene_camaras():
+    sesion = FakeSession(hay_camaras_demo=True)
 
     assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is False
     assert sesion.agregados == []
     assert sesion.flushes == 0
     assert sesion.commits == 0
+
+
+def test_cargar_seed_solo_mira_las_camaras_del_restaurante_demo():
+    """Una cámara de otro tenant no debe impedir repoblar la demo."""
+    sesion = FakeSession(hay_camaras_demo=False)
+
+    assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is True
+    guardia = sesion.sentencias[0]
+    assert "camaras.restaurante_id" in str(guardia)
+    assert guardia.compile().params["restaurante_id_1"] == RESTAURANTE_DEMO_ID
+
+
+def test_cargar_seed_ajusta_la_secuencia_del_restaurante_demo():
+    """El id 1 fue explícito: la secuencia debe quedar después de MAX(id)."""
+    sesion = FakeSession()
+
+    cargar_seed(sesion, sensor_tokens=TOKENS, password="demo")
+
+    setval = [str(sentencia) for sentencia in sesion.sentencias if "setval" in str(sentencia)]
+    assert len(setval) == 1
+    assert "pg_get_serial_sequence('restaurantes', 'id')" in setval[0]

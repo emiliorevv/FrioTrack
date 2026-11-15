@@ -119,8 +119,8 @@ def test_restaurantes_es_la_raiz_del_tenant():
     assert tabla.c.creado_en.default.arg.__name__ == "utcnow"
 
 
-@pytest.mark.parametrize("nombre", ["usuarios", "camaras", "lotes", "alertas"])
-def test_tablas_operativas_llevan_restaurante_id_con_indice(nombre: str):
+@pytest.mark.parametrize("nombre", ["usuarios", "camaras"])
+def test_tablas_con_tenant_llevan_restaurante_id_con_indice(nombre: str):
     tabla = Base.metadata.tables[nombre]
 
     assert {fk.target_fullname for fk in tabla.c.restaurante_id.foreign_keys} == {
@@ -134,6 +134,6 @@ def test_tablas_operativas_llevan_restaurante_id_con_indice(nombre: str):
     assert indices[f"ix_{nombre}_restaurante_id"] == ["restaurante_id"]
 
 
-@pytest.mark.parametrize("nombre", ["lecturas", "sensores"])
-def test_lecturas_y_sensores_derivan_el_tenant_de_la_camara(nombre: str):
+@pytest.mark.parametrize("nombre", ["lecturas", "sensores", "lotes", "alertas"])
+def test_el_resto_deriva_el_tenant_de_la_camara(nombre: str):
     assert "restaurante_id" not in Base.metadata.tables[nombre].c

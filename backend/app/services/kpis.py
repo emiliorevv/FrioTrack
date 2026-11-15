@@ -55,31 +55,38 @@ def calcular_kpis(db: Session, restaurante_id: int) -> dict[str, Any]:
     alertas_activas = db.scalar(
         select(func.count())
         .select_from(Alerta)
+        .join(Camara, Camara.id == Alerta.camara_id)
         .where(
             Alerta.cerrada_en.is_(None),
-            Alerta.restaurante_id == restaurante_id,
+            Camara.restaurante_id == restaurante_id,
         )
     )
 
     atendidas = db.execute(
-        select(Alerta.abierta_en, Alerta.atendida_en).where(
+        select(Alerta.abierta_en, Alerta.atendida_en)
+        .join(Camara, Camara.id == Alerta.camara_id)
+        .where(
             Alerta.atendida_en.is_not(None),
-            Alerta.restaurante_id == restaurante_id,
+            Camara.restaurante_id == restaurante_id,
         )
     ).all()
 
     costos_en_riesgo = db.scalars(
-        select(Lote.costo_total_mxn).where(
+        select(Lote.costo_total_mxn)
+        .join(Camara, Camara.id == Lote.camara_id)
+        .where(
             Lote.estado == "en_riesgo",
-            Lote.restaurante_id == restaurante_id,
+            Camara.restaurante_id == restaurante_id,
         )
     ).all()
 
     mermas = db.execute(
-        select(Lote.merma_en, Lote.costo_total_mxn).where(
+        select(Lote.merma_en, Lote.costo_total_mxn)
+        .join(Camara, Camara.id == Lote.camara_id)
+        .where(
             Lote.estado == "merma",
             Lote.merma_en.is_not(None),
-            Lote.restaurante_id == restaurante_id,
+            Camara.restaurante_id == restaurante_id,
         )
     ).all()
 

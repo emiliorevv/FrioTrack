@@ -484,7 +484,6 @@ def test_servicio_notifica_al_abrir_una_alerta(monkeypatch):
     camara_recibida, alertas, lotes, lotes_a_merma, ahora, settings = llamadas[0]
     assert camara_recibida is camara
     assert [alerta.tipo for alerta in alertas] == ["temperatura"]
-    assert alertas[0].restaurante_id == 1  # la alerta nace con el tenant de la cámara
     assert alertas[0].sms_enviados == 0  # el canal simulado no cuenta como SMS
     assert lotes == [lote]
     assert lotes_a_merma == []
@@ -550,7 +549,7 @@ def test_fallo_del_notificador_no_rompe_la_ingesta(monkeypatch):
 
 async def _eventos_de(accion: Callable[[], object]) -> list[tuple[str, dict[str, object]]]:
     """Suscribe una cola, corre la ingesta y devuelve lo publicado al bus."""
-    cola = bus.suscribir()
+    cola = bus.suscribir(1)
     try:
         accion()
         await asyncio.sleep(0)  # deja correr el `call_soon_threadsafe` del bus
@@ -691,7 +690,7 @@ def test_no_publica_si_falla_el_commit(monkeypatch):
     sesion.commit = commit_roto  # type: ignore[method-assign]
 
     async def escenario() -> int:
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         try:
             with pytest.raises(RuntimeError):
                 procesar_telemetria(sesion, _datos(temperatura_c=1.0), token=TOKEN)

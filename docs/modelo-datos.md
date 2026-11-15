@@ -35,11 +35,12 @@ alertas_seguridad        ips_bloqueadas <── (lo escribe el detector, lo lee 
 
 El restaurante 1 lo inserta la migración `0002`; el seed lo reutiliza y no lo
 duplica. Con `AUTH_REQUERIDA=0` (local y pruebas) todas las consultas operan
-sobre ese tenant. `usuarios`, `camaras`, `lotes` y `alertas` llevan
-`restaurante_id` (FK a `restaurantes.id` + índice `ix_<tabla>_restaurante_id`).
-`lecturas` y `sensores` no la llevan: su tenant se deriva de la cámara.
-`logs_acceso`, `alertas_seguridad` e `ips_bloqueadas` siguen globales porque
-pertenecen al SIEM de la plataforma. Ver [multi-tenant.md](multi-tenant.md).
+sobre ese tenant. `usuarios` y `camaras` guardan `restaurante_id` (FK a
+`restaurantes.id` + índice `ix_<tabla>_restaurante_id`): son la fuente de
+verdad. `lotes`, `alertas`, `lecturas` y `sensores` no la llevan y derivan el
+tenant de su cámara (join), para que no existan dos valores que puedan
+divergir. `logs_acceso`, `alertas_seguridad` e `ips_bloqueadas` siguen globales
+porque pertenecen al SIEM de la plataforma. Ver [multi-tenant.md](multi-tenant.md).
 
 ## Operación (ERP/MES)
 
@@ -93,7 +94,6 @@ token en claro.
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | `serial` PK | |
-| `restaurante_id` | `int` FK | Tenant dueño del inventario |
 | `producto` | `text` | "Robalo fresco" |
 | `camara_id` | `int` FK | |
 | `cantidad` | `numeric(8,2)` | |
@@ -107,8 +107,7 @@ token en claro.
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | `serial` PK | |
-| `restaurante_id` | `int` FK | Tenant que ve y atiende la alerta |
-| `camara_id` | `int` FK | |
+| `camara_id` | `int` FK | La alerta hereda el tenant de esta cámara |
 | `tipo` | `text` | `temperatura` o `puerta` |
 | `abierta_en` | `timestamptz` | |
 | `cerrada_en` | `timestamptz` null | Nulo = activa |

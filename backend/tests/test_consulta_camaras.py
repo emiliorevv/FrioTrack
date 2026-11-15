@@ -139,12 +139,12 @@ class SesionFalsa:
         return valor == esperado
 
     def _lotes_del_tenant(self, params: dict[str, Any]) -> list[Lote]:
-        """Lotes que pasarían el filtro `restaurante_id` de la consulta."""
+        """Lotes cuyo tenant (el de su cámara) pasa el filtro de la consulta."""
         if "restaurante_id_1" not in params:
             return list(self.lotes)
-        return [
-            lote for lote in self.lotes if lote.restaurante_id == params["restaurante_id_1"]
-        ]
+        tenant = params["restaurante_id_1"]
+        camaras = {camara.id: camara.restaurante_id for camara in self.camaras}
+        return [lote for lote in self.lotes if camaras.get(lote.camara_id) == tenant]
 
     def _lotes(self, params: dict[str, Any]) -> list[Lote]:
         filas = self._lotes_del_tenant(params)
@@ -262,11 +262,9 @@ def _lote(
     costo_total_mxn: str,
     estado: str,
     caducidad: date,
-    restaurante_id: int = 1,
 ) -> Lote:
     return Lote(
         id=id,
-        restaurante_id=restaurante_id,
         producto=producto,
         camara_id=camara_id,
         cantidad=Decimal(cantidad),
@@ -592,16 +590,7 @@ def _mundo_de_dos_tenants() -> dict[str, Any]:
     lecturas = [_lectura(101, 1, ahora - timedelta(minutes=5))]
     lotes = [
         _lote(1, 1, "Robalo fresco", "12.00", "3240.00", "ok", date(2026, 11, 20)),
-        _lote(
-            9,
-            6,
-            "Tiramisú",
-            "2.00",
-            "300.00",
-            "ok",
-            date(2026, 11, 22),
-            restaurante_id=2,
-        ),
+        _lote(9, 6, "Tiramisú", "2.00", "300.00", "ok", date(2026, 11, 22)),
     ]
     return {
         "sesion": SesionFalsa(camaras=camaras, lecturas=lecturas, lotes=lotes),
@@ -637,3 +626,15 @@ def test_tenant_2_no_puede_filtrar_lotes_por_camara_ajena():
         respuesta = cliente.get("/api/lotes", params={"camara_id": 1})
 
     assert respuesta.status_code == 404
+
+
+def test_tenant_1_no_ve_camaras_ni_lotes_del_tenant_2():
+    """El lote hereda el tenant de su cámara, no de una columna propia."""
+    mundo = _mundo_de_dos_tenants()
+
+    with _cliente(mundo["sesion"], restaurante_id=1) as cliente:
+        camaras = cliente.get("/api/camaras").json()
+        lotes = cliente.get("/api/lotes").json()
+
+    assert [camara["id"] for camara in camaras] == [1]
+    assert [lote["id"] for lote in lotes] == [1]

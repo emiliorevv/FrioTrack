@@ -14,9 +14,9 @@ def test_suscribir_publicar_y_recibir():
     bus = EventBus()
 
     async def escenario():
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         try:
-            bus.publicar("lectura", {"camara_id": 1})
+            bus.publicar("lectura", {"camara_id": 1}, 1)
             return await asyncio.wait_for(cola.get(), timeout=1)
         finally:
             bus.desuscribir(cola)
@@ -29,8 +29,8 @@ def test_publicar_desde_otro_hilo_entrega_el_evento():
     bus = EventBus()
 
     async def escenario():
-        cola = bus.suscribir()
-        hilo = threading.Thread(target=bus.publicar, args=("lectura", {"camara_id": 7}))
+        cola = bus.suscribir(1)
+        hilo = threading.Thread(target=bus.publicar, args=("lectura", {"camara_id": 7}, 1))
         try:
             hilo.start()
             return await asyncio.wait_for(cola.get(), timeout=1)
@@ -44,7 +44,7 @@ def test_publicar_desde_otro_hilo_entrega_el_evento():
 def test_publicar_sin_suscriptores_no_falla():
     bus = EventBus()
 
-    bus.publicar("lectura", {"camara_id": 1})
+    bus.publicar("lectura", {"camara_id": 1}, 1)
 
 
 def test_hay_suscriptores_refleja_las_conexiones():
@@ -52,7 +52,7 @@ def test_hay_suscriptores_refleja_las_conexiones():
 
     async def escenario():
         antes = bus.hay_suscriptores()
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         durante = bus.hay_suscriptores()
         bus.desuscribir(cola)
         return antes, durante, bus.hay_suscriptores()
@@ -64,9 +64,9 @@ def test_desuscribir_deja_de_entregar_eventos():
     bus = EventBus()
 
     async def escenario():
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         bus.desuscribir(cola)
-        bus.publicar("lectura", {"camara_id": 1})
+        bus.publicar("lectura", {"camara_id": 1}, 1)
         await asyncio.sleep(0)
         return cola.empty()
 
@@ -77,11 +77,11 @@ def test_cola_llena_descarta_la_lectura_sin_bloquear():
     bus = EventBus()
 
     async def escenario():
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         try:
             for indice in range(TAMANO_COLA):
                 cola.put_nowait(("relleno", {"indice": indice}))
-            bus.publicar("lectura", {"camara_id": 1})
+            bus.publicar("lectura", {"camara_id": 1}, 1)
             await asyncio.sleep(0)
             return cola.qsize(), cola.get_nowait()
         finally:
@@ -96,11 +96,11 @@ def test_cola_llena_pide_reconectar_para_evento_de_estado():
     bus = EventBus()
 
     async def escenario():
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         try:
             for indice in range(TAMANO_COLA):
                 cola.put_nowait(("relleno", {"indice": indice}))
-            bus.publicar("alerta_abierta", {"id": 31})
+            bus.publicar("alerta_abierta", {"id": 31}, 1)
             await asyncio.sleep(0)
             return cola.qsize(), cola.get_nowait()
         finally:
@@ -117,11 +117,11 @@ def test_cola_llena_hace_espacio_para_la_notificacion(descartable: str):
     bus = EventBus()
 
     async def escenario():
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         try:
             for indice in range(TAMANO_COLA):
                 cola.put_nowait((descartable, {"indice": indice}))
-            bus.publicar("notificacion", {"camara_id": 1})
+            bus.publicar("notificacion", {"camara_id": 1}, 1)
             await asyncio.sleep(0)
             eventos = []
             while not cola.empty():
@@ -141,12 +141,12 @@ def test_notificacion_solo_descarta_el_primer_evento_descartable():
     bus = EventBus()
 
     async def escenario():
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         try:
             for indice in range(TAMANO_COLA):
                 tipo = "kpis" if indice == 40 else "alerta_abierta"
                 cola.put_nowait((tipo, {"indice": indice}))
-            bus.publicar("notificacion", {"camara_id": 1})
+            bus.publicar("notificacion", {"camara_id": 1}, 1)
             await asyncio.sleep(0)
             eventos = []
             while not cola.empty():
@@ -168,11 +168,11 @@ def test_cola_llena_descarta_kpis_sin_pedir_reconexion():
     bus = EventBus()
 
     async def escenario():
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         try:
             for indice in range(TAMANO_COLA):
                 cola.put_nowait(("lectura", {"indice": indice}))
-            bus.publicar("kpis", {"alertas_activas": 1})
+            bus.publicar("kpis", {"alertas_activas": 1}, 1)
             await asyncio.sleep(0)
             return cola.qsize(), cola.get_nowait()
         finally:
@@ -187,11 +187,11 @@ def test_cola_llena_sin_descartables_entrega_la_notificacion_y_reconecta():
     bus = EventBus()
 
     async def escenario():
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         try:
             for indice in range(TAMANO_COLA):
                 cola.put_nowait(("alerta_abierta", {"id": indice}))
-            bus.publicar("notificacion", {"camara_id": 1})
+            bus.publicar("notificacion", {"camara_id": 1}, 1)
             await asyncio.sleep(0)
             eventos = []
             while not cola.empty():
@@ -215,7 +215,7 @@ def test_publicar_reparte_a_colas_de_loops_distintos():
 
     def escuchar() -> None:
         async def esperar():
-            cola = bus.suscribir()
+            cola = bus.suscribir(1)
             try:
                 listos.wait(timeout=2)  # ambos loops ya tienen su cola
                 return await asyncio.wait_for(cola.get(), timeout=2)
@@ -231,7 +231,7 @@ def test_publicar_reparte_a_colas_de_loops_distintos():
     for hilo in hilos:
         hilo.start()
     listos.wait(timeout=2)
-    bus.publicar("alerta_abierta", {"id": 31})
+    bus.publicar("alerta_abierta", {"id": 31}, 1)
     for hilo in hilos:
         hilo.join(timeout=3)
 
@@ -247,7 +247,7 @@ def test_loop_cerrado_de_otra_conexion_no_tumba_el_reparto():
 
     def escuchar() -> None:
         async def esperar():
-            cola = bus.suscribir()
+            cola = bus.suscribir(1)
             try:
                 listo.set()
                 return await asyncio.wait_for(cola.get(), timeout=3)
@@ -261,23 +261,26 @@ def test_loop_cerrado_de_otra_conexion_no_tumba_el_reparto():
     assert listo.wait(timeout=2)
 
     async def suscribir_y_morir():
-        bus.suscribir()  # se deja registrada: su loop se cierra al salir
+        bus.suscribir(1)  # se deja registrada: su loop se cierra al salir
 
     asyncio.run(suscribir_y_morir())
 
-    bus.publicar("lectura", {"camara_id": 3})
+    bus.publicar("lectura", {"camara_id": 3}, 1)
     hilo.join(timeout=4)
 
     assert resultado == [("lectura", {"camara_id": 3})]
 
 
-def test_tarea_global_de_kpis_no_publica_sin_suscriptores(monkeypatch):
-    publicados: list[tuple[str, dict]] = []
-    bus = EventBus()
-    monkeypatch.setattr(bus, "publicar", lambda evento, datos: publicados.append((evento, datos)))
-    monkeypatch.setattr(kpis_mod, "bus", bus)
+def test_tarea_global_de_kpis_no_calcula_sin_suscriptores(monkeypatch):
+    calculos: list[bool] = []
+    monkeypatch.setattr(
+        kpis_mod,
+        "publicar_kpis_de_todos_los_tenants",
+        lambda: calculos.append(True),
+    )
 
     async def escenario():
+        monkeypatch.setattr(kpis_mod, "bus", EventBus())
         tarea = asyncio.create_task(kpis_mod.publicar_kpis_periodicos(0.01))
         await asyncio.sleep(0.05)
         tarea.cancel()
@@ -285,23 +288,118 @@ def test_tarea_global_de_kpis_no_publica_sin_suscriptores(monkeypatch):
             await tarea
 
     asyncio.run(escenario())
-    assert publicados == []
+    assert calculos == []
 
 
-def test_tarea_global_de_kpis_publica_la_senal_cuando_hay_suscriptores(monkeypatch):
-    """El bus solo avisa; cada conexión recalcula los KPIs de su restaurante."""
+def test_tarea_global_de_kpis_calcula_cuando_hay_suscriptores(monkeypatch):
+    calculos: list[bool] = []
+    monkeypatch.setattr(
+        kpis_mod,
+        "publicar_kpis_de_todos_los_tenants",
+        lambda: calculos.append(True),
+    )
 
     async def escenario():
         bus = EventBus()
         monkeypatch.setattr(kpis_mod, "bus", bus)
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         tarea = asyncio.create_task(kpis_mod.publicar_kpis_periodicos(0.01))
         try:
-            return await asyncio.wait_for(cola.get(), timeout=1)
+            await asyncio.sleep(0.05)
         finally:
             tarea.cancel()
             with suppress(asyncio.CancelledError):
                 await tarea
             bus.desuscribir(cola)
 
-    assert asyncio.run(escenario()) == ("kpis", {})
+    asyncio.run(escenario())
+    assert calculos  # al menos un ciclo con suscriptores
+
+
+class _SesionDeTenants:
+    """Sesión mínima: devuelve los tenants con cámaras y cierra al salir."""
+
+    def __init__(self, tenants: list[int]) -> None:
+        self.tenants = tenants
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_excepcion: object) -> None:
+        pass
+
+    def scalars(self, _sentencia: object) -> list[int]:
+        return self.tenants
+
+
+def test_publicar_kpis_calcula_una_vez_por_tenant_y_reparte(monkeypatch):
+    calculos: list[int] = []
+    monkeypatch.setattr(
+        kpis_mod, "SessionLocal", lambda bind=None: _SesionDeTenants([1, 2])
+    )
+    monkeypatch.setattr(kpis_mod, "get_engine", lambda: None)
+    monkeypatch.setattr(
+        kpis_mod,
+        "calcular_kpis",
+        lambda _session, tenant: calculos.append(tenant) or {"tenant": tenant},
+    )
+
+    async def escenario():
+        bus = EventBus()
+        monkeypatch.setattr(kpis_mod, "bus", bus)
+        cola1 = bus.suscribir(1)
+        cola2 = bus.suscribir(2)
+        try:
+            kpis_mod.publicar_kpis_de_todos_los_tenants()
+            await asyncio.sleep(0)
+            return cola1.get_nowait(), cola2.get_nowait(), cola1.empty(), cola2.empty()
+        finally:
+            bus.desuscribir(cola1)
+            bus.desuscribir(cola2)
+
+    evento1, evento2, vacia1, vacia2 = asyncio.run(escenario())
+
+    # Una sola computación por tenant, no una por conexión.
+    assert calculos == [1, 2]
+    assert evento1 == ("kpis", {"tenant": 1})
+    assert evento2 == ("kpis", {"tenant": 2})
+    assert vacia1 and vacia2
+
+
+# --- Aislamiento del bus ----------------------------------------------------
+
+
+def test_evento_de_otro_tenant_no_llega_a_la_cola():
+    bus = EventBus()
+
+    async def escenario():
+        cola1 = bus.suscribir(1)
+        cola2 = bus.suscribir(2)
+        try:
+            bus.publicar("alerta_abierta", {"camara_id": 6}, 2)
+            await asyncio.sleep(0)
+            return cola1.empty(), cola2.get_nowait()
+        finally:
+            bus.desuscribir(cola1)
+            bus.desuscribir(cola2)
+
+    vacia1, evento2 = asyncio.run(escenario())
+    assert vacia1 is True
+    assert evento2 == ("alerta_abierta", {"camara_id": 6})
+
+
+def test_evento_sin_tenant_no_llega_a_nadie():
+    bus = EventBus()
+
+    async def escenario():
+        cola1 = bus.suscribir(1)
+        cola2 = bus.suscribir(2)
+        try:
+            bus.publicar("lectura", {"camara_id": 1}, None)
+            await asyncio.sleep(0)
+            return cola1.empty(), cola2.empty()
+        finally:
+            bus.desuscribir(cola1)
+            bus.desuscribir(cola2)
+
+    assert asyncio.run(escenario()) == (True, True)

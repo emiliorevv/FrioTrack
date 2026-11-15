@@ -23,7 +23,7 @@ from app.core.auth import (
 )
 from app.core.rate_limit import LimitadorIntentos
 from app.core.security import hash_password, verify_password
-from app.db.models import RESTAURANTE_DEMO_ID, Alerta, IpBloqueada, LogAcceso, Usuario
+from app.db.models import RESTAURANTE_DEMO_ID, Alerta, Camara, IpBloqueada, LogAcceso, Usuario
 from app.db.session import get_db
 from app.main import create_app
 from app.middleware import acceso
@@ -136,6 +136,8 @@ class SesionFalsa:
         self.obtenidos.append((modelo, ident))
         if modelo is Usuario:
             return self.usuario if self.usuario is not None and self.usuario.id == ident else None
+        if modelo is Camara:
+            return Camara(id=ident, restaurante_id=1, nombre="Cámara de prueba")
         return self.alerta if modelo is Alerta else None
 
     def commit(self) -> None:
@@ -188,7 +190,6 @@ def _usuario(
 def _alerta() -> Alerta:
     return Alerta(
         id=31,
-        restaurante_id=1,
         camara_id=1,
         tipo="temperatura",
         abierta_en=datetime(2026, 11, 12, 18, 5, tzinfo=UTC),
@@ -696,7 +697,6 @@ def test_atender_sin_auth_sigue_usando_al_primer_jefe(monkeypatch):
 def _stream_aislado(monkeypatch):
     """Evita Postgres y que el cupo de conexiones se arrastre entre pruebas."""
     monkeypatch.setattr(stream_mod, "calcular_kpis_actuales", lambda _rid: KPIS)
-    monkeypatch.setattr(stream_mod, "_ids_de_camaras", lambda _rid: frozenset())
     monkeypatch.setattr(
         stream_mod,
         "limite_conexiones",

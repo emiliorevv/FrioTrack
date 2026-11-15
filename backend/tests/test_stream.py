@@ -40,7 +40,6 @@ def _sin_cache_settings():
 def _kpis_y_cupo_limpios(monkeypatch):
     """Evita tocar Postgres y que el cupo se arrastre entre pruebas."""
     monkeypatch.setattr(stream_mod, "calcular_kpis_actuales", lambda _rid: KPIS)
-    monkeypatch.setattr(stream_mod, "_ids_de_camaras", lambda _rid: frozenset({1, 2}))
     monkeypatch.setattr(
         stream_mod,
         "limite_conexiones",
@@ -105,7 +104,7 @@ def test_stream_termina_al_recibir_cerrar(monkeypatch):
         try:
             await anext(generador)  # retry
             await anext(generador)  # kpis inicial
-            bus.publicar(EVENTO_CERRAR, {})
+            bus.publicar(EVENTO_CERRAR, {}, 1)
             with pytest.raises(StopAsyncIteration):
                 await asyncio.wait_for(anext(generador), timeout=1)
         finally:
@@ -126,51 +125,59 @@ def test_limite_de_conexiones_se_libera_al_desuscribir():
     assert excepcion.value.status_code == 503
 
 
-def test_stream_filtra_camaras_ajenas_y_recalcula_kpis_del_tenant(monkeypatch):
+def test_stream_reenvia_los_kpis_del_bus_sin_recalcular(monkeypatch):
     bus = EventBus()
     monkeypatch.setattr(stream_mod, "bus", bus)
     calculos: list[int] = []
     monkeypatch.setattr(
         stream_mod,
         "calcular_kpis_actuales",
-        lambda rid: calculos.append(rid) or {"restaurante_id": rid},
+        lambda rid: calculos.append(rid) or {"inicial": rid},
     )
-    permitidas = {2}
-    monkeypatch.setattr(
-        stream_mod, "_ids_de_camaras", lambda _rid: frozenset(permitidas)
-    )
+
+    async def escenario():
+        generador = stream_mod._eventos(_RequestFalsa(), 1)
+        try:
+            assert "retry: 3000" in await anext(generador)
+            inicial = await anext(generador)
+
+            # El KPI periódico llega ya calculado por la tarea global del tenant.
+            bus.publicar("kpis", {"alertas_activas": 7}, 1)
+            del_bus = await asyncio.wait_for(anext(generador), timeout=1)
+
+            bus.publicar("lectura", {"camara_id": 2, "temperatura_c": 1.0}, 1)
+            lectura = await asyncio.wait_for(anext(generador), timeout=1)
+            return inicial, del_bus, lectura
+        finally:
+            await generador.aclose()
+
+    inicial, del_bus, lectura = asyncio.run(escenario())
+
+    assert '"inicial":1' in inicial
+    # Se reenvía el payload del bus tal cual: no se recalcula por conexión.
+    assert del_bus.startswith("event: kpis")
+    assert '"alertas_activas":7' in del_bus
+    assert lectura.startswith("event: lectura")
+    assert '"camara_id":2' in lectura
+    assert calculos == [1]
+
+
+def test_stream_de_tenant_2_no_recibe_eventos_del_tenant_1(monkeypatch):
+    bus = EventBus()
+    monkeypatch.setattr(stream_mod, "bus", bus)
 
     async def escenario():
         generador = stream_mod._eventos(_RequestFalsa(), 2)
         try:
-            assert "retry: 3000" in await anext(generador)
-            inicial = await anext(generador)
-            assert '"restaurante_id":2' in inicial
-
-            # La lectura de la cámara 1 es de otro tenant: se descarta.
-            bus.publicar("lectura", {"camara_id": 1, "temperatura_c": 3.0})
-            bus.publicar("lectura", {"camara_id": 2, "temperatura_c": 1.0})
-            propia = await asyncio.wait_for(anext(generador), timeout=1)
-
-            # El evento `kpis` del bus solo es la señal: se recalcula el tenant
-            # y se refresca la lista de cámaras permitidas.
-            permitidas.update({2, 3})
-            bus.publicar("kpis", {})
-            refresco = await asyncio.wait_for(anext(generador), timeout=1)
-            bus.publicar("lectura", {"camara_id": 3, "temperatura_c": 2.0})
-            nueva = await asyncio.wait_for(anext(generador), timeout=1)
-
-            return propia, refresco, nueva
+            await anext(generador)  # retry
+            await anext(generador)  # kpis inicial
+            bus.publicar("lectura", {"camara_id": 1}, 1)
+            bus.publicar("lectura", {"camara_id": 6}, 2)
+            return await asyncio.wait_for(anext(generador), timeout=1)
         finally:
             await generador.aclose()
 
-    propia, refresco, nueva = asyncio.run(escenario())
+    evento = asyncio.run(escenario())
 
-    assert propia.startswith("event: lectura")
-    assert '"camara_id":2' in propia
-    assert '"camara_id":1' not in propia
-    assert refresco.startswith("event: kpis")
-    assert '"restaurante_id":2' in refresco
-    assert nueva.startswith("event: lectura")
-    assert '"camara_id":3' in nueva
-    assert calculos == [2, 2]
+    assert evento.startswith("event: lectura")
+    assert '"camara_id":6' in evento

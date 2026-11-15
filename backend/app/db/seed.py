@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings, leer_sensor_tokens
@@ -60,6 +60,13 @@ LOTES: list[tuple[str, int, Decimal, str, Decimal, int]] = [
     ("Helado", 5, Decimal("8.00"), "l", Decimal("760.00"), 45),
     ("Carne de res congelada", 5, Decimal("12.00"), "kg", Decimal("2880.00"), 60),
 ]
+
+# El demo se inserta con id explícito; la secuencia debe quedar en MAX(id) para
+# que el primer restaurante creado sin id (el futuro sign-up) reciba el 2.
+SQL_SECUENCIA_RESTAURANTES = (
+    "SELECT setval(pg_get_serial_sequence('restaurantes', 'id'), "
+    "(SELECT MAX(id) FROM restaurantes))"
+)
 
 
 def _tokens_de_entorno() -> dict[str, str]:
@@ -118,7 +125,6 @@ def construir_seed(
     hoy = date.today()
     lotes = [
         Lote(
-            restaurante_id=RESTAURANTE_DEMO_ID,
             producto=producto,
             camara_id=camara_id,
             cantidad=cantidad,
@@ -154,11 +160,17 @@ def cargar_seed(
     sensor_tokens: dict[str, str] | None = None,
     password: str | None = None,
 ) -> bool:
-    """Carga cámaras, sensores, lotes y usuarios si la base está vacía.
+    """Carga cámaras, sensores, lotes y usuarios si el restaurante demo está vacío.
 
-    Regresa True si insertó datos y False si ya había cámaras (idempotente).
+    Regresa True si insertó datos y False si el tenant demo ya tenía cámaras
+    (idempotente). Otras cámaras de otros restaurantes no cuentan: si al demo le
+    borraron sus datos, se repuebla.
     """
-    if session.scalar(select(Camara.id).limit(1)) is not None:
+    if session.scalar(
+        select(Camara.id)
+        .where(Camara.restaurante_id == RESTAURANTE_DEMO_ID)
+        .limit(1)
+    ) is not None:
         return False
 
     camaras, sensores, lotes, usuarios = construir_seed(sensor_tokens, password)
@@ -168,6 +180,8 @@ def cargar_seed(
             Restaurante(id=RESTAURANTE_DEMO_ID, nombre=NOMBRE_RESTAURANTE_DEMO)
         )
         session.flush()  # las filas hijas necesitan el restaurante antes del commit
+        # El id del demo fue explícito: alinea la secuencia para el próximo alta.
+        session.execute(text(SQL_SECUENCIA_RESTAURANTES))
     session.add_all(camaras)
     session.flush()
     session.add_all(sensores)
