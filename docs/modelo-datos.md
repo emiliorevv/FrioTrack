@@ -2,6 +2,8 @@
 
 Tablas de Postgres (Supabase) que usan el backend y el módulo de seguridad. El backend es dueño de todas; seguridad lee `logs_acceso` y `lecturas`, y escribe solo en `alertas_seguridad` e `ips_bloqueadas`.
 
+> La fuente de verdad del esquema son los modelos de `backend/app/db/models.py` y las migraciones de `backend/alembic/versions/` (ver [migraciones.md](migraciones.md)). Este documento describe el modelo; los cambios de esquema van por una migración nueva, nunca editando el SQL Editor de Supabase.
+
 Convenciones:
 - Fechas en UTC (`timestamptz`). El dashboard las muestra en hora de Mérida.
 - Dinero en pesos MXN con `numeric(10,2)`.

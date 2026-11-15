@@ -1,33 +1,42 @@
-"""Crea el esquema y carga los datos semilla.
+"""Verifica el esquema y carga los datos semilla.
 
-Uso desde `backend/`:
+El esquema lo crean las migraciones de Alembic; este módulo ya no llama a
+`create_all`. Uso desde `backend/`:
 
+    alembic upgrade head
     python -m app.db.init_db
 """
 
+from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 
-from app.db import models  # noqa: F401  (registra las tablas en Base.metadata)
-from app.db.base import Base
 from app.db.seed import cargar_seed
 from app.db.session import SessionLocal, get_engine
 
+MENSAJE_FALTA_ESQUEMA = (
+    "Falta el esquema: ejecuta `alembic upgrade head` antes de cargar el seed."
+)
 
-def crear_esquema(engine: Engine) -> None:
-    """Crea todas las tablas que falten."""
-    Base.metadata.create_all(bind=engine)
+
+def esquema_existe(engine: Engine) -> bool:
+    """Indica si la tabla `camaras` ya existe (la crea el baseline de Alembic)."""
+    return inspect(engine).has_table("camaras")
 
 
 def inicializar_db() -> bool:
-    """Crea el esquema y carga el seed. Regresa False si la base ya tenía datos."""
+    """Carga el seed sobre un esquema migrado. Regresa False si ya había datos."""
     engine = get_engine()
-    crear_esquema(engine)
+    if not esquema_existe(engine):
+        raise RuntimeError(MENSAJE_FALTA_ESQUEMA)
     with SessionLocal(bind=engine) as session:
         return cargar_seed(session)
 
 
 if __name__ == "__main__":
-    if inicializar_db():
-        print("Esquema listo y datos semilla cargados.")
-    else:
-        print("La base ya tenía datos; no se cargó nada.")
+    try:
+        if inicializar_db():
+            print("Datos semilla cargados.")
+        else:
+            print("La base ya tenía datos; no se cargó nada.")
+    except RuntimeError as error:
+        raise SystemExit(f"Error: {error}") from error
