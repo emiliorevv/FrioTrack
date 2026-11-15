@@ -139,6 +139,23 @@ describe('AuthProvider', () => {
     expect(result.current.token).toBeNull()
   })
 
+  it('no muestra “0 s” cuando el 429 trae Retry-After 0', async () => {
+    vi.mocked(iniciarSesion).mockRejectedValueOnce(
+      new ErrorApi('Too Many Requests', 429, 0),
+    )
+
+    const { result } = montar()
+
+    await act(async () => {
+      await result.current.login('jefe', 'mala')
+    })
+
+    expect(result.current.error).toBe(
+      'Demasiados intentos de inicio de sesión. Intenta de nuevo más tarde.',
+    )
+    expect(result.current.error).not.toContain('0 s')
+  })
+
   it('usa el detalle real de un 500 y cae al genérico sin detalle', async () => {
     vi.mocked(iniciarSesion).mockRejectedValueOnce(
       new ErrorApi('La API respondió 500 Internal Server Error', 500),
@@ -388,7 +405,7 @@ describe('AuthProvider · registro', () => {
     expect(leerTokenGuardado()).toBeNull()
   })
 
-  it('traduce un 422 a las reglas de usuario y contraseña', async () => {
+  it('traduce un 422 con los límites compartidos', async () => {
     vi.mocked(registrar).mockRejectedValueOnce(
       new ErrorApi('Unprocessable Entity', 422),
     )
@@ -400,7 +417,7 @@ describe('AuthProvider · registro', () => {
     })
 
     expect(result.current.error).toBe(
-      'Revisa los datos: usuario mínimo 3 caracteres y contraseña mínimo 8.',
+      'Revisa los datos: restaurante 2-120 caracteres, usuario 3-64 y contraseña 8-128.',
     )
     expect(getToken()).toBeNull()
   })
@@ -420,6 +437,50 @@ describe('AuthProvider · registro', () => {
       'Demasiados registros desde esta red. Intenta de nuevo en 30 s.',
     )
     expect(getToken()).toBeNull()
+  })
+
+  it('no muestra “0 s” cuando el 429 de registro trae Retry-After 0', async () => {
+    vi.mocked(registrar).mockRejectedValueOnce(
+      new ErrorApi('Too Many Requests', 429, 0),
+    )
+
+    const { result } = montar()
+
+    await act(async () => {
+      await result.current.registro('Taquería', 'dueno-nuevo', 'friotrack-demo')
+    })
+
+    expect(result.current.error).toBe(
+      'Demasiados registros desde esta red. Intenta de nuevo más tarde.',
+    )
+    expect(result.current.error).not.toContain('0 s')
+  })
+
+  it('avisa que la cuenta existe si el JWT del 201 no es válido', async () => {
+    vi.mocked(registrar).mockResolvedValueOnce({
+      access_token: 'no-es-un-jwt',
+      token_type: 'bearer',
+      expira_en_segundos: 28800,
+    })
+
+    const { result } = montar()
+
+    let exito!: boolean
+    await act(async () => {
+      exito = await result.current.registro(
+        'Taquería del Norte',
+        'dueno-nuevo',
+        'friotrack-demo',
+      )
+    })
+
+    expect(exito).toBe(false)
+    expect(result.current.error).toBe(
+      'Tu cuenta se creó, pero no pudimos iniciar la sesión. Inicia sesión con tus credenciales.',
+    )
+    expect(result.current.token).toBeNull()
+    expect(getToken()).toBeNull()
+    expect(leerTokenGuardado()).toBeNull()
   })
 
   it('cae a un mensaje accionable cuando falla la red', async () => {

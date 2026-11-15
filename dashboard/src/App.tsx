@@ -90,7 +90,7 @@ function App({ usuario, rol, onLogout }: AppProps) {
 
   const equiposEnAlerta = conteos.alerta + conteos.critica
   const sinDatos = camaras.length === 0 && kpis === null
-  const mostrarBienvenida = camaras.length === 0 && !cargando && !errorResumen
+  const mostrarBienvenida = camaras.length === 0 && !cargando && rol === 'dueno'
   const actualizadoEn = fechaMasReciente(ultimoExitoHttp, ultimaActividadSse)
 
   return (

@@ -1,31 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from './AuthProvider'
+import { validarLogin, validarRegistro } from './validacion'
 
 type Modo = 'login' | 'registro'
 
-/** Devuelve el primer mensaje de validación del alta, o `null` si está bien. */
-function validarRegistro(
-  restaurante: string,
-  usuario: string,
-  password: string,
-  confirmacion: string,
-): string | null {
-  if (!restaurante) {
-    return 'Escribe el nombre de tu restaurante.'
-  }
-  if (!usuario) {
-    return 'Escribe un usuario.'
-  }
-  if (usuario.length < 3) {
-    return 'El usuario debe tener al menos 3 caracteres.'
-  }
-  if (password.length < 8) {
-    return 'La contraseña debe tener al menos 8 caracteres.'
-  }
-  if (password !== confirmacion) {
-    return 'Las contraseñas no coinciden.'
-  }
-  return null
+const TEXTOS_BOTON: Record<Modo, [string, string]> = {
+  login: ['Entrar', 'Entrando…'],
+  registro: ['Crear cuenta', 'Creando cuenta…'],
 }
 
 export function Login() {
@@ -38,14 +19,8 @@ export function Login() {
   const [errorLocal, setErrorLocal] = useState<string | null>(null)
 
   const mensajeError = errorLocal ?? error
-  const textoBoton =
-    modo === 'login'
-      ? cargando
-        ? 'Entrando…'
-        : 'Entrar'
-      : cargando
-        ? 'Creando cuenta…'
-        : 'Crear cuenta'
+  const [textoNormal, textoCargando] = TEXTOS_BOTON[modo]
+  const textoBoton = cargando ? textoCargando : textoNormal
 
   function cambiarModo(nuevo: Modo) {
     if (nuevo === modo) {
@@ -72,8 +47,9 @@ export function Login() {
     const usuarioLimpio = usuario.trim()
 
     if (modo === 'login') {
-      if (!usuarioLimpio || !password) {
-        setErrorLocal('Escribe tu usuario y contraseña.')
+      const validacion = validarLogin(usuarioLimpio, password)
+      if (validacion) {
+        setErrorLocal(validacion)
         return
       }
       await login(usuarioLimpio, password)

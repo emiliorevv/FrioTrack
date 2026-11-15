@@ -159,6 +159,14 @@ describe('Login', () => {
     )
 
     fireEvent.change(screen.getByLabelText('Restaurante'), {
+      target: { value: 'A' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'El restaurante debe tener entre 2 y 120 caracteres.',
+    )
+
+    fireEvent.change(screen.getByLabelText('Restaurante'), {
       target: { value: '  Taquería del Norte  ' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
@@ -169,7 +177,7 @@ describe('Login', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'El usuario debe tener al menos 3 caracteres.',
+      'El usuario debe tener entre 3 y 64 caracteres.',
     )
 
     fireEvent.change(screen.getByLabelText('Usuario'), {
@@ -180,7 +188,7 @@ describe('Login', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'La contraseña debe tener al menos 8 caracteres.',
+      'La contraseña debe tener entre 8 y 128 caracteres.',
     )
 
     fireEvent.change(screen.getByLabelText(/^Contraseña$/), {
@@ -195,6 +203,78 @@ describe('Login', () => {
     )
 
     expect(registrar).not.toHaveBeenCalled()
+  })
+
+  it('rechaza los máximos de restaurante, usuario y contraseña', () => {
+    renderizar()
+    abrirRegistro()
+
+    llenarRegistro({ restaurante: 'R'.repeat(121) })
+    fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'El restaurante debe tener entre 2 y 120 caracteres.',
+    )
+
+    llenarRegistro({ usuario: 'u'.repeat(65) })
+    fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'El usuario debe tener entre 3 y 64 caracteres.',
+    )
+
+    llenarRegistro({
+      password: 'p'.repeat(129),
+      confirmacion: 'p'.repeat(129),
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'La contraseña debe tener entre 8 y 128 caracteres.',
+    )
+
+    expect(registrar).not.toHaveBeenCalled()
+  })
+
+  it('cuenta code points: cuatro emojis no llegan al mínimo de 8', () => {
+    renderizar()
+    abrirRegistro()
+    llenarRegistro({
+      password: '😀😀😀😀',
+      confirmacion: '😀😀😀😀',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'La contraseña debe tener entre 8 y 128 caracteres.',
+    )
+    expect(registrar).not.toHaveBeenCalled()
+  })
+
+  it('valida los máximos del login antes de llamar a la API', () => {
+    renderizar()
+
+    fireEvent.change(screen.getByLabelText('Usuario'), {
+      target: { value: 'u'.repeat(65) },
+    })
+    fireEvent.change(screen.getByLabelText('Contraseña'), {
+      target: { value: 'friotrack-demo' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'El usuario no puede superar los 64 caracteres.',
+    )
+
+    fireEvent.change(screen.getByLabelText('Usuario'), {
+      target: { value: 'jefe' },
+    })
+    fireEvent.change(screen.getByLabelText('Contraseña'), {
+      target: { value: 'p'.repeat(129) },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'La contraseña no puede superar los 128 caracteres.',
+    )
+
+    expect(iniciarSesion).not.toHaveBeenCalled()
   })
 
   it('envía el registro con los campos recortados y guarda la sesión', async () => {
@@ -245,7 +325,7 @@ describe('Login', () => {
     await enviarRegistro()
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Revisa los datos: usuario mínimo 3 caracteres y contraseña mínimo 8.',
+      'Revisa los datos: restaurante 2-120 caracteres, usuario 3-64 y contraseña 8-128.',
     )
   })
 
@@ -262,6 +342,64 @@ describe('Login', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Demasiados registros desde esta red. Intenta de nuevo en 45 s.',
     )
+  })
+
+  it('no promete un reintento inmediato si Retry-After es 0', async () => {
+    vi.mocked(registrar).mockRejectedValueOnce(
+      new ErrorApi('Too Many Requests', 429, 0),
+    )
+    renderizar()
+    abrirRegistro()
+    llenarRegistro()
+
+    await enviarRegistro()
+
+    const alerta = await screen.findByRole('alert')
+    expect(alerta).toHaveTextContent(
+      'Demasiados registros desde esta red. Intenta de nuevo más tarde.',
+    )
+    expect(alerta).not.toHaveTextContent('0 s')
+  })
+
+  it('avisa que la cuenta se creó si el JWT del 201 no es utilizable', async () => {
+    vi.mocked(registrar).mockResolvedValueOnce({
+      access_token: 'no-es-un-jwt',
+      token_type: 'bearer',
+      expira_en_segundos: 28800,
+    })
+    renderizar()
+    abrirRegistro()
+    llenarRegistro()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Tu cuenta se creó, pero no pudimos iniciar la sesión. Inicia sesión con tus credenciales.',
+    )
+    expect(screen.getByLabelText('Restaurante')).toHaveValue(
+      'Taquería del Norte',
+    )
+    expect(screen.getByLabelText('Usuario')).toHaveValue('dueno-nuevo')
+    expect(sessionStorage.getItem('friotrack.token')).toBeNull()
+  })
+
+  it('usa los textos de botón de login sin ternarios anidados', async () => {
+    vi.mocked(iniciarSesion).mockReturnValueOnce(new Promise<never>(() => {}))
+    renderizar()
+
+    expect(screen.getByRole('button', { name: 'Entrar' })).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Usuario'), {
+      target: { value: 'jefe' },
+    })
+    fireEvent.change(screen.getByLabelText('Contraseña'), {
+      target: { value: 'friotrack-demo' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar' }))
+
+    expect(
+      await screen.findByRole('button', { name: 'Entrando…' }),
+    ).toBeDisabled()
   })
 
   it('no expone la contraseña en el texto visible', () => {

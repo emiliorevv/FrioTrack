@@ -16,6 +16,12 @@ import {
 } from '../api/client'
 import { decodificarJwt } from './jwt'
 import { leerTokenGuardado, setToken, suscribirNoAutorizado } from './token'
+import { LIMITES } from './validacion'
+
+const MENSAJE_SESION_INVALIDA =
+  'La sesión recibida no es válida. Intenta de nuevo.'
+const MENSAJE_SESION_REGISTRO =
+  'Tu cuenta se creó, pero no pudimos iniciar la sesión. Inicia sesión con tus credenciales.'
 
 interface Sesion {
   token: string
@@ -95,7 +101,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const payload = decodificarJwt(respuesta.access_token)
 
     if (!payload || payload.exp * 1000 <= Date.now()) {
-      setError('La sesión recibida no es válida. Intenta de nuevo.')
       return false
     }
 
@@ -109,16 +114,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return true
   }, [])
 
-  const login = useCallback(
-    async (usuario: string, password: string) => {
+  const ejecutar = useCallback(
+    async (
+      peticion: () => Promise<RespuestaLogin>,
+      mapearError: (fallo: unknown) => string,
+      mensajeSesionInvalida = MENSAJE_SESION_INVALIDA,
+    ): Promise<boolean> => {
       setCargando(true)
       setError(null)
 
       try {
-        const respuesta = await iniciarSesion(usuario, password)
-        return aplicarSesion(respuesta)
+        const respuesta = await peticion()
+        if (aplicarSesion(respuesta)) {
+          return true
+        }
+
+        setError(mensajeSesionInvalida)
+        return false
       } catch (fallo) {
-        setError(mensajeDeLogin(fallo))
+        setError(mapearError(fallo))
         return false
       } finally {
         setCargando(false)
@@ -127,22 +141,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [aplicarSesion],
   )
 
-  const registro = useCallback(
-    async (restaurante: string, usuario: string, password: string) => {
-      setCargando(true)
-      setError(null)
+  const login = useCallback(
+    (usuario: string, password: string) =>
+      ejecutar(() => iniciarSesion(usuario, password), mensajeDeLogin),
+    [ejecutar],
+  )
 
-      try {
-        const respuesta = await registrarApi(restaurante, usuario, password)
-        return aplicarSesion(respuesta)
-      } catch (fallo) {
-        setError(mensajeDeRegistro(fallo))
-        return false
-      } finally {
-        setCargando(false)
-      }
-    },
-    [aplicarSesion],
+  const registro = useCallback(
+    (restaurante: string, usuario: string, password: string) =>
+      ejecutar(
+        () => registrarApi(restaurante, usuario, password),
+        mensajeDeRegistro,
+        MENSAJE_SESION_REGISTRO,
+      ),
+    [ejecutar],
   )
 
   const limpiarError = useCallback(() => {
@@ -205,16 +217,19 @@ export function useAuth(): ContextoAuth {
   return contexto
 }
 
+function sufijoReintento(segundos: number | null): string {
+  return segundos !== null && segundos > 0
+    ? ` Intenta de nuevo en ${segundos} s.`
+    : ' Intenta de nuevo más tarde.'
+}
+
 function mensajeDeLogin(fallo: unknown): string {
   if (fallo instanceof ErrorApi) {
     if (fallo.status === 401) {
       return 'Usuario o contraseña incorrectos.'
     }
     if (fallo.status === 429) {
-      const base = 'Demasiados intentos de inicio de sesión.'
-      return fallo.retryAfterSegundos !== null
-        ? `${base} Intenta de nuevo en ${fallo.retryAfterSegundos} s.`
-        : base
+      return `Demasiados intentos de inicio de sesión.${sufijoReintento(fallo.retryAfterSegundos)}`
     }
     return fallo.detalle ?? 'No se pudo iniciar sesión.'
   }
@@ -227,13 +242,10 @@ function mensajeDeRegistro(fallo: unknown): string {
       return 'No se pudo completar el registro. Revisa los datos o prueba con otro usuario.'
     }
     if (fallo.status === 422) {
-      return 'Revisa los datos: usuario mínimo 3 caracteres y contraseña mínimo 8.'
+      return `Revisa los datos: restaurante ${LIMITES.restauranteMin}-${LIMITES.restauranteMax} caracteres, usuario ${LIMITES.usuarioMin}-${LIMITES.usuarioMax} y contraseña ${LIMITES.passwordMin}-${LIMITES.passwordMax}.`
     }
     if (fallo.status === 429) {
-      const base = 'Demasiados registros desde esta red.'
-      return fallo.retryAfterSegundos !== null
-        ? `${base} Intenta de nuevo en ${fallo.retryAfterSegundos} s.`
-        : `${base} Intenta de nuevo más tarde.`
+      return `Demasiados registros desde esta red.${sufijoReintento(fallo.retryAfterSegundos)}`
     }
     // Sin detalles técnicos del backend: el alta solo necesita una salida clara.
     return 'No se pudo crear la cuenta. Intenta de nuevo.'

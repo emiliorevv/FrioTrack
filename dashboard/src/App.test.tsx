@@ -330,7 +330,7 @@ describe('vista general', () => {
   it('muestra la bienvenida y el botón deshabilitado en un restaurante sin cámaras', async () => {
     vi.mocked(obtenerCamaras).mockResolvedValueOnce([])
 
-    renderizarApp()
+    renderizarApp({ usuario: 'dueno-nuevo', rol: 'dueno' })
 
     expect(
       await screen.findByRole('heading', {
@@ -365,12 +365,64 @@ describe('vista general', () => {
   })
 
   it('no muestra la bienvenida cuando el restaurante ya tiene cámaras', async () => {
-    renderizarApp()
+    renderizarApp({ usuario: 'dueno-nuevo', rol: 'dueno' })
     await screen.findAllByRole('article')
 
     expect(
       screen.queryByRole('heading', { name: 'Tu restaurante está listo' }),
     ).not.toBeInTheDocument()
+  })
+
+  it.each(['jefe_cocina', 'gerente'] as const)(
+    'no muestra el onboarding de dueño a un %s sin cámaras',
+    async (rol) => {
+      vi.mocked(obtenerCamaras).mockResolvedValueOnce([])
+
+      renderizarApp({ usuario: 'persona', rol })
+
+      expect(
+        await screen.findByText('Aquí aparecerán tus cámaras.'),
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole('heading', { name: 'Tu restaurante está listo' }),
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: 'Agregar cámara' }),
+      ).not.toBeInTheDocument()
+    },
+  )
+
+  it('mantiene la bienvenida si falla un refresco del resumen', async () => {
+    vi.mocked(obtenerCamaras).mockResolvedValueOnce([])
+    renderizarApp({ usuario: 'dueno-nuevo', rol: 'dueno' })
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Tu restaurante está listo',
+      }),
+    ).toBeInTheDocument()
+
+    vi.mocked(obtenerCamaras).mockRejectedValueOnce(new Error('sin red'))
+    vi.useFakeTimers()
+
+    act(() => {
+      oyentes.get('alerta_abierta')?.(
+        new MessageEvent('alerta_abierta', { data: '{"id":1}' }),
+      )
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(
+      screen.getByRole('heading', { name: 'Tu restaurante está listo' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/No se pudo actualizar el resumen HTTP/),
+    ).toBeInTheDocument()
   })
 
   it('el dueño ve su rol y puede atender alertas', async () => {
