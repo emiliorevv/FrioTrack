@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  atenderAlerta,
   ErrorApi,
+  obtenerAlertasActivas,
   obtenerAlertasSeguridad,
   obtenerCamaras,
   obtenerHealth,
@@ -156,6 +158,106 @@ describe('pedir', () => {
 
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toContain('tardó más de 10 s')
+  })
+})
+
+describe('obtenerAlertasActivas', () => {
+  const alerta = {
+    id: 31,
+    camara_id: 1,
+    tipo: 'temperatura',
+    abierta_en: '2026-11-14T23:00:00+00:00',
+    cerrada_en: null,
+    atendida_por: null,
+    temperatura_max_c: 3.4,
+    sms_enviados: 1,
+  }
+
+  it('pide las alertas activas del contrato', async () => {
+    fetchFalso.mockResolvedValue(respuesta([alerta]))
+
+    await expect(obtenerAlertasActivas()).resolves.toEqual([alerta])
+    expect(fetchFalso).toHaveBeenCalledWith(
+      `${BASE}/alertas?activas=true`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('descarta filas inválidas y normaliza los campos opcionales', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta([
+        alerta,
+        { id: 2, camara_id: '1', tipo: 'temperatura', abierta_en: '...' },
+        { id: 3, camara_id: 1, tipo: 4, abierta_en: '...' },
+        { id: 4, camara_id: 1, tipo: 'puerta' },
+        {
+          id: 5,
+          camara_id: 2,
+          tipo: 'puerta',
+          abierta_en: '2026-11-14T23:10:00+00:00',
+          cerrada_en: undefined,
+          atendida_por: undefined,
+          temperatura_max_c: undefined,
+          sms_enviados: undefined,
+        },
+        null,
+      ]),
+    )
+
+    const alertas = await obtenerAlertasActivas()
+
+    expect(alertas.map((item) => item.id)).toEqual([31, 5])
+    expect(alertas[1]).toMatchObject({
+      cerrada_en: null,
+      atendida_por: null,
+      temperatura_max_c: null,
+      sms_enviados: 0,
+    })
+  })
+
+  it('lanza si la respuesta no es un arreglo', async () => {
+    fetchFalso.mockResolvedValue(respuesta({ detail: 'contrato roto' }))
+
+    await expect(obtenerAlertasActivas()).rejects.toThrow(/formato inesperado/)
+  })
+})
+
+describe('atenderAlerta', () => {
+  const alerta = {
+    id: 31,
+    camara_id: 1,
+    tipo: 'temperatura',
+    abierta_en: '2026-11-14T23:00:00+00:00',
+    cerrada_en: null,
+    atendida_por: 3,
+    temperatura_max_c: 3.4,
+    sms_enviados: 1,
+  }
+
+  it('manda el POST con la nota y devuelve la alerta actualizada', async () => {
+    fetchFalso.mockResolvedValue(respuesta(alerta))
+
+    await expect(atenderAlerta(31, 'Puerta cerrada')).resolves.toEqual(alerta)
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/alertas/31/atender`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ nota: 'Puerta cerrada' })
+
+    const headers = new Headers(init.headers)
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('Accept')).toBe('application/json')
+  })
+
+  it('propaga el 409 cuando la alerta ya estaba cerrada', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ detail: 'La alerta ya está cerrada' }, 409, 'Conflict'),
+    )
+
+    await expect(atenderAlerta(31)).rejects.toMatchObject({
+      name: 'ErrorApi',
+      status: 409,
+    })
   })
 })
 

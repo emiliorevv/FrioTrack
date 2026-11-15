@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import './App.css'
+import { AlertasActivas } from './components/AlertasActivas'
 import { CameraCard } from './components/CameraCard'
 import { FilterBar } from './components/FilterBar'
 import { Header } from './components/Header'
@@ -50,7 +51,12 @@ function App() {
     kpis,
     alertasSeguridad,
     alertasCargadas,
+    errorAlertasSeguridad,
+    alertasActivas,
+    cargandoAlertas,
     errorAlertas,
+    atendiendo,
+    atenderAlerta,
     series,
     cargando,
     errorResumen,
@@ -128,6 +134,15 @@ function App() {
               {kpis && <KpiStrip kpis={kpis} />}
             </section>
 
+            <AlertasActivas
+              alertas={alertasActivas}
+              camaras={camaras}
+              cargando={cargandoAlertas}
+              error={errorAlertas}
+              atendiendo={atendiendo}
+              onAtender={(id) => void atenderAlerta(id)}
+            />
+
             <section className="section" aria-labelledby="camaras-title">
               <div className="section-heading">
                 <div>
@@ -169,7 +184,7 @@ function App() {
             <SecurityPanel
               alertas={alertasSeguridad}
               cargado={alertasCargadas}
-              error={errorAlertas}
+              error={errorAlertasSeguridad}
             />
           </>
         )}

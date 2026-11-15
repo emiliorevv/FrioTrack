@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  atenderAlerta as atenderAlertaApi,
+  ErrorApi,
+  obtenerAlertasActivas,
   obtenerAlertasSeguridad,
   obtenerCamaras,
   obtenerHealth,
@@ -10,6 +13,7 @@ import { parsearJson } from '../lib/sse'
 import { esObjeto } from '../lib/validacion'
 import { useStreamEvent, useStreamReconexion } from '../realtime/StreamProvider'
 import type {
+  AlertaOperativa,
   AlertaSeguridad,
   Camara,
   EstadoCamara,
@@ -24,6 +28,8 @@ import type {
 export const INTERVALO_REFRESCO_MS = 60_000
 /** Debounce de los eventos que no traen el valor en riesgo actualizado. */
 export const RETRASO_RESUMEN_MS = 500
+/** Debounce corto de los eventos que cambian las alertas activas. */
+export const RETRASO_ALERTAS_ACTIVAS_MS = 300
 /** Puntos iniciales del sparkline (las últimas 30 temperaturas de 2 h). */
 export const PUNTOS_INICIALES = 30
 /** Tope de la serie en vivo para no crecer sin límite entre refrescos. */
@@ -35,10 +41,20 @@ export interface EstadoDashboard {
   kpis: Kpis | null
   /** Alertas del detector SIEM, en su propio carril. */
   alertasSeguridad: AlertaSeguridad[]
-  /** `true` cuando la última carga de alertas terminó bien. */
+  /** `true` cuando la última carga de alertas de seguridad terminó bien. */
   alertasCargadas: boolean
-  /** Fallo del carril de alertas; no afecta cámaras ni KPIs. */
+  /** Fallo del carril de alertas de seguridad; no afecta cámaras ni KPIs. */
+  errorAlertasSeguridad: string | null
+  /** Alertas operativas que siguen abiertas. */
+  alertasActivas: AlertaOperativa[]
+  /** `true` mientras no termina la primera carga de alertas activas. */
+  cargandoAlertas: boolean
+  /** Fallo del carril de alertas activas; no bloquea el resto. */
   errorAlertas: string | null
+  /** Ids con una petición de atención en curso. */
+  atendiendo: Record<number, boolean>
+  /** Marca una alerta como atendida y refresca KPIs/cámaras. */
+  atenderAlerta: (id: number, nota?: string) => Promise<void>
   /** Temperaturas por cámara, de la más vieja a la más reciente. */
   series: Record<number, SerieCamara>
   /** Solo la primera carga (o un reintento sin datos) marca `true`. */
@@ -55,10 +71,10 @@ export interface EstadoDashboard {
 /**
  * Une la carga inicial de la API, el respaldo por polling y el stream SSE.
  *
- * Cada carril (resumen, series, health y alertas) tiene su propio
- * `AbortController` e id: un evento de alerta no cancela el polling, una
- * respuesta lenta de seguridad no bloquea cámaras/KPIs y una respuesta vieja
- * no pisa a otra más reciente.
+ * Cada carril (resumen, series, health, alertas de seguridad y alertas
+ * activas) tiene su propio `AbortController` e id: un evento de alerta no
+ * cancela el polling, una respuesta lenta de seguridad no bloquea
+ * cámaras/KPIs y una respuesta vieja no pisa a otra más reciente.
  */
 export function useDashboard(): EstadoDashboard {
   const [health, setHealth] = useState<Health | null>(null)
@@ -68,7 +84,13 @@ export function useDashboard(): EstadoDashboard {
     [],
   )
   const [alertasCargadas, setAlertasCargadas] = useState(false)
+  const [errorAlertasSeguridad, setErrorAlertasSeguridad] = useState<
+    string | null
+  >(null)
+  const [alertasActivas, setAlertasActivas] = useState<AlertaOperativa[]>([])
+  const [cargandoAlertas, setCargandoAlertas] = useState(true)
   const [errorAlertas, setErrorAlertas] = useState<string | null>(null)
+  const [atendiendo, setAtendiendo] = useState<Record<number, boolean>>({})
   const [puntosSeries, setPuntosSeries] = useState<
     Record<number, PuntoSerie[]>
   >({})
@@ -107,9 +129,15 @@ export function useDashboard(): EstadoDashboard {
   const healthSolicitudRef = useRef(0)
   const healthRef = useRef<Health | null>(null)
 
-  // Carril de alertas: no comparte señal ni orden con cámaras/KPIs.
+  // Carril de alertas de seguridad: no comparte señal ni orden con el resto.
   const alertasControladorRef = useRef<AbortController | null>(null)
   const alertasSolicitudRef = useRef(0)
+
+  // Carril de alertas operativas activas.
+  const alertasActivasControladorRef = useRef<AbortController | null>(null)
+  const alertasActivasSolicitudRef = useRef(0)
+  const timerAlertasActivasRef = useRef<number | null>(null)
+  const atendiendoRef = useRef<Set<number>>(new Set())
 
   const timerResumenRef = useRef<number | null>(null)
 
@@ -219,7 +247,7 @@ export function useDashboard(): EstadoDashboard {
       }
       setAlertasSeguridad(alertas)
       setAlertasCargadas(true)
-      setErrorAlertas(null)
+      setErrorAlertasSeguridad(null)
     } catch (fallo) {
       if (
         !activoRef.current ||
@@ -229,7 +257,39 @@ export function useDashboard(): EstadoDashboard {
         return
       }
       // Se conservan las alertas previas; el panel muestra el estado de error.
+      setErrorAlertasSeguridad(mensajeDeError(fallo))
+    }
+  }, [])
+
+  const cargarAlertasActivas = useCallback(async () => {
+    alertasActivasControladorRef.current?.abort()
+    const controlador = new AbortController()
+    alertasActivasControladorRef.current = controlador
+    alertasActivasSolicitudRef.current += 1
+    const idSolicitud = alertasActivasSolicitudRef.current
+
+    try {
+      const alertas = await obtenerAlertasActivas(controlador.signal)
+      if (
+        !activoRef.current ||
+        alertasActivasSolicitudRef.current !== idSolicitud
+      ) {
+        return
+      }
+      setAlertasActivas(alertas)
+      setErrorAlertas(null)
+      setCargandoAlertas(false)
+    } catch (fallo) {
+      if (
+        !activoRef.current ||
+        alertasActivasSolicitudRef.current !== idSolicitud ||
+        esAbortado(fallo)
+      ) {
+        return
+      }
+      // Se conserva la lista previa; la sección muestra un aviso no bloqueante.
       setErrorAlertas(mensajeDeError(fallo))
+      setCargandoAlertas(false)
     }
   }, [])
 
@@ -361,6 +421,67 @@ export function useDashboard(): EstadoDashboard {
     }, RETRASO_RESUMEN_MS)
   }, [cargarResumenPorEvento])
 
+  const programarRefrescoAlertasActivas = useCallback(() => {
+    if (timerAlertasActivasRef.current !== null) {
+      window.clearTimeout(timerAlertasActivasRef.current)
+    }
+    timerAlertasActivasRef.current = window.setTimeout(() => {
+      timerAlertasActivasRef.current = null
+      void cargarAlertasActivas()
+    }, RETRASO_ALERTAS_ACTIVAS_MS)
+  }, [cargarAlertasActivas])
+
+  const atenderAlerta = useCallback(
+    async (id: number, nota?: string) => {
+      if (atendiendoRef.current.has(id)) {
+        return
+      }
+      atendiendoRef.current.add(id)
+      setAtendiendo((actual) => ({ ...actual, [id]: true }))
+
+      try {
+        const actualizada = await atenderAlertaApi(id, nota)
+        if (!activoRef.current) {
+          return
+        }
+
+        setAlertasActivas((actual) => {
+          if (actualizada.cerrada_en !== null) {
+            return actual.filter((alerta) => alerta.id !== id)
+          }
+          return actual.map((alerta) =>
+            alerta.id === id ? actualizada : alerta,
+          )
+        })
+        setErrorAlertas(null)
+        // El KPI de tiempo de respuesta y el estado de la cámara cambian.
+        void cargarResumen()
+      } catch (fallo) {
+        if (!activoRef.current) {
+          return
+        }
+
+        if (fallo instanceof ErrorApi && fallo.status === 409) {
+          // La alerta ya se cerró entre el render y el clic: refresca sin error.
+          await Promise.all([cargarAlertasActivas(), cargarResumen()])
+          return
+        }
+
+        setErrorAlertas(mensajeDeError(fallo))
+      } finally {
+        atendiendoRef.current.delete(id)
+        if (activoRef.current) {
+          setAtendiendo((actual) => {
+            const siguiente = { ...actual }
+            delete siguiente[id]
+            return siguiente
+          })
+        }
+      }
+    },
+    [cargarAlertasActivas, cargarResumen],
+  )
+
   useEffect(() => {
     activoRef.current = true
     // La carga arranca al montar; los setState ocurren después del primer
@@ -369,12 +490,16 @@ export function useDashboard(): EstadoDashboard {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void cargarHealth()
     void cargarAlertas()
+    void cargarAlertasActivas()
 
     const intervaloResumen = window.setInterval(() => {
       void cargarResumen()
     }, INTERVALO_REFRESCO_MS)
     const intervaloAlertas = window.setInterval(() => {
       void cargarAlertas()
+    }, INTERVALO_REFRESCO_MS)
+    const intervaloAlertasActivas = window.setInterval(() => {
+      void cargarAlertasActivas()
     }, INTERVALO_REFRESCO_MS)
 
     return () => {
@@ -384,14 +509,20 @@ export function useDashboard(): EstadoDashboard {
       seriesControladorRef.current?.abort()
       healthControladorRef.current?.abort()
       alertasControladorRef.current?.abort()
+      alertasActivasControladorRef.current?.abort()
       window.clearInterval(intervaloResumen)
       window.clearInterval(intervaloAlertas)
+      window.clearInterval(intervaloAlertasActivas)
       if (timerResumenRef.current !== null) {
         window.clearTimeout(timerResumenRef.current)
         timerResumenRef.current = null
       }
+      if (timerAlertasActivasRef.current !== null) {
+        window.clearTimeout(timerAlertasActivasRef.current)
+        timerAlertasActivasRef.current = null
+      }
     }
-  }, [cargarResumen, cargarHealth, cargarAlertas])
+  }, [cargarResumen, cargarHealth, cargarAlertas, cargarAlertasActivas])
 
   const reconexiones = useStreamReconexion()
   const reconexionesPreviasRef = useRef(reconexiones)
@@ -456,23 +587,34 @@ export function useDashboard(): EstadoDashboard {
     }
   }, [])
 
-  const alRecibirEventoResumen = useCallback(() => {
+  const alRecibirAlertaOperativa = useCallback(() => {
+    setUltimaActividadSse(new Date())
+    programarRefrescoResumen()
+    programarRefrescoAlertasActivas()
+  }, [programarRefrescoResumen, programarRefrescoAlertasActivas])
+
+  const alRecibirLoteActualizado = useCallback(() => {
     setUltimaActividadSse(new Date())
     programarRefrescoResumen()
   }, [programarRefrescoResumen])
 
   useStreamEvent('lectura', alRecibirLectura)
   useStreamEvent('kpis', alRecibirKpis)
-  useStreamEvent('alerta_abierta', alRecibirEventoResumen)
-  useStreamEvent('alerta_cerrada', alRecibirEventoResumen)
-  useStreamEvent('lote_actualizado', alRecibirEventoResumen)
+  useStreamEvent('alerta_abierta', alRecibirAlertaOperativa)
+  useStreamEvent('alerta_cerrada', alRecibirAlertaOperativa)
+  useStreamEvent('lote_actualizado', alRecibirLoteActualizado)
 
   const refrescar = useCallback(async () => {
     if (!hayDatosRef.current) {
       setCargando(true)
     }
-    await Promise.all([cargarResumen(), cargarHealth(), cargarAlertas()])
-  }, [cargarResumen, cargarHealth, cargarAlertas])
+    await Promise.all([
+      cargarResumen(),
+      cargarHealth(),
+      cargarAlertas(),
+      cargarAlertasActivas(),
+    ])
+  }, [cargarResumen, cargarHealth, cargarAlertas, cargarAlertasActivas])
 
   const series = useMemo(() => {
     const resultado: Record<number, SerieCamara> = {}
@@ -488,7 +630,12 @@ export function useDashboard(): EstadoDashboard {
     kpis,
     alertasSeguridad,
     alertasCargadas,
+    errorAlertasSeguridad,
+    alertasActivas,
+    cargandoAlertas,
     errorAlertas,
+    atendiendo,
+    atenderAlerta,
     series,
     cargando,
     errorResumen,

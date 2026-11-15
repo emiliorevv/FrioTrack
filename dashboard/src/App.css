@@ -338,6 +338,116 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* Alertas activas                                                     */
+/* ------------------------------------------------------------------ */
+
+.alertas-activas__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.alertas-activas__contenido {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.alertas-activas__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  list-style: none;
+}
+
+.alerta-activa {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.alerta-activa:last-child {
+  border-bottom: 0;
+}
+
+.alerta-activa__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.alerta-activa__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.alerta-activa__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.alerta-activa__accion {
+  flex: 0 0 auto;
+  min-height: 36px;
+}
+
+.alertas-activas__empty {
+  padding: 14px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.alertas-activas__error {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+@media (min-width: 640px) {
+  .alerta-activa {
+    padding: 14px 16px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Filtros                                                             */
 /* ------------------------------------------------------------------ */
 
