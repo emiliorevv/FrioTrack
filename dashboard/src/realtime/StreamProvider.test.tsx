@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { setToken, suscribirNoAutorizado } from '../auth/token'
 import { EventSourceFalso } from '../test/EventSourceFalso'
 import {
   construirUrlStream,
@@ -27,12 +28,14 @@ function MuestraReconexiones() {
 }
 
 beforeEach(() => {
+  setToken(null)
   EventSourceFalso.reiniciar()
   vi.stubGlobal('EventSource', EventSourceFalso)
   vi.stubEnv('VITE_API_URL', API)
 })
 
 afterEach(() => {
+  setToken(null)
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
@@ -204,6 +207,76 @@ describe('StreamProvider', () => {
 
     expect(oyente).toHaveBeenCalledTimes(1)
     expect(EventSourceFalso.instancias).toHaveLength(1)
+  })
+
+  it('no reconecta y notifica si el token del stream ya no sirve', async () => {
+    vi.useFakeTimers()
+    setToken('jwt-muerto')
+    const fetchFalso = vi.fn().mockResolvedValue({ status: 401 })
+    vi.stubGlobal('fetch', fetchFalso)
+    const oyente = vi.fn()
+    const desuscribir = suscribirNoAutorizado(oyente)
+
+    try {
+      render(
+        <StreamProvider token="jwt-muerto">
+          <p>contenido</p>
+        </StreamProvider>,
+      )
+
+      await act(async () => {
+        EventSourceFalso.instancias[0]?.simularError(EventSourceFalso.CLOSED)
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(fetchFalso).toHaveBeenCalledWith(
+        `${API}/kpis`,
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer jwt-muerto',
+          }),
+        }),
+      )
+      expect(oyente).toHaveBeenCalledTimes(1)
+
+      act(() => {
+        vi.advanceTimersByTime(RECONEXION_MAX_MS)
+      })
+
+      expect(EventSourceFalso.instancias).toHaveLength(1)
+    } finally {
+      desuscribir()
+    }
+  })
+
+  it('reconecta si la prueba del token responde 200', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const fetchFalso = vi.fn().mockResolvedValue({ status: 200 })
+    vi.stubGlobal('fetch', fetchFalso)
+
+    render(
+      <StreamProvider token="jwt-vivo">
+        <p>contenido</p>
+      </StreamProvider>,
+    )
+
+    await act(async () => {
+      EventSourceFalso.instancias[0]?.simularError(EventSourceFalso.CLOSED)
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(fetchFalso).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      vi.advanceTimersByTime(RECONEXION_BASE_MS)
+    })
+
+    expect(EventSourceFalso.instancias).toHaveLength(2)
   })
 })
 

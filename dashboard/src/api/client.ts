@@ -7,6 +7,7 @@ import type {
   Lectura,
 } from '../types'
 import { esObjeto } from '../lib/validacion'
+import { getToken, notificarNoAutorizado } from '../auth/token'
 import { resolverApiUrl } from './url'
 
 const TIEMPO_LIMITE_MS = 10_000
@@ -14,15 +15,31 @@ const TIEMPO_LIMITE_MS = 10_000
 /** Error HTTP de la API: conserva el status y el `detail` del contrato. */
 export class ErrorApi extends Error {
   readonly status: number
+  /** Segundos de `Retry-After` en un 429, si el backend lo manda. */
+  readonly retryAfterSegundos: number | null
+  /** `detail` real del backend; `null` si solo había un status HTTP. */
+  readonly detalle: string | null
 
-  constructor(mensaje: string, status: number) {
+  constructor(
+    mensaje: string,
+    status: number,
+    retryAfterSegundos: number | null = null,
+    detalle: string | null = null,
+  ) {
     super(mensaje)
     this.name = 'ErrorApi'
     this.status = status
+    this.retryAfterSegundos = retryAfterSegundos
+    this.detalle = detalle
   }
 }
 
-async function leerDetalle(respuesta: Response): Promise<string> {
+interface DetalleError {
+  mensaje: string
+  detalle: string | null
+}
+
+async function leerDetalle(respuesta: Response): Promise<DetalleError> {
   try {
     const datos: unknown = await respuesta.json()
     if (
@@ -32,14 +49,17 @@ async function leerDetalle(respuesta: Response): Promise<string> {
       typeof datos.detail === 'string' &&
       datos.detail.trim()
     ) {
-      return datos.detail
+      return { mensaje: datos.detail, detalle: datos.detail }
     }
   } catch {
     // El cuerpo no era JSON; se usa el status como mensaje.
   }
 
   const sufijo = respuesta.statusText ? ` ${respuesta.statusText}` : ''
-  return `La API respondió ${respuesta.status}${sufijo}`
+  return {
+    mensaje: `La API respondió ${respuesta.status}${sufijo}`,
+    detalle: null,
+  }
 }
 
 /**
@@ -49,7 +69,16 @@ async function leerDetalle(respuesta: Response): Promise<string> {
  * `AbortController` manual: `AbortSignal.any` no existe en Safari < 17.4 ni
  * Chrome < 116, que están dentro del target de Vite.
  */
-export async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
+export interface OpcionesPedir {
+  /** No adjunta token ni dispara el logout global (login). */
+  sinAuth?: boolean
+}
+
+export async function pedir<T>(
+  ruta: string,
+  init?: RequestInit,
+  opciones: OpcionesPedir = {},
+): Promise<T> {
   const base = resolverApiUrl()
   if (!base) {
     throw new Error(
@@ -59,6 +88,13 @@ export async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
 
   const headers = new Headers(init?.headers)
   headers.set('Accept', 'application/json')
+
+  const token = opciones.sinAuth ? null : getToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  } else {
+    headers.delete('Authorization')
+  }
 
   const controlador = new AbortController()
   let motivo: 'timeout' | 'llamador' | null = null
@@ -101,10 +137,80 @@ export async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
   }
 
   if (!respuesta.ok) {
-    throw new ErrorApi(await leerDetalle(respuesta), respuesta.status)
+    if (respuesta.status === 401 && token && getToken() === token) {
+      notificarNoAutorizado()
+    }
+
+    const { mensaje, detalle } = await leerDetalle(respuesta)
+    throw new ErrorApi(
+      mensaje,
+      respuesta.status,
+      leerRetryAfter(respuesta.headers.get('Retry-After')),
+      detalle,
+    )
   }
 
   return (await respuesta.json()) as T
+}
+
+/** Respuesta de `POST /auth/login`. */
+export interface RespuestaLogin {
+  access_token: string
+  token_type: string
+  expira_en_segundos: number
+}
+
+/**
+ * Login del dashboard. Usa `sinAuth` para no adjuntar un token viejo y para
+ * que un 401 de credenciales no dispare el logout global.
+ */
+export async function iniciarSesion(
+  usuario: string,
+  password: string,
+): Promise<RespuestaLogin> {
+  const datos = await pedir<unknown>(
+    '/auth/login',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario, password }),
+    },
+    { sinAuth: true },
+  )
+
+  if (
+    !esObjeto(datos) ||
+    typeof datos.access_token !== 'string' ||
+    !datos.access_token ||
+    typeof datos.token_type !== 'string' ||
+    typeof datos.expira_en_segundos !== 'number'
+  ) {
+    throw new Error('La API devolvió una sesión inválida.')
+  }
+
+  return {
+    access_token: datos.access_token,
+    token_type: datos.token_type,
+    expira_en_segundos: datos.expira_en_segundos,
+  }
+}
+
+function leerRetryAfter(valor: string | null): number | null {
+  const limpio = valor?.trim()
+  if (!limpio) {
+    return null
+  }
+
+  if (/^\d+$/.test(limpio)) {
+    const segundos = Number(limpio)
+    return Number.isFinite(segundos) && segundos >= 0 ? segundos : null
+  }
+
+  const fecha = Date.parse(limpio)
+  if (Number.isNaN(fecha)) {
+    return null
+  }
+  return Math.max(0, Math.ceil((fecha - Date.now()) / 1000))
 }
 
 export function obtenerHealth(senal?: AbortSignal): Promise<Health> {

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { resolverApiUrl } from '../api/url'
+import { getToken, notificarNoAutorizado } from '../auth/token'
 import {
   construirUrlStream,
   EVENTOS_STREAM,
@@ -60,6 +61,7 @@ export function StreamProvider({ children, token }: StreamProviderProps) {
     let timerReconexion: number | null = null
     let intentoReconexion = 0
     let desmontado = false
+    let verificandoSesion = false
 
     const desconectar = () => {
       if (!fuente) {
@@ -85,6 +87,54 @@ export function StreamProvider({ children, token }: StreamProviderProps) {
         timerReconexion = null
         conectar()
       }, retraso)
+    }
+
+    /**
+     * Un stream CLOSED con token puede ser un JWT vencido o revocado. Antes
+     * de reintentar, una petición corta a un endpoint protegido distingue
+     * "token muerto" (logout global, sin reintentos) de una caída de red.
+     */
+    const comprobarSesion = async () => {
+      if (desmontado || verificandoSesion) {
+        return
+      }
+      if (!token) {
+        programarReconexion()
+        return
+      }
+
+      verificandoSesion = true
+      const controlador = new AbortController()
+      const temporizador = window.setTimeout(() => controlador.abort(), 3000)
+
+      try {
+        const respuesta = await fetch(`${base}/kpis`, {
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          signal: controlador.signal,
+        })
+
+        if (respuesta.status === 401) {
+          if (getToken() === token) {
+            notificarNoAutorizado()
+          }
+          return
+        }
+
+        if (!desmontado) {
+          programarReconexion()
+        }
+      } catch {
+        // Red caída, timeout o 5xx: se reintenta con el backoff normal.
+        if (!desmontado) {
+          programarReconexion()
+        }
+      } finally {
+        window.clearTimeout(temporizador)
+        verificandoSesion = false
+      }
     }
 
     const conectar = () => {
@@ -125,7 +175,11 @@ export function StreamProvider({ children, token }: StreamProviderProps) {
         // CONNECTING: el navegador reintenta solo. CLOSED (502/503, 204 o
         // content-type inesperado): EventSource ya no vuelve, lo recreamos.
         if (nueva.readyState === estadoCerrado) {
-          programarReconexion()
+          if (token) {
+            void comprobarSesion()
+          } else {
+            programarReconexion()
+          }
         }
       }
 

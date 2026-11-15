@@ -43,6 +43,7 @@ function renderizar(props: Partial<Props> = {}) {
       error={null}
       errorAtender={null}
       atendiendo={{}}
+      puedeAtender
       onAtender={() => {}}
       onLimpiarErrorAtender={() => {}}
       {...props}
@@ -133,6 +134,21 @@ describe('AlertasActivas', () => {
     expect(
       screen.getByRole('heading', { name: /Alertas activas/ }),
     ).toHaveTextContent('1')
+  })
+
+  it('el gerente ve el botón deshabilitado y la nota de rol', () => {
+    renderizar({
+      alertas: [alerta],
+      camaras: [camara],
+      puedeAtender: false,
+    })
+
+    const boton = screen.getByRole('button', { name: 'Atender' })
+    expect(boton).toBeDisabled()
+    expect(boton).toHaveAttribute('aria-describedby', 'alertas-permiso')
+    expect(
+      screen.getByText('Solo jefe de cocina puede atender.'),
+    ).toBeInTheDocument()
   })
 
   it('muestra error al cargar en vez de “Sin alertas”', () => {

@@ -1,6 +1,12 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Header } from './Header'
+
+const sesion = {
+  usuario: 'jefe',
+  rol: 'jefe_cocina',
+  onLogout: () => {},
+}
 
 afterEach(() => {
   vi.useRealTimers()
@@ -8,25 +14,25 @@ afterEach(() => {
 
 describe('Header', () => {
   it('no muestra la pill de demo cuando la escala es 1', () => {
-    render(<Header actualizadoEn={null} escalaTiempo={1} />)
+    render(<Header actualizadoEn={null} escalaTiempo={1} {...sesion} />)
 
     expect(screen.queryByText(/MODO DEMO/)).not.toBeInTheDocument()
   })
 
   it('no muestra la pill de demo cuando la escala no está definida', () => {
-    render(<Header actualizadoEn={null} />)
+    render(<Header actualizadoEn={null} {...sesion} />)
 
     expect(screen.queryByText(/MODO DEMO/)).not.toBeInTheDocument()
   })
 
   it('muestra la pill con la escala cuando es distinta de 1', () => {
-    render(<Header actualizadoEn={null} escalaTiempo={30} />)
+    render(<Header actualizadoEn={null} escalaTiempo={30} {...sesion} />)
 
     expect(screen.getByText('MODO DEMO ×30')).toBeInTheDocument()
   })
 
   it('sin datos no inventa "Actualizado hace 0 s"', () => {
-    render(<Header actualizadoEn={null} />)
+    render(<Header actualizadoEn={null} {...sesion} />)
 
     expect(screen.getByText('Sin datos')).toBeInTheDocument()
     expect(screen.queryByText(/Actualizado hace/)).not.toBeInTheDocument()
@@ -36,7 +42,9 @@ describe('Header', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-14T12:00:00Z'))
 
-    render(<Header actualizadoEn={new Date('2026-11-14T11:59:52Z')} />)
+    render(
+      <Header actualizadoEn={new Date('2026-11-14T11:59:52Z')} {...sesion} />,
+    )
 
     expect(screen.getByText('Actualizado hace 8 s')).toBeInTheDocument()
 
@@ -47,17 +55,38 @@ describe('Header', () => {
     expect(screen.getByText('Actualizado hace 10 s')).toBeInTheDocument()
   })
 
-  it('usa las iniciales recibidas y el default JC', () => {
-    const { rerender } = render(<Header actualizadoEn={null} />)
+  it('muestra iniciales, usuario y rol del jefe', () => {
+    render(<Header actualizadoEn={null} {...sesion} />)
 
     expect(
-      screen.getByRole('img', { name: 'Sesión de JC, jefe de cocina' }),
-    ).toHaveTextContent('JC')
+      screen.getByRole('img', { name: 'Sesión de jefe, Jefe de cocina' }),
+    ).toHaveTextContent('JE')
+    expect(screen.getByText('jefe')).toBeInTheDocument()
+    expect(screen.getByText('Jefe de cocina')).toBeInTheDocument()
+  })
 
-    rerender(<Header actualizadoEn={null} iniciales="AM" />)
+  it('actualiza iniciales y rol para el gerente', () => {
+    render(
+      <Header
+        actualizadoEn={null}
+        usuario="gerente"
+        rol="gerente"
+        onLogout={() => {}}
+      />,
+    )
 
     expect(
-      screen.getByRole('img', { name: 'Sesión de AM, jefe de cocina' }),
-    ).toHaveTextContent('AM')
+      screen.getByRole('img', { name: 'Sesión de gerente, Gerente' }),
+    ).toHaveTextContent('GE')
+    expect(screen.getByText('Gerente')).toBeInTheDocument()
+  })
+
+  it('el botón Salir llama al logout y su nombre accesible coincide', () => {
+    const onLogout = vi.fn()
+    render(<Header actualizadoEn={null} {...sesion} onLogout={onLogout} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salir' }))
+
+    expect(onLogout).toHaveBeenCalledTimes(1)
   })
 })

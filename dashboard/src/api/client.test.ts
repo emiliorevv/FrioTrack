@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   atenderAlerta,
   ErrorApi,
+  iniciarSesion,
   obtenerAlertasActivas,
   obtenerAlertasSeguridad,
   obtenerCamaras,
@@ -10,6 +11,7 @@ import {
   obtenerLecturas,
   pedir,
 } from './client'
+import { setToken, suscribirNoAutorizado } from '../auth/token'
 import { resolverApiUrl } from './url'
 
 vi.mock('./url', () => ({
@@ -19,22 +21,31 @@ vi.mock('./url', () => ({
 const BASE = 'http://api.prueba.mx/api'
 const fetchFalso = vi.fn()
 
-function respuesta(datos: unknown, estado = 200, texto = 'OK'): Response {
+function respuesta(
+  datos: unknown,
+  estado = 200,
+  texto = 'OK',
+  cabeceras: Record<string, string> = {},
+): Response {
   return {
     ok: estado >= 200 && estado < 300,
     status: estado,
     statusText: texto,
+    headers: new Headers(cabeceras),
     json: async () => datos,
   } as unknown as Response
 }
 
 beforeEach(() => {
+  setToken(null)
   fetchFalso.mockReset()
   vi.stubGlobal('fetch', fetchFalso)
   vi.mocked(resolverApiUrl).mockReturnValue(BASE)
 })
 
 afterEach(() => {
+  setToken(null)
+  sessionStorage.clear()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -122,15 +133,19 @@ describe('pedir', () => {
       name: 'ErrorApi',
       message: 'Cámara no encontrada',
       status: 404,
+      detalle: 'Cámara no encontrada',
     })
   })
 
   it('usa el status cuando el cuerpo del error no trae detail', async () => {
     fetchFalso.mockResolvedValue(respuesta({}, 500, 'Internal Server Error'))
 
-    await expect(obtenerKpis()).rejects.toThrow(
-      'La API respondió 500 Internal Server Error',
-    )
+    const fallo = await obtenerKpis().catch((error: unknown) => error)
+
+    expect(fallo).toMatchObject({
+      message: 'La API respondió 500 Internal Server Error',
+      detalle: null,
+    })
   })
 
   it('falla claro si no hay VITE_API_URL fuera de desarrollo', async () => {
@@ -319,5 +334,138 @@ describe('obtenerAlertasSeguridad', () => {
     await expect(obtenerAlertasSeguridad()).rejects.toThrow(
       /formato inesperado/,
     )
+  })
+})
+
+describe('auth del cliente', () => {
+  it('adjunta el token en Authorization cuando hay sesión', async () => {
+    setToken('jwt-de-prueba')
+    fetchFalso.mockResolvedValue(respuesta([]))
+
+    await obtenerCamaras()
+
+    const [, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(new Headers(init.headers).get('Authorization')).toBe(
+      'Bearer jwt-de-prueba',
+    )
+  })
+
+  it('no adjunta Authorization al login aunque haya un token viejo', async () => {
+    setToken('jwt-viejo')
+    fetchFalso.mockResolvedValue(
+      respuesta({
+        access_token: 'jwt-nuevo',
+        token_type: 'bearer',
+        expira_en_segundos: 28800,
+      }),
+    )
+
+    await iniciarSesion('jefe', 'friotrack-demo')
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    const headers = new Headers(init.headers)
+    expect(url).toBe(`${BASE}/auth/login`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      usuario: 'jefe',
+      password: 'friotrack-demo',
+    })
+    expect(headers.get('Authorization')).toBeNull()
+    expect(headers.get('Content-Type')).toBe('application/json')
+  })
+
+  it('un 401 autenticado notifica para cerrar la sesión', async () => {
+    setToken('jwt-viejo')
+    const oyente = vi.fn()
+    const desuscribir = suscribirNoAutorizado(oyente)
+    fetchFalso.mockResolvedValue(
+      respuesta({ detail: 'No autorizado' }, 401, 'Unauthorized'),
+    )
+
+    try {
+      await expect(obtenerCamaras()).rejects.toMatchObject({ status: 401 })
+      expect(oyente).toHaveBeenCalledTimes(1)
+    } finally {
+      desuscribir()
+    }
+  })
+
+  it('un 401 del login no dispara el logout global', async () => {
+    setToken('jwt-viejo')
+    const oyente = vi.fn()
+    const desuscribir = suscribirNoAutorizado(oyente)
+    fetchFalso.mockResolvedValue(
+      respuesta(
+        { detail: 'Usuario o contraseña incorrectos.' },
+        401,
+        'Unauthorized',
+      ),
+    )
+
+    try {
+      await expect(iniciarSesion('jefe', 'mala')).rejects.toMatchObject({
+        status: 401,
+      })
+      expect(oyente).not.toHaveBeenCalled()
+    } finally {
+      desuscribir()
+    }
+  })
+
+  it('no usa un token de sessionStorage antes de que el provider lo restaure', async () => {
+    sessionStorage.setItem('friotrack.token', 'token-basura')
+    fetchFalso.mockResolvedValue(respuesta([]))
+
+    await obtenerCamaras()
+
+    const [, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(new Headers(init.headers).get('Authorization')).toBeNull()
+  })
+
+  it('lee Retry-After de un 429', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta(
+        { detail: 'Demasiados intentos de inicio de sesión.' },
+        429,
+        'Too Many Requests',
+        { 'Retry-After': '120' },
+      ),
+    )
+
+    const fallo = await iniciarSesion('jefe', 'mala').catch(
+      (error: unknown) => error,
+    )
+
+    expect(fallo).toMatchObject({
+      name: 'ErrorApi',
+      status: 429,
+      retryAfterSegundos: 120,
+    })
+  })
+
+  it('lee Retry-After en formato de fecha HTTP', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-21T07:27:00Z'))
+    fetchFalso.mockResolvedValue(
+      respuesta({ detail: 'Rate limit' }, 429, 'Too Many Requests', {
+        'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT',
+      }),
+    )
+
+    const fallo = await pedir('/prueba').catch((error: unknown) => error)
+
+    expect(fallo).toMatchObject({ retryAfterSegundos: 60 })
+  })
+
+  it('ignora un Retry-After vacío o solo con espacios', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ detail: 'Rate limit' }, 429, 'Too Many Requests', {
+        'Retry-After': '   ',
+      }),
+    )
+
+    const fallo = await pedir('/prueba').catch((error: unknown) => error)
+
+    expect(fallo).toMatchObject({ retryAfterSegundos: null })
   })
 })

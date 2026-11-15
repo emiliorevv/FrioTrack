@@ -1,3 +1,4 @@
+import { etiquetaRol } from '../auth/roles'
 import { useReloj } from '../hooks/useReloj'
 
 interface HeaderProps {
@@ -8,16 +9,25 @@ interface HeaderProps {
    * etiqueta de demo; si `/health` falla, no hay etiqueta.
    */
   escalaTiempo?: number
-  /** Iniciales del usuario logueado; hoy no hay auth y el default es JC. */
-  iniciales?: string
+  usuario: string
+  rol: string
+  onLogout: () => void
+}
+
+function inicialesDe(usuario: string): string {
+  const limpio = usuario.trim()
+  return limpio ? limpio.slice(0, 2).toUpperCase() : 'US'
 }
 
 export function Header({
   actualizadoEn,
   escalaTiempo,
-  iniciales = 'JC',
+  usuario,
+  rol,
+  onLogout,
 }: HeaderProps) {
   const mostrarModoDemo = escalaTiempo !== undefined && escalaTiempo !== 1
+  const nombreRol = etiquetaRol(rol)
 
   return (
     <header className="site-header">
@@ -41,13 +51,28 @@ export function Header({
           ) : (
             <span className="updated">Sin datos</span>
           )}
-          <span
-            className="avatar"
-            role="img"
-            aria-label={`Sesión de ${iniciales}, jefe de cocina`}
-          >
-            {iniciales}
-          </span>
+
+          <div className="session">
+            <span
+              className="avatar"
+              role="img"
+              aria-label={`Sesión de ${usuario}, ${nombreRol}`}
+            >
+              {inicialesDe(usuario)}
+            </span>
+            <span className="session__data">
+              <span className="session__name">{usuario}</span>
+              <span className="session__role">{nombreRol}</span>
+            </span>
+            <button
+              type="button"
+              className="session__logout"
+              onClick={onLogout}
+              title="Cerrar sesión"
+            >
+              Salir
+            </button>
+          </div>
         </div>
       </div>
     </header>
