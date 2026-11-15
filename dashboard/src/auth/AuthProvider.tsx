@@ -8,9 +8,20 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { ErrorApi, iniciarSesion } from '../api/client'
+import {
+  ErrorApi,
+  iniciarSesion,
+  registrar as registrarApi,
+  type RespuestaLogin,
+} from '../api/client'
 import { decodificarJwt } from './jwt'
 import { leerTokenGuardado, setToken, suscribirNoAutorizado } from './token'
+import { LIMITES } from './validacion'
+
+const MENSAJE_SESION_INVALIDA =
+  'La sesión recibida no es válida. Intenta de nuevo.'
+const MENSAJE_SESION_REGISTRO =
+  'Tu cuenta se creó, pero no pudimos iniciar la sesión. Inicia sesión con tus credenciales.'
 
 interface Sesion {
   token: string
@@ -21,11 +32,19 @@ interface Sesion {
 }
 
 interface BaseAuth {
-  /** `true` mientras se procesa el login. */
+  /** `true` mientras se procesa el login o el registro. */
   cargando: boolean
   error: string | null
   login: (usuario: string, password: string) => Promise<boolean>
+  /** Crea restaurante y dueño; con éxito deja la sesión iniciada. */
+  registro: (
+    restaurante: string,
+    usuario: string,
+    password: string,
+  ) => Promise<boolean>
   logout: () => void
+  /** Limpia el error al cambiar de pestaña del formulario. */
+  limpiarError: () => void
 }
 
 export interface Autenticado extends BaseAuth {
@@ -78,33 +97,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const login = useCallback(async (usuario: string, password: string) => {
-    setCargando(true)
-    setError(null)
+  const aplicarSesion = useCallback((respuesta: RespuestaLogin): boolean => {
+    const payload = decodificarJwt(respuesta.access_token)
 
-    try {
-      const respuesta = await iniciarSesion(usuario, password)
-      const payload = decodificarJwt(respuesta.access_token)
-
-      if (!payload || payload.exp * 1000 <= Date.now()) {
-        setError('La sesión recibida no es válida. Intenta de nuevo.')
-        return false
-      }
-
-      setToken(respuesta.access_token)
-      setSesion({
-        token: respuesta.access_token,
-        usuario: payload.usuario,
-        rol: payload.rol,
-        exp: payload.exp,
-      })
-      return true
-    } catch (fallo) {
-      setError(mensajeDeLogin(fallo))
+    if (!payload || payload.exp * 1000 <= Date.now()) {
       return false
-    } finally {
-      setCargando(false)
     }
+
+    setToken(respuesta.access_token)
+    setSesion({
+      token: respuesta.access_token,
+      usuario: payload.usuario,
+      rol: payload.rol,
+      exp: payload.exp,
+    })
+    return true
+  }, [])
+
+  const ejecutar = useCallback(
+    async (
+      peticion: () => Promise<RespuestaLogin>,
+      mapearError: (fallo: unknown) => string,
+      mensajeSesionInvalida = MENSAJE_SESION_INVALIDA,
+    ): Promise<boolean> => {
+      setCargando(true)
+      setError(null)
+
+      try {
+        const respuesta = await peticion()
+        if (aplicarSesion(respuesta)) {
+          return true
+        }
+
+        setError(mensajeSesionInvalida)
+        return false
+      } catch (fallo) {
+        setError(mapearError(fallo))
+        return false
+      } finally {
+        setCargando(false)
+      }
+    },
+    [aplicarSesion],
+  )
+
+  const login = useCallback(
+    (usuario: string, password: string) =>
+      ejecutar(() => iniciarSesion(usuario, password), mensajeDeLogin),
+    [ejecutar],
+  )
+
+  const registro = useCallback(
+    (restaurante: string, usuario: string, password: string) =>
+      ejecutar(
+        () => registrarApi(restaurante, usuario, password),
+        mensajeDeRegistro,
+        MENSAJE_SESION_REGISTRO,
+      ),
+    [ejecutar],
+  )
+
+  const limpiarError = useCallback(() => {
+    setError(null)
   }, [])
 
   const logout = useCallback(() => {
@@ -141,7 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [logout])
 
   const valor = useMemo<ContextoAuth>(() => {
-    const base = { cargando, error, login, logout }
+    const base = { cargando, error, login, registro, logout, limpiarError }
     return sesion
       ? {
           ...base,
@@ -150,7 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           rol: sesion.rol,
         }
       : { ...base, token: null, usuario: null, rol: null }
-  }, [sesion, cargando, error, login, logout])
+  }, [sesion, cargando, error, login, registro, logout, limpiarError])
 
   return <AuthContext.Provider value={valor}>{children}</AuthContext.Provider>
 }
@@ -163,18 +217,38 @@ export function useAuth(): ContextoAuth {
   return contexto
 }
 
+function sufijoReintento(segundos: number | null): string {
+  return segundos !== null && segundos > 0
+    ? ` Intenta de nuevo en ${segundos} s.`
+    : ' Intenta de nuevo más tarde.'
+}
+
 function mensajeDeLogin(fallo: unknown): string {
   if (fallo instanceof ErrorApi) {
     if (fallo.status === 401) {
       return 'Usuario o contraseña incorrectos.'
     }
     if (fallo.status === 429) {
-      const base = 'Demasiados intentos de inicio de sesión.'
-      return fallo.retryAfterSegundos !== null
-        ? `${base} Intenta de nuevo en ${fallo.retryAfterSegundos} s.`
-        : base
+      return `Demasiados intentos de inicio de sesión.${sufijoReintento(fallo.retryAfterSegundos)}`
     }
     return fallo.detalle ?? 'No se pudo iniciar sesión.'
   }
   return 'No se pudo iniciar sesión. Revisa tu conexión.'
+}
+
+function mensajeDeRegistro(fallo: unknown): string {
+  if (fallo instanceof ErrorApi) {
+    if (fallo.status === 409) {
+      return 'No se pudo completar el registro. Revisa los datos o prueba con otro usuario.'
+    }
+    if (fallo.status === 422) {
+      return `Revisa los datos: restaurante ${LIMITES.restauranteMin}-${LIMITES.restauranteMax} caracteres, usuario ${LIMITES.usuarioMin}-${LIMITES.usuarioMax} y contraseña ${LIMITES.passwordMin}-${LIMITES.passwordMax}.`
+    }
+    if (fallo.status === 429) {
+      return `Demasiados registros desde esta red.${sufijoReintento(fallo.retryAfterSegundos)}`
+    }
+    // Sin detalles técnicos del backend: el alta solo necesita una salida clara.
+    return 'No se pudo crear la cuenta. Intenta de nuevo.'
+  }
+  return 'No se pudo crear la cuenta. Revisa tu conexión e intenta de nuevo.'
 }

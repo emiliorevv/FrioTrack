@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ErrorApi, iniciarSesion } from '../api/client'
+import { ErrorApi, iniciarSesion, registrar } from '../api/client'
 import { AuthProvider, useAuth } from './AuthProvider'
 import {
   getToken,
@@ -29,7 +29,7 @@ vi.mock('../api/client', () => {
     }
   }
 
-  return { ErrorApi, iniciarSesion: vi.fn() }
+  return { ErrorApi, iniciarSesion: vi.fn(), registrar: vi.fn() }
 })
 
 function crearToken(payload: Record<string, unknown>): string {
@@ -137,6 +137,23 @@ describe('AuthProvider', () => {
       'Demasiados intentos de inicio de sesión. Intenta de nuevo en 120 s.',
     )
     expect(result.current.token).toBeNull()
+  })
+
+  it('no muestra “0 s” cuando el 429 trae Retry-After 0', async () => {
+    vi.mocked(iniciarSesion).mockRejectedValueOnce(
+      new ErrorApi('Too Many Requests', 429, 0),
+    )
+
+    const { result } = montar()
+
+    await act(async () => {
+      await result.current.login('jefe', 'mala')
+    })
+
+    expect(result.current.error).toBe(
+      'Demasiados intentos de inicio de sesión. Intenta de nuevo más tarde.',
+    )
+    expect(result.current.error).not.toContain('0 s')
   })
 
   it('usa el detalle real de un 500 y cae al genérico sin detalle', async () => {
@@ -325,5 +342,206 @@ describe('AuthProvider', () => {
     })
 
     expect(result.current.cargando).toBe(false)
+  })
+})
+
+describe('AuthProvider · registro', () => {
+  it('registra, guarda el JWT y expone al dueño', async () => {
+    const token = tokenVigente('dueno-nuevo', 'dueno')
+    vi.mocked(registrar).mockResolvedValueOnce({
+      access_token: token,
+      token_type: 'bearer',
+      expira_en_segundos: 28800,
+    })
+
+    const { result } = montar()
+
+    let exito!: boolean
+    await act(async () => {
+      exito = await result.current.registro(
+        'Taquería del Norte',
+        'dueno-nuevo',
+        'friotrack-demo',
+      )
+    })
+
+    expect(registrar).toHaveBeenCalledWith(
+      'Taquería del Norte',
+      'dueno-nuevo',
+      'friotrack-demo',
+    )
+    expect(exito).toBe(true)
+    expect(result.current.token).toBe(token)
+    expect(result.current.usuario).toBe('dueno-nuevo')
+    expect(result.current.rol).toBe('dueno')
+    expect(result.current.error).toBeNull()
+    expect(result.current.cargando).toBe(false)
+    expect(getToken()).toBe(token)
+    expect(leerTokenGuardado()).toBe(token)
+  })
+
+  it('un 409 no guarda token y explica el fallo sin detalles técnicos', async () => {
+    vi.mocked(registrar).mockRejectedValueOnce(
+      new ErrorApi('No se pudo completar el registro.', 409),
+    )
+
+    const { result } = montar()
+
+    let exito!: boolean
+    await act(async () => {
+      exito = await result.current.registro(
+        'Taquería del Norte',
+        'dueno-nuevo',
+        'friotrack-demo',
+      )
+    })
+
+    expect(exito).toBe(false)
+    expect(result.current.error).toBe(
+      'No se pudo completar el registro. Revisa los datos o prueba con otro usuario.',
+    )
+    expect(result.current.token).toBeNull()
+    expect(getToken()).toBeNull()
+    expect(leerTokenGuardado()).toBeNull()
+  })
+
+  it('traduce un 422 con los límites compartidos', async () => {
+    vi.mocked(registrar).mockRejectedValueOnce(
+      new ErrorApi('Unprocessable Entity', 422),
+    )
+
+    const { result } = montar()
+
+    await act(async () => {
+      await result.current.registro('Taquería', 'ab', 'corta')
+    })
+
+    expect(result.current.error).toBe(
+      'Revisa los datos: restaurante 2-120 caracteres, usuario 3-64 y contraseña 8-128.',
+    )
+    expect(getToken()).toBeNull()
+  })
+
+  it('usa el mensaje de rate limit y Retry-After en un 429', async () => {
+    vi.mocked(registrar).mockRejectedValueOnce(
+      new ErrorApi('Too Many Requests', 429, 30),
+    )
+
+    const { result } = montar()
+
+    await act(async () => {
+      await result.current.registro('Taquería', 'dueno-nuevo', 'friotrack-demo')
+    })
+
+    expect(result.current.error).toBe(
+      'Demasiados registros desde esta red. Intenta de nuevo en 30 s.',
+    )
+    expect(getToken()).toBeNull()
+  })
+
+  it('no muestra “0 s” cuando el 429 de registro trae Retry-After 0', async () => {
+    vi.mocked(registrar).mockRejectedValueOnce(
+      new ErrorApi('Too Many Requests', 429, 0),
+    )
+
+    const { result } = montar()
+
+    await act(async () => {
+      await result.current.registro('Taquería', 'dueno-nuevo', 'friotrack-demo')
+    })
+
+    expect(result.current.error).toBe(
+      'Demasiados registros desde esta red. Intenta de nuevo más tarde.',
+    )
+    expect(result.current.error).not.toContain('0 s')
+  })
+
+  it('avisa que la cuenta existe si el JWT del 201 no es válido', async () => {
+    vi.mocked(registrar).mockResolvedValueOnce({
+      access_token: 'no-es-un-jwt',
+      token_type: 'bearer',
+      expira_en_segundos: 28800,
+    })
+
+    const { result } = montar()
+
+    let exito!: boolean
+    await act(async () => {
+      exito = await result.current.registro(
+        'Taquería del Norte',
+        'dueno-nuevo',
+        'friotrack-demo',
+      )
+    })
+
+    expect(exito).toBe(false)
+    expect(result.current.error).toBe(
+      'Tu cuenta se creó, pero no pudimos iniciar la sesión. Inicia sesión con tus credenciales.',
+    )
+    expect(result.current.token).toBeNull()
+    expect(getToken()).toBeNull()
+    expect(leerTokenGuardado()).toBeNull()
+  })
+
+  it('cae a un mensaje accionable cuando falla la red', async () => {
+    vi.mocked(registrar).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { result } = montar()
+
+    await act(async () => {
+      await result.current.registro('Taquería', 'dueno-nuevo', 'friotrack-demo')
+    })
+
+    expect(result.current.error).toBe(
+      'No se pudo crear la cuenta. Revisa tu conexión e intenta de nuevo.',
+    )
+    expect(getToken()).toBeNull()
+  })
+
+  it('programa la expiración de la sesión recién registrada', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-15T10:00:00Z'))
+    const token = tokenQueExpiraEn(60)
+    vi.mocked(registrar).mockResolvedValueOnce({
+      access_token: token,
+      token_type: 'bearer',
+      expira_en_segundos: 60,
+    })
+
+    const { result } = montar()
+
+    await act(async () => {
+      await result.current.registro('Taquería', 'dueno-nuevo', 'friotrack-demo')
+    })
+    expect(result.current.token).toBe(token)
+
+    act(() => {
+      vi.advanceTimersByTime(60_000)
+    })
+
+    expect(result.current.token).toBeNull()
+    expect(result.current.error).toBe(
+      'Tu sesión expiró. Inicia sesión de nuevo.',
+    )
+    expect(getToken()).toBeNull()
+  })
+
+  it('limpiarError borra el error al cambiar de formulario', async () => {
+    vi.mocked(registrar).mockRejectedValueOnce(
+      new ErrorApi('Too Many Requests', 429, 30),
+    )
+
+    const { result } = montar()
+
+    await act(async () => {
+      await result.current.registro('Taquería', 'dueno-nuevo', 'friotrack-demo')
+    })
+    expect(result.current.error).not.toBeNull()
+
+    act(() => {
+      result.current.limpiarError()
+    })
+
+    expect(result.current.error).toBeNull()
   })
 })

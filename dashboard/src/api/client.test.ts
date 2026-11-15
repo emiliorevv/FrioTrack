@@ -10,6 +10,7 @@ import {
   obtenerKpis,
   obtenerLecturas,
   pedir,
+  registrar,
 } from './client'
 import { setToken, suscribirNoAutorizado } from '../auth/token'
 import { resolverApiUrl } from './url'
@@ -373,6 +374,50 @@ describe('auth del cliente', () => {
     })
     expect(headers.get('Authorization')).toBeNull()
     expect(headers.get('Content-Type')).toBe('application/json')
+  })
+
+  it('no adjunta Authorization al registro aunque haya un token viejo', async () => {
+    setToken('jwt-viejo')
+    fetchFalso.mockResolvedValue(
+      respuesta(
+        {
+          access_token: 'jwt-nuevo',
+          token_type: 'bearer',
+          expira_en_segundos: 28800,
+        },
+        201,
+        'Created',
+      ),
+    )
+
+    const sesion = await registrar(
+      'Taquería del Norte',
+      'dueno-nuevo',
+      'friotrack-demo',
+    )
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    const headers = new Headers(init.headers)
+    expect(url).toBe(`${BASE}/auth/registro`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      restaurante: 'Taquería del Norte',
+      usuario: 'dueno-nuevo',
+      password: 'friotrack-demo',
+    })
+    expect(headers.get('Authorization')).toBeNull()
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(sesion.access_token).toBe('jwt-nuevo')
+  })
+
+  it('rechaza una sesión de registro con contrato inválido', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ access_token: '' }, 201, 'Created'),
+    )
+
+    await expect(
+      registrar('Taquería del Norte', 'dueno-nuevo', 'friotrack-demo'),
+    ).rejects.toThrow('La API devolvió una sesión inválida.')
   })
 
   it('un 401 autenticado notifica para cerrar la sesión', async () => {

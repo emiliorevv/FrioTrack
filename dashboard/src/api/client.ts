@@ -160,6 +160,25 @@ export interface RespuestaLogin {
   expira_en_segundos: number
 }
 
+/** Valida el contrato de sesión de login y registro en un solo lugar. */
+function validarRespuestaLogin(datos: unknown): RespuestaLogin {
+  if (
+    !esObjeto(datos) ||
+    typeof datos.access_token !== 'string' ||
+    !datos.access_token ||
+    typeof datos.token_type !== 'string' ||
+    typeof datos.expira_en_segundos !== 'number'
+  ) {
+    throw new Error('La API devolvió una sesión inválida.')
+  }
+
+  return {
+    access_token: datos.access_token,
+    token_type: datos.token_type,
+    expira_en_segundos: datos.expira_en_segundos,
+  }
+}
+
 /**
  * Login del dashboard. Usa `sinAuth` para no adjuntar un token viejo y para
  * que un 401 de credenciales no dispare el logout global.
@@ -178,21 +197,29 @@ export async function iniciarSesion(
     { sinAuth: true },
   )
 
-  if (
-    !esObjeto(datos) ||
-    typeof datos.access_token !== 'string' ||
-    !datos.access_token ||
-    typeof datos.token_type !== 'string' ||
-    typeof datos.expira_en_segundos !== 'number'
-  ) {
-    throw new Error('La API devolvió una sesión inválida.')
-  }
+  return validarRespuestaLogin(datos)
+}
 
-  return {
-    access_token: datos.access_token,
-    token_type: datos.token_type,
-    expira_en_segundos: datos.expira_en_segundos,
-  }
+/**
+ * Alta de restaurante y su usuario dueño. Igual que el login, no adjunta un
+ * token viejo: el registro es público y devuelve la sesión nueva.
+ */
+export async function registrar(
+  restaurante: string,
+  usuario: string,
+  password: string,
+): Promise<RespuestaLogin> {
+  const datos = await pedir<unknown>(
+    '/auth/registro',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ restaurante, usuario, password }),
+    },
+    { sinAuth: true },
+  )
+
+  return validarRespuestaLogin(datos)
 }
 
 function leerRetryAfter(valor: string | null): number | null {
