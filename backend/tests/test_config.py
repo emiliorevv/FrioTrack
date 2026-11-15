@@ -35,6 +35,7 @@ def _configurar_produccion(monkeypatch, entorno: str | None = "produccion", **va
         monkeypatch.setenv("ENTORNO", entorno)
     completa = {
         "JWT_SECRET": SECRETO_FUERTE,
+        "AUTH_REQUERIDA": "1",
         "CRON_TOKEN": "cron-de-produccion",
         "SEED_PASSWORD": "no-es-la-demo",
         "SENSOR_TOKENS": json.dumps(TOKENS_VALIDOS),
@@ -70,6 +71,14 @@ def test_produccion_sin_cron_token_lanza(monkeypatch, cron_token):
     _configurar_produccion(monkeypatch, CRON_TOKEN=cron_token)
 
     with pytest.raises(RuntimeError, match="CRON_TOKEN"):
+        get_settings().validar_configuracion()
+
+
+@pytest.mark.parametrize("auth_requerida", ["0", "false"], ids=["cero", "false"])
+def test_produccion_sin_auth_requerida_lanza(monkeypatch, auth_requerida):
+    _configurar_produccion(monkeypatch, AUTH_REQUERIDA=auth_requerida)
+
+    with pytest.raises(RuntimeError, match="AUTH_REQUERIDA"):
         get_settings().validar_configuracion()
 
 

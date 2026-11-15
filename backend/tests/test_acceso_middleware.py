@@ -344,6 +344,22 @@ def test_telemetria_401_conserva_credencial_y_sujeto(
     assert salida["sujeto"] == "S-PES-01"
 
 
+def test_health_no_consulta_bloqueos_ni_registra(monkeypatch, sesion_falsa, log_stdout):
+    """Render pega al health seguido; no debe llenar logs ni recibir 403."""
+    _activar_db(monkeypatch)
+    _configurar_entorno(monkeypatch, entorno="local")
+    _bloquear(sesion_falsa)
+
+    with TestClient(create_app()) as cliente:
+        respuesta = cliente.get("/api/health")
+        _esperar_registros(cliente)
+
+    assert respuesta.status_code == 200
+    assert sesion_falsa.consultas == []
+    assert sesion_falsa.insertados == []
+    assert log_stdout.getvalue() == ""
+
+
 def test_ruta_que_lanza_registra_500_y_responde_500(monkeypatch, sesion_falsa, log_stdout):
     _activar_db(monkeypatch)
 

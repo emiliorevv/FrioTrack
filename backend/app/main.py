@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.middleware.acceso import AccesoLogMiddleware
 from app.realtime.kpis import publicar_kpis_periodicos
+from app.routers.auth import router as auth_router
 from app.routers.camaras import router as camaras_router
 from app.routers.operacion import router as operacion_router
 from app.routers.simulador import router as simulador_router
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
         """Sin autenticación: despierta Render y avisa el modo demo."""
         return {"ok": True, "escala_tiempo": settings.escala_tiempo}
 
+    app.include_router(auth_router)
     app.include_router(camaras_router)
     app.include_router(operacion_router)
     app.include_router(simulador_router)
