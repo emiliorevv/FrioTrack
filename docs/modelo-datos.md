@@ -124,9 +124,9 @@ Solo puede haber una alerta abierta por cámara y tipo.
 |---|---|---|
 | `id` | `serial` PK | |
 | `restaurante_id` | `int` FK | Tenant del usuario; viaja en el JWT |
-| `usuario` | `text` unique | Único a nivel global (el sign-up por tenant llega después) |
+| `usuario` | `text` unique | Único a nivel global; es el identificador de login y puede ser el correo |
 | `password_hash` | `text` | PBKDF2 o bcrypt, nunca en claro |
-| `rol` | `text` | `jefe_cocina` o `gerente` |
+| `rol` | `text` | `dueno` (todo el restaurante y atiende alertas), `jefe_cocina` (ve todo y atiende) o `gerente` (solo consulta) |
 | `telefono` | `text` null | A dónde llegan los SMS (formato `+52...`) |
 
 ## Seguridad (SOC)
@@ -142,7 +142,7 @@ Una fila por petición, con exactamente los campos del formato de logs del [cont
 | `metodo` | `text` | |
 | `ruta` | `text` | Sin query string (el token del stream nunca se guarda) |
 | `status` | `int` | |
-| `credencial` | `text` | `sensor`, `cron`, `usuario`, `ninguna` |
+| `credencial` | `text` | `sensor`, `cron`, `usuario`, `registro`, `ninguna` |
 | `sujeto` | `text` null | `sensor_id` o usuario |
 | `user_agent` | `text` | |
 | `latencia_ms` | `int` | |
@@ -178,4 +178,4 @@ El backend crea las tablas y carga esto si la base está vacía:
 - Las 5 cámaras del restaurante demo con los rangos y tiempos del README.
 - Un sensor por cámara (el tenant se deriva de la cámara).
 - 2 o 3 lotes por cámara con costos realistas (por ejemplo: robalo 12 kg $3,240; camarón 5 kg $1,610; arrachera 10 kg $3,100; pechuga 15 kg $1,650; crema 6 l $420; queso Oaxaca 4 kg $640; lechuga 20 pz $300; cilantro y hierbas $180; papas congeladas 10 kg $520; helado 8 l $760).
-- Dos usuarios del restaurante demo: `jefe` (`jefe_cocina`) y `gerente` (`gerente`), con contraseña desde una variable de entorno.
+- Dos usuarios del restaurante demo: `jefe` (`jefe_cocina`) y `gerente` (`gerente`), con contraseña desde una variable de entorno. El sign-up crea un usuario `dueno` por cada restaurante nuevo.

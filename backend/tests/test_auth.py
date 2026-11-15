@@ -50,10 +50,12 @@ def _sin_cache_settings():
 
 @pytest.fixture(autouse=True)
 def _limitador_limpio():
-    """El limitador es global; cada prueba empieza con la ventana vacía."""
+    """Los limitadores son globales; cada prueba empieza con la ventana vacía."""
     auth_mod.limitador_login.reiniciar()
+    auth_mod.limitador_registro.reiniciar()
     yield
     auth_mod.limitador_login.reiniciar()
+    auth_mod.limitador_registro.reiniciar()
 
 
 def _activar_auth(monkeypatch, activa: bool = True) -> None:

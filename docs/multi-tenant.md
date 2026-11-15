@@ -2,8 +2,8 @@
 
 FríoTrack atiende varios restaurantes con el mismo despliegue. Este documento
 resume cómo se guarda el tenant y cómo se aísla todo lo que ya existe. El
-sign-up (alta de restaurantes y usuarios) todavía no existe: por ahora solo hay
-un tenant real, la demo.
+sign-up (`POST /auth/registro`) da de alta restaurantes y su usuario `dueno`;
+la verificación de correo y el onboarding visual siguen pendientes.
 
 ## Modelo
 
@@ -38,6 +38,21 @@ que ya estaba en `0001` con datos.
   `get_restaurante_id` devuelve el restaurante demo, así que la demo se
   comporta igual que antes.
 
+## Sign-up
+
+`POST /auth/registro` es público (no depende de `AUTH_REQUERIDA`) y crea en una
+sola transacción un `restaurante` y su usuario con rol `dueno`. El tenant nuevo
+nace **sin cámaras ni usuarios adicionales**; el JWT que devuelve el endpoint ya
+trae su `restaurante_id`, así que el dueño entra directo al dashboard y ve una
+lista vacía hasta que se den de alta cámaras.
+
+- El identificador de login es `usuario` (único global; el dashboard puede
+  pedirlo como correo). Todavía **no** hay verificación de correo ni campo
+  `email`.
+- El rate limit es por IP: 5 intentos por hora, y un alta exitosa lo limpia.
+- El resto del onboarding (alta visual de cámaras, invitación de
+  `jefe_cocina`/`gerente`, verificación de correo) queda para PRs posteriores.
+
 ## Aislamiento
 
 - **JWT**: `crear_token` firma el claim `restaurante_id`. `decodificar_token` lo
@@ -50,8 +65,9 @@ que ya estaba en `0001` con datos.
   Pedir una cámara, sus lecturas, o atender una alerta de otro restaurante
   responde **404**, igual que un recurso inexistente, para no filtrar su
   existencia. La verificación vive en `camara_del_restaurante()` y la reutilizan
-  todos los endpoints. `POST /alertas/{id}/atender` sin JWT elige al primer
-  `jefe_cocina` **del tenant de la petición**.
+  todos los endpoints. `POST /alertas/{id}/atender` acepta los roles
+  `jefe_cocina` y `dueno` del JWT; sin JWT elige al primer `jefe_cocina` **del
+  tenant de la petición**.
 - **KPIs**: `calcular_kpis(db, restaurante_id)` filtra las cinco consultas con
   join a la cámara: lecturas, alertas activas, atendidas, lotes en riesgo y
   mermas.
@@ -76,7 +92,9 @@ que ya estaba en `0001` con datos.
 
 ## Pendientes
 
-- Sign-up, alta de restaurantes y CRUD de cámaras/usuarios por tenant.
+- Verificación de correo en el sign-up y onboarding visual (cámaras, usuarios y
+  roles) por tenant.
+- CRUD de cámaras y usuarios, e invitación de `jefe_cocina`/`gerente`.
 - RLS (Row Level Security) en Postgres como segunda barrera, además del filtro
   en la API. Para `lotes` y `alertas`, la política tendrá que hacer el join con
   `camaras` porque no guardan el tenant.
