@@ -1,0 +1,29 @@
+title: Lecturas imposibles de temperatura en una cámara
+id: 26f277c2-6d7a-4ff2-b44c-452f2788f824
+status: experimental
+description: La temperatura de una cámara cambió más de 8 °C en 60 segundos o menos, un salto físicamente improbable que sugiere lecturas manipuladas
+author: Equipo FríoTrack
+date: 2026-11-14
+references:
+  - docs/adr/0007-reglas-siem-sigma.md
+logsource:
+  product: friotrack
+  service: api_lecturas
+detection:
+  selection:
+    tabla: lecturas
+    campo: temperatura_c
+  # El detector compara lecturas consecutivas de la misma cámara usando
+  # recibida_en (hora del servidor), no el ts que manda el sensor.
+  timeframe: 60s
+  condition: selection | delta(temperatura_c) by camara_id > 8
+level: medium
+tags:
+  - attack.impact
+  - attack.t0832
+falsepositives:
+  - Reacomodo del producto o apertura larga de la puerta
+  - Sensor descalibrado o recién instalado
+# Acción de respuesta (no es parte del estándar Sigma, la ejecuta el detector):
+# marcar las lecturas involucradas como sospechosas (lecturas.sospechosa = true)
+# y avisar al responsable.
