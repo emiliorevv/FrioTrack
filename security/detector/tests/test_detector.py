@@ -198,7 +198,7 @@ def test_fuerza_bruta_ignora_eventos_fuera_de_la_ventana():
     assert evaluar_fuerza_bruta(filas, AHORA) == []
 
 
-def test_fuerza_bruta_cuenta_ingesta_cron_y_login_pero_no_otras_rutas():
+def test_fuerza_bruta_cuenta_ingesta_cron_login_y_registro_pero_no_otras_rutas():
     otras = [fila_log(ruta="/api/camaras", segundos_atras=indice) for indice in range(15)]
     ingesta = [
         fila_log(ruta="/api/telemetria", segundos_atras=indice, status=403) for indice in range(5)
@@ -214,6 +214,24 @@ def test_fuerza_bruta_cuenta_ingesta_cron_y_login_pero_no_otras_rutas():
             sujeto=None,
         )
         for indice in range(2)
+    ] + [
+        fila_log(
+            ruta="/api/auth/registro",
+            segundos_atras=indice,
+            status=409,
+            credencial="registro",
+            sujeto=None,
+        )
+        for indice in range(2)
+    ] + [
+        fila_log(
+            ruta="/api/auth/registro",
+            segundos_atras=indice,
+            status=429,
+            credencial="registro",
+            sujeto=None,
+        )
+        for indice in range(2)
     ]
 
     assert evaluar_fuerza_bruta(otras, AHORA) == []
@@ -221,9 +239,25 @@ def test_fuerza_bruta_cuenta_ingesta_cron_y_login_pero_no_otras_rutas():
     assert len(hallazgos) == 1
     assert hallazgos[0].detalle["rutas"] == [
         "/api/auth/login",
+        "/api/auth/registro",
         "/api/simulador/tick",
         "/api/telemetria",
     ]
+
+
+def test_fuerza_bruta_ignora_los_registros_exitosos():
+    filas = [
+        fila_log(
+            ruta="/api/auth/registro",
+            segundos_atras=indice,
+            status=201,
+            credencial="registro",
+            sujeto=f"dueno{indice}@norte.mx",
+        )
+        for indice in range(15)
+    ]
+
+    assert evaluar_fuerza_bruta(filas, AHORA) == []
 
 
 # --- Token desde IP desconocida --------------------------------------------

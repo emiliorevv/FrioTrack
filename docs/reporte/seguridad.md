@@ -53,7 +53,7 @@ Las reglas están en **Sigma** (YAML) para convertirlas a Splunk, Elastic, Senti
 
 | Regla | Archivo | Condición | Umbral | Severidad | Acción |
 |---|---|---|---|---|---|
-| Fuerza bruta de credenciales | `security/siem/fuerza-bruta-tokens.yml` | `401` o `403` en `/api/telemetria`, `/api/simulador/tick` o `/api/auth/login` desde la misma IP | 10 o más en 5 minutos | Alta (`high`) | Bloquear la IP 60 minutos y alertar |
+| Fuerza bruta de credenciales | `security/siem/fuerza-bruta-tokens.yml` | `401`, `403`, `409` o `429` en `/api/telemetria`, `/api/simulador/tick`, `/api/auth/login` o `/api/auth/registro` desde la misma IP | 10 o más en 5 minutos | Alta (`high`) | Bloquear la IP 60 minutos y alertar |
 | Token de sensor desde IP desconocida | `security/siem/token-ip-desconocida.yml` | `credencial = sensor`, `status = 202` en `/api/telemetria` y `ip_origen` fuera de la lista de confianza | 1 evento | Alta (`high`) | Revocar el token del sensor y alertar |
 | Lecturas imposibles | `security/siem/lecturas-imposibles.yml` | Cambio de más de 8 °C en 60 segundos o menos en la misma cámara | 1 evento | Media (`medium`) | Marcar las lecturas como sospechosas y alertar |
 

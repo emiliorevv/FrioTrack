@@ -1,5 +1,8 @@
 /** Etiqueta legible para el rol del JWT. */
 export function etiquetaRol(rol: string): string {
+  if (rol === 'dueno') {
+    return 'Dueño'
+  }
   if (rol === 'jefe_cocina') {
     return 'Jefe de cocina'
   }
@@ -9,7 +12,7 @@ export function etiquetaRol(rol: string): string {
   return rol || 'Usuario'
 }
 
-/** Permiso de negocio: solo el jefe de cocina atiende alertas. */
+/** Permiso de negocio: el dueño y el jefe de cocina atienden alertas. */
 export function puedeAtenderAlertas(rol: string): boolean {
-  return rol === 'jefe_cocina'
+  return rol === 'dueno' || rol === 'jefe_cocina'
 }

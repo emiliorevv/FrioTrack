@@ -124,7 +124,7 @@ Solo puede haber una alerta abierta por cámara y tipo.
 |---|---|---|
 | `id` | `serial` PK | |
 | `restaurante_id` | `int` FK | Tenant del usuario; viaja en el JWT |
-| `usuario` | `text` unique | Único a nivel global; es el identificador de login y puede ser el correo |
+| `usuario` | `text` unique | Único a nivel global; identificador de login, se guarda en minúsculas y puede ser el correo |
 | `password_hash` | `text` | PBKDF2 o bcrypt, nunca en claro |
 | `rol` | `text` | `dueno` (todo el restaurante y atiende alertas), `jefe_cocina` (ve todo y atiende) o `gerente` (solo consulta) |
 | `telefono` | `text` null | A dónde llegan los SMS (formato `+52...`) |

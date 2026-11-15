@@ -42,7 +42,7 @@ Alta pública de un restaurante y su usuario dueño. No requiere JWT y funciona 
 { "restaurante": "Taquería Norte", "usuario": "dueno@norte.mx", "password": "..." }
 ```
 
-`restaurante` va de 2 a 120 caracteres y `usuario` de 3 a 64; a ambos se les recortan los espacios de los extremos y un valor que queda vacío es inválido. `usuario` es el **identificador de login** y es único a nivel global: el dashboard puede pedirlo como correo, pero todavía no existe el campo `email` ni la verificación de correo, así que no se agrega un dato que aún no se valida. `password` va de 8 a 128 caracteres y se guarda hasheada con PBKDF2.
+`restaurante` va de 2 a 120 caracteres y `usuario` de 3 a 64; a ambos se les recortan los espacios de los extremos y un valor que queda vacío es inválido. `usuario` además se guarda en **minúsculas** (`Dueno@Norte.mx` y `dueno@norte.mx` son el mismo login) y es el **identificador de login**, único a nivel global: el dashboard puede pedirlo como correo, pero todavía no existe el campo `email` ni la verificación de correo, así que no se agrega un dato que aún no se valida. `password` va de 8 a 128 caracteres y se guarda hasheada con PBKDF2.
 
 Respuesta `201`, con el mismo formato que el login:
 ```json
@@ -53,9 +53,11 @@ El alta crea el `restaurante` y, en la misma transacción, un `usuario` con rol 
 
 | Código | Cuándo |
 |---|---|
-| `409` | El `usuario` ya existe (`Ese usuario ya está registrado.`), también si dos altas compiten y la unicidad la detecta la base |
+| `409` | El alta no procedió (`No se pudo completar el registro.`), también si dos altas compiten y la unicidad la detecta la base. El mensaje es genérico a propósito: no confirma si el usuario existe; la verificación por correo será la solución completa y, mientras tanto, el rate limit y la regla SIEM de fuerza bruta cubren el abuso |
 | `422` | Campos fuera de rango, vacíos o con tipo incorrecto |
-| `429` | Más de 5 intentos por IP en una hora, con `Retry-After`; un alta exitosa limpia el contador de esa IP |
+| `429` | Más de 5 intentos por IP en una hora, con `Retry-After`; cuentan todos los intentos, también las altas exitosas |
+
+Los `409` y `429` de este endpoint alimentan la regla SIEM de fuerza bruta, que bloquea la IP tras 10 eventos en 5 minutos.
 
 Las rutas de consulta y el stream exigen este JWT cuando `AUTH_REQUERIDA=1`, que es **obligatorio en producción** (la API no arranca en Render sin él). Con `AUTH_REQUERIDA=0`, permitido solo en local y pruebas, quedan abiertas como antes sobre el restaurante demo. Los datos se aíslan por `restaurante_id`: un recurso de otro restaurante responde `404`, igual que uno inexistente. Un token sin el claim `restaurante_id`, o con un tenant distinto al de la fila del usuario, responde `401`; los tokens emitidos antes de este cambio dejan de servir (vigencia máxima 8 h). `POST /telemetria` y `POST /simulador/tick` conservan sus tokens de sensor y de cron, y `GET /health` sigue sin autenticación. Un token ausente, inválido o expirado devuelve `401` con `WWW-Authenticate: Bearer`; un rol sin permiso devuelve `403`.
 

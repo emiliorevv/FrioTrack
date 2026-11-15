@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -75,9 +76,11 @@ class SesionRegistroFalsa:
         self,
         existente: Usuario | None = None,
         error_commit: Exception | None = None,
+        siempre_nuevo: bool = False,
     ) -> None:
         self.existente = existente
         self.error_commit = error_commit
+        self.siempre_nuevo = siempre_nuevo
         self.agregados: list[object] = []
         self.restaurantes: list[Restaurante] = []
         self.usuarios: list[Usuario] = []
@@ -98,9 +101,13 @@ class SesionRegistroFalsa:
         self.sentencias.append(sentencia)
         if self.existente is not None:
             return self.existente
-        if "FROM usuarios" in str(sentencia):
-            return self.usuarios[0] if self.usuarios else None
-        return None
+        if "FROM usuarios" not in str(sentencia) or self.siempre_nuevo:
+            return None
+        nombre = next(
+            (valor for valor in sentencia.compile().params.values() if isinstance(valor, str)),
+            None,
+        )
+        return next((usuario for usuario in self.usuarios if usuario.usuario == nombre), None)
 
     def scalars(self, sentencia: object) -> ResultadoFalso:
         self.sentencias.append(sentencia)
@@ -249,7 +256,8 @@ def test_registro_correcto_crea_restaurante_y_dueno(log_stdout):
     assert payload["uid"] == usuario.id
 
     assert sesion.commits == 1
-    assert sesion.refreshes == [usuario]
+    # Con expire_on_commit=False el usuario ya trae sus campos: no hace falta refresh.
+    assert sesion.refreshes == []
 
     # La credencial y el sujeto llegan al log de acceso del middleware.
     salida = json.loads(log_stdout.getvalue().splitlines()[-1])
@@ -272,25 +280,44 @@ def test_registro_duplicado_regresa_409_sin_crear_restaurante():
         respuesta = cliente.post("/api/auth/registro", json=DATOS)
 
     assert respuesta.status_code == 409
-    assert respuesta.json()["detail"] == "Ese usuario ya está registrado."
+    assert respuesta.json()["detail"] == "No se pudo completar el registro."
     assert sesion.restaurantes == []
     assert sesion.agregados == []
     assert sesion.commits == 0
 
 
+def _error_integridad(constraint: str) -> IntegrityError:
+    """IntegrityError con la forma que expone psycopg en `orig.diag`."""
+    origen = SimpleNamespace(diag=SimpleNamespace(constraint_name=constraint))
+    return IntegrityError("INSERT usuarios", {}, origen)
+
+
 def test_registro_con_carrera_de_unicidad_regresa_409_y_hace_rollback():
     sesion = SesionRegistroFalsa(
-        error_commit=IntegrityError("INSERT usuarios", {}, Exception("duplicate key"))
+        error_commit=_error_integridad("usuarios_usuario_key")
     )
 
     with _cliente(sesion) as cliente:
         respuesta = cliente.post("/api/auth/registro", json=DATOS)
 
     assert respuesta.status_code == 409
-    assert respuesta.json()["detail"] == "Ese usuario ya está registrado."
+    assert respuesta.json()["detail"] == "No se pudo completar el registro."
     assert sesion.rollbacks == 1
     assert sesion.commits == 0
     assert sesion.refreshes == []
+
+
+def test_registro_re_lanza_otra_violacion_de_integridad():
+    sesion = SesionRegistroFalsa(
+        error_commit=_error_integridad("usuarios_pkey")
+    )
+
+    with pytest.raises(IntegrityError):
+        with _cliente(sesion) as cliente:
+            cliente.post("/api/auth/registro", json=DATOS)
+
+    assert sesion.rollbacks == 1
+    assert sesion.commits == 0
 
 
 @pytest.mark.parametrize(
@@ -328,27 +355,32 @@ def test_registro_funciona_con_auth_requerida_encendida_y_apagada(monkeypatch):
         assert decodificar_token(respuesta.json()["access_token"])["rol"] == "dueno"
 
 
-def test_registro_rate_limit_tras_cinco_intentos_regresa_429():
-    existente = Usuario(
-        id=1,
-        restaurante_id=1,
-        usuario="dueno@norte.mx",
-        password_hash=hash_password("otra"),
-        rol="dueno",
-    )
-    sesion = SesionRegistroFalsa(existente=existente)
+def test_registro_rate_limit_cuenta_tambien_las_altas_exitosas():
+    # Un script con usuarios únicos no puede crear filas sin tope: los 201
+    # también consumen la ventana de la IP.
+    sesion = SesionRegistroFalsa(siempre_nuevo=True)
 
     with _cliente(sesion) as cliente:
-        respuestas = [cliente.post("/api/auth/registro", json=DATOS) for _ in range(5)]
-        sexta = cliente.post("/api/auth/registro", json=DATOS)
+        respuestas = [
+            cliente.post(
+                "/api/auth/registro",
+                json={**DATOS, "usuario": f"dueno{indice}@norte.mx"},
+            )
+            for indice in range(5)
+        ]
+        sexta = cliente.post(
+            "/api/auth/registro",
+            json={**DATOS, "usuario": "dueno5@norte.mx"},
+        )
 
-    assert [respuesta.status_code for respuesta in respuestas] == [409] * 5
+    assert [respuesta.status_code for respuesta in respuestas] == [201] * 5
+    assert len(sesion.restaurantes) == 5
+    assert len(sesion.usuarios) == 5
     assert sexta.status_code == 429
     assert 1 <= int(sexta.headers["retry-after"]) <= 3600
     assert "Demasiados registros" in sexta.json()["detail"]
     # El sexto ni siquiera consulta si el usuario existe.
     assert len(sesion.sentencias) == 5
-    assert sesion.agregados == []
 
 
 def test_flujo_registro_token_camaras_vacias_y_login():
@@ -370,6 +402,35 @@ def test_flujo_registro_token_camaras_vacias_y_login():
     assert camaras.json() == []
     assert login.status_code == 200
     assert decodificar_token(login.json()["access_token"])["restaurante_id"] == 2
+
+
+def test_registro_normaliza_usuario_a_minusculas_y_el_login_funciona():
+    sesion = SesionRegistroFalsa()
+
+    with _cliente(sesion) as cliente:
+        registro = cliente.post(
+            "/api/auth/registro",
+            json={
+                "restaurante": "Taquería Norte",
+                "usuario": "  Dueno@Norte.mx  ",
+                "password": "secreto123",
+            },
+        )
+        login = cliente.post(
+            "/api/auth/login",
+            json={"usuario": "dueno@norte.mx", "password": "secreto123"},
+        )
+        login_con_mayusculas = cliente.post(
+            "/api/auth/login",
+            json={"usuario": "Dueno@Norte.mx", "password": "secreto123"},
+        )
+
+    assert registro.status_code == 201
+    assert sesion.usuarios[0].usuario == "dueno@norte.mx"
+    assert sesion.restaurantes[0].nombre == "Taquería Norte"
+    assert login.status_code == 200
+    assert login_con_mayusculas.status_code == 200
+    assert decodificar_token(login.json()["access_token"])["sub"] == "dueno@norte.mx"
 
 
 # --- Rol `dueno` al atender alertas ----------------------------------------

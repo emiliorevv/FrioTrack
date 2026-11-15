@@ -19,8 +19,13 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # debe revelar cuál de los dos falló.
 MENSAJE_CREDENCIALES = "Usuario o contraseña incorrectos."
 MENSAJE_LIMITE = "Demasiados intentos de inicio de sesión; espera antes de reintentar."
-MENSAJE_USUARIO_REGISTRADO = "Ese usuario ya está registrado."
+# Genérico a propósito: un 409 por usuario existente confirmaría una cuenta válida
+# para atacarla en el login. La verificación por correo es la solución completa;
+# mientras tanto, el rate limit y la regla SIEM de fuerza bruta cubren el abuso.
+MENSAJE_REGISTRO_FALLIDO = "No se pudo completar el registro."
 MENSAJE_LIMITE_REGISTRO = "Demasiados registros desde esta IP; espera antes de reintentar."
+
+CONSTRAINT_USUARIO_UNICO = "usuarios_usuario_key"
 
 # PBKDF2 precomputado de una contraseña dummy: verificar contra él cuando el
 # usuario no existe iguala el tiempo de respuesta sin pagar el hash al importar.
@@ -31,9 +36,25 @@ HASH_SIN_USUARIO = (
 
 limitador_login = LimitadorIntentos()
 # El alta es pública y crea filas: más estricta que el login para que un script
-# no llene la tabla de restaurantes. Solo cuenta los intentos fallidos, porque
-# un registro exitoso limpia la ventana de esa IP.
+# no llene la tabla de restaurantes. Cuentan todos los intentos, también las
+# altas exitosas: limpiar la ventana al registrar dejaría crear filas sin tope.
 limitador_registro = LimitadorIntentos(maximo=5, ventana_seg=3600)
+
+
+def _token_salida(usuario: Usuario) -> TokenSalida:
+    """Arma la respuesta de login y registro con la misma expiración configurada."""
+    return TokenSalida(
+        access_token=crear_token(usuario),
+        expira_en_segundos=get_settings().jwt_expira_horas * 3600,
+    )
+
+
+def _es_usuario_duplicado(error: IntegrityError) -> bool:
+    """Solo la unicidad de `usuarios.usuario` es un duplicado esperado."""
+    return (
+        getattr(getattr(error.orig, "diag", None), "constraint_name", None)
+        == CONSTRAINT_USUARIO_UNICO
+    )
 
 
 @router.post("/login", response_model=TokenSalida)
@@ -62,10 +83,7 @@ def login(datos: LoginEntrada, request: Request, db: SesionDb) -> TokenSalida:
 
     limitador_login.limpiar(ip)
     request.state.sujeto = usuario.usuario
-    return TokenSalida(
-        access_token=crear_token(usuario),
-        expira_en_segundos=get_settings().jwt_expira_horas * 3600,
-    )
+    return _token_salida(usuario)
 
 
 @router.post("/registro", response_model=TokenSalida, status_code=status.HTTP_201_CREATED)
@@ -90,9 +108,11 @@ def registro(datos: RegistroEntrada, request: Request, db: SesionDb) -> TokenSal
         )
 
     if buscar_usuario(db, datos.usuario) is not None:
+        # Mismo mensaje y status que la carrera de unicidad: no se confirma si
+        # el usuario existe, solo que el alta no procedió.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=MENSAJE_USUARIO_REGISTRADO,
+            detail=MENSAJE_REGISTRO_FALLIDO,
         )
 
     try:
@@ -109,18 +129,16 @@ def registro(datos: RegistroEntrada, request: Request, db: SesionDb) -> TokenSal
         db.add(usuario)
         db.commit()
     except IntegrityError as error:
-        # Carrera entre dos altas del mismo usuario: la unicidad la decide la
-        # base y el cliente recibe el mismo 409 que en la comprobación previa.
         db.rollback()
+        # Solo la carrera por el mismo `usuario` es un duplicado esperado. Un
+        # NOT NULL/FK/check se re-lanza: ocultarlo mandaría al cliente a
+        # reintentar con otro nombre para siempre.
+        if not _es_usuario_duplicado(error):
+            raise
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=MENSAJE_USUARIO_REGISTRADO,
+            detail=MENSAJE_REGISTRO_FALLIDO,
         ) from error
 
-    db.refresh(usuario)
-    limitador_registro.limpiar(ip)
     request.state.sujeto = usuario.usuario
-    return TokenSalida(
-        access_token=crear_token(usuario),
-        expira_en_segundos=get_settings().jwt_expira_horas * 3600,
-    )
+    return _token_salida(usuario)

@@ -1,7 +1,7 @@
 title: Fuerza bruta de credenciales en la API
 id: 3b8e2f6a-9c41-4d7e-8a15-2f6c0d9e7b41
 status: experimental
-description: Muchos intentos fallidos de autenticación contra sensores, cron o el login del dashboard desde la misma IP
+description: Muchos intentos fallidos de autenticación contra sensores, cron, el login del dashboard o el registro de dueños desde la misma IP
 author: Equipo FríoTrack
 date: 2026-11-11
 logsource:
@@ -13,9 +13,12 @@ detection:
       - /api/telemetria
       - /api/simulador/tick
       - /api/auth/login
+      - /api/auth/registro
     status:
       - 401
       - 403
+      - 409
+      - 429
   timeframe: 5m
   condition: selection | count() by ip_origen >= 10
 level: high
@@ -26,5 +29,6 @@ falsepositives:
   - Sensor mal configurado con un token viejo
   - Worker del cron con un CRON_TOKEN desactualizado
   - Usuario del dashboard que olvidó su contraseña
+  - Dueño que reintenta el registro con un usuario ya ocupado
 # Acción de respuesta (no es parte del estándar Sigma, la ejecuta el detector):
 # bloquear ip_origen 1 hora y avisar al responsable.

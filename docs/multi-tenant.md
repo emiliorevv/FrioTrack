@@ -46,10 +46,11 @@ nace **sin cámaras ni usuarios adicionales**; el JWT que devuelve el endpoint y
 trae su `restaurante_id`, así que el dueño entra directo al dashboard y ve una
 lista vacía hasta que se den de alta cámaras.
 
-- El identificador de login es `usuario` (único global; el dashboard puede
-  pedirlo como correo). Todavía **no** hay verificación de correo ni campo
-  `email`.
-- El rate limit es por IP: 5 intentos por hora, y un alta exitosa lo limpia.
+- El identificador de login es `usuario` (único global; se guarda en minúsculas
+  y el dashboard puede pedirlo como correo). Todavía **no** hay verificación de
+  correo ni campo `email`.
+- El rate limit es por IP: 5 intentos por hora; cuentan también las altas
+  exitosas.
 - El resto del onboarding (alta visual de cámaras, invitación de
   `jefe_cocina`/`gerente`, verificación de correo) queda para PRs posteriores.
 

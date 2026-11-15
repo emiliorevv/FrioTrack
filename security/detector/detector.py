@@ -46,9 +46,9 @@ REGLA_LECTURAS_IMPOSIBLES_ID = "26f277c2-6d7a-4ff2-b44c-452f2788f824"
 REGLA_LECTURAS_IMPOSIBLES = "Lecturas imposibles de temperatura"
 
 RUTAS_FUERZA_BRUTA = frozenset(
-    {"/api/telemetria", "/api/simulador/tick", "/api/auth/login"}
+    {"/api/telemetria", "/api/simulador/tick", "/api/auth/login", "/api/auth/registro"}
 )
-ESTADOS_FUERZA_BRUTA = frozenset({401, 403})
+ESTADOS_FUERZA_BRUTA = frozenset({401, 403, 409, 429})
 RUTA_TELEMETRIA = "/api/telemetria"
 
 VENTANA_FUERZA_BRUTA_SEG = 300
@@ -214,7 +214,7 @@ def validar_ips_produccion(
 
 
 def evaluar_fuerza_bruta(filas: Sequence[FilaLog], ahora: datetime) -> list[Hallazgo]:
-    """IPs con 10 o más respuestas 401/403 en ingesta, cron o login en 5 minutos."""
+    """IPs con 10+ respuestas 401/403/409/429 en ingesta, cron, login o registro en 5 min."""
     desde = ahora - timedelta(seconds=VENTANA_FUERZA_BRUTA_SEG)
     por_ip: dict[str, list[FilaLog]] = defaultdict(list)
     for fila in filas:
