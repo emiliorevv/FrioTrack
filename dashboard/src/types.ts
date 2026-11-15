@@ -6,6 +6,46 @@
 
 export type EstadoCamara = 'en_rango' | 'alerta' | 'critica'
 
+/** Respuesta de `GET /health`. */
+export interface Health {
+  ok: boolean
+  /** Factor del modo demo; 1 significa tiempo real. */
+  escala_tiempo: number
+}
+
+/** Fila de `GET /camaras/{id}/lecturas`. */
+export interface Lectura {
+  id: number
+  /** Momento del sensor, ISO 8601. */
+  ts: string
+  /** Momento en que la API recibió la lectura. */
+  recibida_en: string
+  temperatura_c: number
+  humedad_pct: number
+  puerta_abierta: boolean
+  /** La marcó el detector de lecturas imposibles. */
+  sospechosa: boolean
+}
+
+/** Payload del evento `lectura` de `GET /api/stream` (sin id ni recibida_en). */
+export interface LecturaStream {
+  camara_id: number
+  ts: string
+  temperatura_c: number
+  humedad_pct: number
+  puerta_abierta: boolean
+  estado_camara: EstadoCamara
+}
+
+/** Temperaturas para el sparkline, de la más vieja a la más reciente. */
+export type SerieCamara = number[]
+
+/** Punto interno de la serie: conserva `ts` para fusionar HTTP + SSE. */
+export interface PuntoSerie {
+  ts: string
+  valor: number
+}
+
 export interface UltimaLectura {
   ts: string
   temperatura_c: number

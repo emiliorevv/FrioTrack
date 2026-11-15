@@ -1,11 +1,11 @@
 import type { Camara, EstadoCamara } from '../types'
 import {
-  formatearHace,
   formatearMxn,
   formatearRango,
   formatearTemperatura,
 } from '../lib/format'
 import { Sparkline } from './Sparkline'
+import { TiempoRelativo } from './TiempoRelativo'
 
 const ETIQUETA_ESTADO: Record<EstadoCamara, string> = {
   en_rango: 'En rango',
@@ -16,10 +16,9 @@ const ETIQUETA_ESTADO: Record<EstadoCamara, string> = {
 interface CameraCardProps {
   camara: Camara
   serie: number[]
-  ahora: Date
 }
 
-export function CameraCard({ camara, serie, ahora }: CameraCardProps) {
+export function CameraCard({ camara, serie }: CameraCardProps) {
   const lectura = camara.ultima_lectura
   const tituloId = `camara-${camara.id}`
   const enRiesgo = camara.valor_en_riesgo_mxn > 0
@@ -35,7 +34,7 @@ export function CameraCard({ camara, serie, ahora }: CameraCardProps) {
           {ETIQUETA_ESTADO[camara.estado]}
         </span>
         <span className="camera-card__age">
-          {lectura ? formatearHace(lectura.ts, ahora) : 'Sin lecturas'}
+          {lectura ? <TiempoRelativo ts={lectura.ts} /> : 'Sin lecturas'}
         </span>
       </div>
 

@@ -3,7 +3,7 @@ import type {
   AlertaSeguridad,
   SeveridadSeguridad,
 } from '../types'
-import { formatearHace } from '../lib/format'
+import { TiempoRelativo } from './TiempoRelativo'
 
 type TonoSeguridad = 'danger' | 'warn' | 'neutral'
 
@@ -48,10 +48,11 @@ function resumirDetalle(detalle: Record<string, unknown>): string {
 
 interface SecurityPanelProps {
   alertas: AlertaSeguridad[]
-  ahora: Date
+  /** Aclaración visible, por ejemplo mientras el detector SIEM no existe. */
+  nota?: string
 }
 
-export function SecurityPanel({ alertas, ahora }: SecurityPanelProps) {
+export function SecurityPanel({ alertas, nota }: SecurityPanelProps) {
   return (
     <section className="security" aria-labelledby="seguridad-title">
       <div className="section-heading">
@@ -61,6 +62,8 @@ export function SecurityPanel({ alertas, ahora }: SecurityPanelProps) {
         </div>
         <span className="tag">SIEM</span>
       </div>
+
+      {nota && <p className="security__nota">{nota}</p>}
 
       <ul className="security__list">
         {alertas.map((alerta) => {
@@ -85,9 +88,7 @@ export function SecurityPanel({ alertas, ahora }: SecurityPanelProps) {
                   {ETIQUETA_ACCION[alerta.accion]}
                 </p>
               </div>
-              <time className="security__time" dateTime={alerta.ts}>
-                {formatearHace(alerta.ts, ahora)}
-              </time>
+              <TiempoRelativo className="security__time" ts={alerta.ts} />
             </li>
           )
         })}

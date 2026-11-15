@@ -1,8 +1,11 @@
+import { useReloj } from '../hooks/useReloj'
+
 interface HeaderProps {
-  actualizadoHaceSegundos: number
+  /** Última actualización con datos; `null` = todavía no hay datos. */
+  actualizadoEn: Date | null
   /**
    * `escala_tiempo` de GET /api/health. En 1 (tiempo real) no se muestra la
-   * etiqueta de demo; mientras no haya API, App pasa 30.
+   * etiqueta de demo; si `/health` falla, no hay etiqueta.
    */
   escalaTiempo?: number
   /** Iniciales del usuario logueado; hoy no hay auth y el default es JC. */
@@ -10,7 +13,7 @@ interface HeaderProps {
 }
 
 export function Header({
-  actualizadoHaceSegundos,
+  actualizadoEn,
   escalaTiempo,
   iniciales = 'JC',
 }: HeaderProps) {
@@ -33,10 +36,11 @@ export function Header({
           {mostrarModoDemo && (
             <span className="demo-pill">MODO DEMO ×{escalaTiempo}</span>
           )}
-          <span className="updated">
-            <span className="updated__dot" aria-hidden="true" />
-            Actualizado hace {actualizadoHaceSegundos} s
-          </span>
+          {actualizadoEn ? (
+            <ActualizadoHace actualizadoEn={actualizadoEn} />
+          ) : (
+            <span className="updated">Sin datos</span>
+          )}
           <span
             className="avatar"
             role="img"
@@ -47,5 +51,21 @@ export function Header({
         </div>
       </div>
     </header>
+  )
+}
+
+/** El reloj vive aquí: solo este texto se re-renderiza cada segundo. */
+function ActualizadoHace({ actualizadoEn }: { actualizadoEn: Date }) {
+  const ahora = useReloj()
+  const segundos = Math.max(
+    0,
+    Math.floor((ahora.getTime() - actualizadoEn.getTime()) / 1000),
+  )
+
+  return (
+    <span className="updated">
+      <span className="updated__dot" aria-hidden="true" />
+      Actualizado hace {segundos} s
+    </span>
   )
 }
