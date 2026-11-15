@@ -1,6 +1,5 @@
 """Datos semilla idempotentes de FríoTrack."""
 
-import hashlib
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings, leer_sensor_tokens
 from app.core.security import hash_password
+from app.core.sensor_token import hash_token
 from app.db.models import (
     NOMBRE_RESTAURANTE_DEMO,
     RESTAURANTE_DEMO_ID,
@@ -61,12 +61,22 @@ LOTES: list[tuple[str, int, Decimal, str, Decimal, int]] = [
     ("Carne de res congelada", 5, Decimal("12.00"), "kg", Decimal("2880.00"), 60),
 ]
 
-# El demo se inserta con id explícito; la secuencia debe quedar en MAX(id) para
-# que el primer restaurante creado sin id (el futuro sign-up) reciba el 2.
-SQL_SECUENCIA_RESTAURANTES = (
-    "SELECT setval(pg_get_serial_sequence('restaurantes', 'id'), "
-    "(SELECT MAX(id) FROM restaurantes))"
+# El demo se inserta con ids explícitos (restaurante 1 y cámaras 1 a 5); la
+# secuencia de cada tabla debe quedar en MAX(id) para que el primer alta sin id
+# reciba el siguiente número y no choque con la PK.
+SQL_SECUENCIA = (
+    "SELECT setval(pg_get_serial_sequence('{tabla}', 'id'), "
+    "(SELECT MAX(id) FROM {tabla}))"
 )
+
+
+def _alinear_secuencia(session: Session, tabla: str) -> None:
+    """Deja la secuencia SERIAL de `tabla` en MAX(id) tras inserts con id explícito.
+
+    `tabla` solo se interpola con nombres fijos definidos aquí (Postgres no
+    acepta identificadores como parámetro ligado).
+    """
+    session.execute(text(SQL_SECUENCIA.format(tabla=tabla)))
 
 
 def _tokens_de_entorno() -> dict[str, str]:
@@ -117,7 +127,7 @@ def construir_seed(
             Sensor(
                 id=sensor_id,
                 camara_id=camara_id,
-                token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                token_hash=hash_token(token),
                 activo=True,
             )
         )
@@ -181,9 +191,12 @@ def cargar_seed(
         )
         session.flush()  # las filas hijas necesitan el restaurante antes del commit
         # El id del demo fue explícito: alinea la secuencia para el próximo alta.
-        session.execute(text(SQL_SECUENCIA_RESTAURANTES))
+        _alinear_secuencia(session, "restaurantes")
     session.add_all(camaras)
     session.flush()
+    # Las 5 cámaras del seed llevan ids 1 a 5; sin esto, el primer alta por API
+    # pediría nextval=1 y chocaría con la PK.
+    _alinear_secuencia(session, "camaras")
     session.add_all(sensores)
     session.add_all(lotes)
     session.add_all(usuarios)

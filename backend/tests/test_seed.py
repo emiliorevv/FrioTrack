@@ -238,12 +238,13 @@ def test_cargar_seed_solo_mira_las_camaras_del_restaurante_demo():
     assert guardia.compile().params["restaurante_id_1"] == RESTAURANTE_DEMO_ID
 
 
-def test_cargar_seed_ajusta_la_secuencia_del_restaurante_demo():
-    """El id 1 fue explícito: la secuencia debe quedar después de MAX(id)."""
+def test_cargar_seed_ajusta_las_secuencias_de_los_ids_explicitos():
+    """Demo y cámaras llevan ids explícitos: la secuencia debe quedar en MAX(id)."""
     sesion = FakeSession()
 
     cargar_seed(sesion, sensor_tokens=TOKENS, password="demo")
 
     setval = [str(sentencia) for sentencia in sesion.sentencias if "setval" in str(sentencia)]
-    assert len(setval) == 1
+    assert len(setval) == 2
     assert "pg_get_serial_sequence('restaurantes', 'id')" in setval[0]
+    assert "pg_get_serial_sequence('camaras', 'id')" in setval[1]
