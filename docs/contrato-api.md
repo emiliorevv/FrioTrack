@@ -19,6 +19,23 @@ Hay tres tipos de credencial, una por zona. Ninguna sirve para lo que le toca a 
 
 Roles de usuario: `jefe_cocina` (ve todo y atiende alertas) y `gerente` (ve todo, no atiende alertas).
 
+### `POST /auth/login`
+
+Entrega el JWT que usa el dashboard. Siempre está disponible, con `AUTH_REQUERIDA` prendida o apagada.
+
+```json
+{ "usuario": "jefe", "password": "..." }
+```
+
+Respuesta `200`:
+```json
+{ "access_token": "<jwt>", "token_type": "bearer", "expira_en_segundos": 28800 }
+```
+
+El JWT usa HS256 y lleva `sub` (usuario), `rol`, `iat` y `exp`; `JWT_EXPIRA_HORAS` define su vigencia (8 h por defecto). Si el usuario no existe o la contraseña no coincide, la respuesta es `401` con el mismo mensaje (`Usuario o contraseña incorrectos.`) y `WWW-Authenticate: Bearer`, sin revelar cuál de los dos falló.
+
+Las rutas de consulta y el stream exigen este JWT cuando `AUTH_REQUERIDA=1` (el valor con el que se despliega junto con el login del dashboard). Con `AUTH_REQUERIDA=0`, que es el default para desarrollo local, quedan abiertas como antes. `POST /telemetria` y `POST /simulador/tick` conservan sus tokens de sensor y de cron, y `GET /health` sigue sin autenticación. Un token ausente, inválido o expirado devuelve `401` con `WWW-Authenticate: Bearer`; un rol sin permiso devuelve `403`.
+
 ## Endpoints
 
 ### Ingesta
@@ -95,7 +112,7 @@ Lista de lecturas de una cámara para la gráfica. Si no se manda rango, regresa
 `tipo` puede ser `temperatura` o `puerta`.
 
 #### `POST /alertas/{id}/atender`
-Solo rol `jefe_cocina`. Body `{ "nota": "Se cerró la puerta" }`. Marca quién la atendió y cuánto tardó.
+Solo rol `jefe_cocina`. Body `{ "nota": "Se cerró la puerta" }`. Marca quién la atendió y cuánto tardó. Con `AUTH_REQUERIDA=1` se atribuye al usuario del JWT y un `gerente` recibe `403`; con la bandera apagada se atribuye al primer `jefe_cocina` del seed.
 
 #### `GET /kpis`
 ```json
@@ -112,7 +129,7 @@ Solo rol `jefe_cocina`. Body `{ "nota": "Se cerró la puerta" }`. Marca quién l
 ### Tiempo real
 
 #### `GET /stream?token=<jwt>`
-Server-Sent Events. Va el token en la URL porque `EventSource` del navegador no deja mandar headers. La conexión se queda abierta y la API manda estos eventos:
+Server-Sent Events. Va el token en la URL porque `EventSource` del navegador no deja mandar headers. Con `AUTH_REQUERIDA=1` el token se valida y, si falta o es inválido, la conexión responde `401`; con la bandera apagada se acepta sin token. La conexión se queda abierta y la API manda estos eventos:
 
 | Evento | Cuándo | `data` |
 |---|---|---|

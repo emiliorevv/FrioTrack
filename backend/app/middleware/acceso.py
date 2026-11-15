@@ -19,8 +19,8 @@ from app.config import get_settings
 from app.db.models import IpBloqueada, LogAcceso
 from app.db.session import SessionLocal, get_engine
 
-# Credencial que corresponde a cada endpoint de máquina. El JWT de usuario se
-# agregará después; mientras tanto el resto de las rutas queda como `ninguna`.
+# Credencial que corresponde a cada endpoint de máquina. El JWT de usuario lo
+# anota `get_current_user` en `request.state`; el resto de las rutas queda `ninguna`.
 CREDENCIAL_POR_RUTA = {
     "/api/telemetria": "sensor",
     "/api/simulador/tick": "cron",

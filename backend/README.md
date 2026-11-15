@@ -28,6 +28,13 @@ En local `ENTORNO=local` relaja las validaciones. En producción `ENTORNO` debe 
 `JWT_SECRET` propio de 32 caracteres o más, `CRON_TOKEN`, `SEED_PASSWORD` distinta
 de la de demo y un token no vacío por cada sensor en `SENSOR_TOKENS`.
 
+Autenticación de usuario: `POST /api/auth/login` entrega un JWT firmado con
+`JWT_SECRET` que dura `JWT_EXPIRA_HORAS` (8 por default). `AUTH_REQUERIDA=1` lo
+exige en cámaras, lecturas, lotes, alertas, KPIs, seguridad y stream; en local se
+deja en `0` para no romper el dashboard mientras no tenga login. Cuando se active,
+el dashboard debe iniciar sesión y mandar el token; el stream lo recibe en
+`?token=<jwt>`.
+
 Render define `RENDER=true` por su cuenta, así que también se detecta producción
 cuando `ENTORNO` se queda en `local` u olvida definirse: si el despliegue corre en
 Render con los valores de demo, la API falla al arrancar en lugar de quedar

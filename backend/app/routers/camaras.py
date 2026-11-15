@@ -1,7 +1,7 @@
 """Endpoints de consulta: cámaras, lecturas y lotes.
 
-Auth pendiente (fase posterior): el contrato pide el JWT de usuario del dashboard
-para estas rutas; mientras no exista el login, quedan abiertas en local.
+Exigen el JWT de usuario cuando `AUTH_REQUERIDA=1`; con la bandera apagada
+(local y pruebas) quedan abiertos como antes.
 """
 
 from __future__ import annotations
@@ -14,10 +14,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.auth import get_current_user
 from app.db.models import Camara, Lectura, Lote
 from app.db.session import get_db
 
-router = APIRouter(prefix="/api", tags=["consulta"])
+router = APIRouter(prefix="/api", tags=["consulta"], dependencies=[Depends(get_current_user)])
 
 VENTANA_POR_DEFECTO = timedelta(hours=2)
 LIMITE_LECTURAS = 5000

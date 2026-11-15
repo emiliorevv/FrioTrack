@@ -137,6 +137,10 @@ cd dashboard && cp .env.example .env
 npm install && npm run dev
 ```
 
+## Autenticación
+
+`POST /api/auth/login` (body `{ "usuario": "...", "password": "..." }`) entrega un JWT de 8 horas (`JWT_EXPIRA_HORAS`) con el usuario y su rol. Con `AUTH_REQUERIDA=0`, que es el default en local, las rutas de consulta y el stream siguen abiertos y el dashboard funciona sin login. En el deploy con login hay que poner `AUTH_REQUERIDA=1`: cámaras, lecturas, lotes, alertas, KPIs, seguridad y stream pasan a exigir el token (el stream lo manda en `?token=<jwt>`) y el dashboard necesita iniciar sesión. `JWT_SECRET` debe ser propio y de 32 caracteres o más en producción.
+
 ## Despliegue
 
 | Servicio | URL |

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     database_url: str = ""
     jwt_secret: str = JWT_SECRET_POR_DEFECTO
     jwt_expira_horas: int = 8
+    # Con False (local) las rutas de consulta siguen abiertas; en producción se
+    # pone AUTH_REQUERIDA=1 junto con el login del dashboard.
+    auth_requerida: bool = False
     cron_token: str = ""
     sensor_tokens: str = "{}"
     # Obligatoria para cargar el seed (usuarios `jefe` y `gerente`); sin default.

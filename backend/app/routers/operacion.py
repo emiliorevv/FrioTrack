@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.auth import get_current_user, require_rol
 from app.db.base import utcnow
 from app.db.models import Alerta, AlertaSeguridad, Usuario
 from app.db.session import get_db
@@ -22,9 +23,10 @@ from app.schemas.operacion import (
 )
 from app.services.kpis import calcular_kpis
 
-router = APIRouter(prefix="/api", tags=["operacion"])
+router = APIRouter(prefix="/api", tags=["operacion"], dependencies=[Depends(get_current_user)])
 
 SesionDb = Annotated[Session, Depends(get_db)]
+JefeCocina = Annotated[Usuario | None, Depends(require_rol("jefe_cocina"))]
 
 
 class AtenderEntrada(BaseModel):
@@ -33,7 +35,7 @@ class AtenderEntrada(BaseModel):
     nota: str | None = None
 
 
-# Auth pendiente (fase posterior): estos endpoints quedan abiertos en local.
+# Con AUTH_REQUERIDA=0 estos endpoints quedan abiertos; con 1 exigen JWT.
 @router.get("/alertas", response_model=list[AlertaSalida])
 def listar_alertas(
     db: SesionDb,
@@ -57,12 +59,14 @@ def atender_alerta(
     alerta_id: int,
     entrada: AtenderEntrada,
     db: SesionDb,
+    usuario: JefeCocina,
 ) -> AlertaSalida:
     """Marca quién atendió la alerta y cuándo; no la cierra.
 
     Es idempotente: si la alerta ya estaba atendida conserva `atendida_en` y
     `atendida_por` (para no empeorar el KPI de tiempo de respuesta) y solo
-    actualiza la nota cuando viene en el cuerpo.
+    actualiza la nota cuando viene en el cuerpo. Solo puede llamarlo el rol
+    `jefe_cocina` cuando la autenticación está activa.
     """
     alerta = db.get(Alerta, alerta_id)
     if alerta is None:
@@ -79,12 +83,13 @@ def atender_alerta(
             bus.publicar("alerta_cerrada", alerta_salida(alerta).model_dump())
         return alerta_salida(alerta)
 
-    # Auth pendiente (fase posterior): aquí irá el usuario del JWT. Mientras tanto
-    # se atribuye al primer `jefe_cocina`, que en el seed es el usuario `jefe`.
-    jefe = db.scalar(
-        select(Usuario).where(Usuario.rol == "jefe_cocina").order_by(Usuario.id).limit(1)
-    )
-    if jefe is None:
+    if usuario is None:
+        # Sin JWT (AUTH_REQUERIDA=0) se atribuye al primer `jefe_cocina`, que en
+        # el seed es el usuario `jefe`.
+        usuario = db.scalar(
+            select(Usuario).where(Usuario.rol == "jefe_cocina").order_by(Usuario.id).limit(1)
+        )
+    if usuario is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=(
@@ -93,7 +98,7 @@ def atender_alerta(
             ),
         )
 
-    alerta.atendida_por = jefe.id
+    alerta.atendida_por = usuario.id
     alerta.atendida_en = utcnow()
     if entrada.nota is not None:
         alerta.nota = entrada.nota
@@ -105,14 +110,14 @@ def atender_alerta(
     return salida
 
 
-# Auth pendiente (fase posterior): este endpoint queda abierto en local.
+# Con AUTH_REQUERIDA=0 este endpoint queda abierto; con 1 exige JWT.
 @router.get("/kpis", response_model=KpisSalida)
 def obtener_kpis(db: SesionDb) -> KpisSalida:
     """Calcula los KPIs del dashboard a partir de lecturas, alertas y lotes."""
     return KpisSalida(**calcular_kpis(db))
 
 
-# Auth pendiente (fase posterior): este endpoint queda abierto en local.
+# Con AUTH_REQUERIDA=0 este endpoint queda abierto; con 1 exige JWT.
 @router.get("/seguridad/alertas", response_model=list[AlertaSeguridadSalida])
 def listar_alertas_seguridad(
     db: SesionDb,

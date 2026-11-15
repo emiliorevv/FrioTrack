@@ -8,10 +8,11 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
+from app.core.auth import get_current_user_stream
 from app.realtime.bus import EVENTO_CERRAR, bus
 from app.realtime.kpis import calcular_kpis_actuales
 
@@ -44,7 +45,8 @@ class LimiteConexiones:
             self._activas -= 1
 
 
-# Sin JWT todavía: el cupo evita que cualquiera tumbe Postgres abriendo conexiones.
+# El cupo evita que cualquiera tumbe Postgres abriendo conexiones; con
+# AUTH_REQUERIDA=1 además hay que presentar un JWT válido.
 limite_conexiones = LimiteConexiones(MAX_CONEXIONES_STREAM)
 
 
@@ -87,13 +89,13 @@ async def _eventos(request: Request) -> AsyncIterator[str]:
         limite_conexiones.liberar()
 
 
-@router.get("/stream")
+@router.get("/stream", dependencies=[Depends(get_current_user_stream)])
 async def stream(request: Request, token: str | None = None) -> StreamingResponse:
     """Mantiene abierta la conexión SSE del dashboard.
 
     `EventSource` del navegador no deja mandar headers, así que el contrato
-    manda el token en la URL. JWT pendiente (fase posterior): se acepta pero
-    todavía no se valida; mientras tanto hay un cupo de conexiones simultáneas.
+    manda el token en la URL. Cuando `AUTH_REQUERIDA=1`, sin `?token=<jwt>`
+    válido la conexión responde 401; con la bandera apagada se acepta sin token.
     """
     limite_conexiones.adquirir()
     return StreamingResponse(
