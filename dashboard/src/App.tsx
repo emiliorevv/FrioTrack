@@ -141,6 +141,18 @@ function App({ usuario, rol, onLogout }: AppProps) {
                 <div>
                   <h2 id="resumen-title">Resumen de hoy</h2>
                   <p>Últimas 24 horas · turno de comida</p>
+                  <details className="explicacion">
+                    <summary>¿Qué es esto?</summary>
+                    <div className="explicacion__cuerpo">
+                      <p>
+                        Es el resumen de las últimas 24 horas del turno: qué
+                        tanto tiempo estuvieron las cámaras en su temperatura
+                        ideal, cuántas alertas siguen pendientes, cuánto tardó
+                        el equipo en atenderlas, cuánto producto está en riesgo
+                        y cuánto se perdió por merma hoy y en el mes.
+                      </p>
+                    </div>
+                  </details>
                 </div>
               </div>
               {kpis && <KpiStrip kpis={kpis} />}

@@ -27,6 +27,11 @@ const ETIQUETA_ACCION: Record<AccionSeguridad, string> = {
   marcar_lecturas: 'Lecturas marcadas',
 }
 
+/** IDs de `security/siem/*.yml`; el detector los manda tal cual. */
+const ID_FUERZA_BRUTA = '3b8e2f6a-9c41-4d7e-8a15-2f6c0d9e7b41'
+const ID_TOKEN_DESCONOCIDO = 'e26aa409-804c-47fb-b852-1786ddaa172d'
+const ID_LECTURAS_IMPOSIBLES = '26f277c2-6d7a-4ff2-b44c-452f2788f824'
+
 /**
  * El backend guarda strings libres. Los conocidos se etiquetan aquí; el
  * resto cae al fallback para no romper el render.
@@ -43,23 +48,28 @@ function etiquetaAccion(valor: string): string {
   return (ETIQUETA_ACCION as Record<string, string>)[valor] ?? 'Sin acción'
 }
 
-function formatearValor(valor: unknown): string {
-  if (Array.isArray(valor)) {
-    return valor.map((item) => String(item)).join(', ')
+function explicacionDeAlerta(alerta: AlertaSeguridad): string {
+  switch (alerta.regla_id) {
+    case ID_FUERZA_BRUTA:
+      return 'Detectamos varios intentos fallidos de inicio de sesión desde la misma dirección. Para proteger el sistema, bloqueamos esa IP durante 60 minutos.'
+    case ID_TOKEN_DESCONOCIDO:
+      return 'Un sensor válido se usó desde una red que no es la del restaurante. Revocamos su token para evitar lecturas falsas.'
+    case ID_LECTURAS_IMPOSIBLES:
+      return 'Una cámara reportó un cambio de temperatura demasiado grande en muy poco tiempo. Marcamos esas lecturas como sospechosas para revisarlas.'
+    default:
+      return `El detector marcó esta actividad como sospechosa: ${alerta.regla}. Revisa la alerta y confirma si fue esperada.`
   }
-  if (valor !== null && typeof valor === 'object') {
-    return JSON.stringify(valor)
-  }
-  return String(valor)
 }
 
-/** Vuelve legible el JSON de `detalle` sin inventar campos que no vengan ahí. */
-function resumirDetalle(detalle: Record<string, unknown>): string {
-  const partes = Object.entries(detalle).map(
-    ([clave, valor]) =>
-      `${clave.replaceAll('_', ' ')}: ${formatearValor(valor)}`,
-  )
-  return partes.length > 0 ? partes.join(' · ') : 'Sin detalle'
+function duracionDeAlerta(alerta: AlertaSeguridad): string | null {
+  return alerta.regla_id === ID_FUERZA_BRUTA ? '60 minutos' : null
+}
+
+function intentosDeAlerta(detalle: Record<string, unknown>): string | null {
+  const intentos = detalle.intentos
+  return typeof intentos === 'number' || typeof intentos === 'string'
+    ? String(intentos)
+    : null
 }
 
 interface SecurityPanelProps {
@@ -100,6 +110,8 @@ export function SecurityPanel({ alertas, cargado, error }: SecurityPanelProps) {
         <ul className="security__list">
           {alertas.map((alerta) => {
             const tono = tonoSeveridad(alerta.severidad)
+            const intentos = intentosDeAlerta(alerta.detalle)
+            const duracion = duracionDeAlerta(alerta)
 
             return (
               <li className="security__item" key={alerta.id}>
@@ -115,10 +127,38 @@ export function SecurityPanel({ alertas, cargado, error }: SecurityPanelProps) {
                     </span>
                   </p>
                   <p className="security__detail">
-                    {alerta.ip_origen && `${alerta.ip_origen} · `}
-                    {resumirDetalle(alerta.detalle)} ·{' '}
+                    {alerta.ip_origen ?? 'Origen desconocido'} ·{' '}
                     {etiquetaAccion(alerta.accion)}
                   </p>
+
+                  <details className="security__details">
+                    <summary>¿Qué pasó?</summary>
+                    <div className="security__explicacion">
+                      <p>{explicacionDeAlerta(alerta)}</p>
+                      <dl className="security__datos">
+                        <div>
+                          <dt>IP</dt>
+                          <dd>{alerta.ip_origen ?? 'Desconocida'}</dd>
+                        </div>
+                        {intentos && (
+                          <div>
+                            <dt>Intentos</dt>
+                            <dd>{intentos}</dd>
+                          </div>
+                        )}
+                        <div>
+                          <dt>Acción</dt>
+                          <dd>{etiquetaAccion(alerta.accion)}</dd>
+                        </div>
+                        {duracion && (
+                          <div>
+                            <dt>Duración</dt>
+                            <dd>{duracion}</dd>
+                          </div>
+                        )}
+                      </dl>
+                    </div>
+                  </details>
                 </div>
                 <TiempoRelativo className="security__time" ts={alerta.ts} />
               </li>

@@ -64,6 +64,8 @@ export interface Camara {
   /** Nulo cuando la cámara todavía no tiene lecturas (recién sembrada la base). */
   ultima_lectura: UltimaLectura | null
   valor_en_riesgo_mxn: number
+  /** Suma de lotes no merma; 0 si la API vieja no lo manda. */
+  valor_inventario_mxn: number
 }
 
 export interface Kpis {

@@ -75,6 +75,10 @@ export function CameraCard({ camara, serie }: CameraCardProps) {
             {formatearMxn(camara.valor_en_riesgo_mxn)}
           </dd>
         </div>
+        <div>
+          <dt>Inventario</dt>
+          <dd>{formatearMxn(camara.valor_inventario_mxn ?? 0)}</dd>
+        </div>
       </dl>
 
       {lectura && (

@@ -19,6 +19,7 @@ const camara: Camara = {
     puerta_abierta: false,
   },
   valor_en_riesgo_mxn: 0,
+  valor_inventario_mxn: 0,
 }
 
 const alerta: AlertaOperativa = {
@@ -130,6 +131,10 @@ describe('AlertasActivas', () => {
     })
 
     expect(screen.getByRole('button', { name: 'Atendida' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Atendida' })).toHaveAttribute(
+      'aria-busy',
+      'false',
+    )
     expect(screen.getByText('0 pendientes de atención')).toBeInTheDocument()
     expect(
       screen.getByRole('heading', { name: /Alertas activas/ }),
