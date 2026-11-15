@@ -114,6 +114,7 @@ function crearCamaras(): Camara[] {
         puerta_abierta: true,
       },
       valor_en_riesgo_mxn: 4850,
+      valor_inventario_mxn: 12340,
     },
     {
       id: 2,
@@ -130,6 +131,7 @@ function crearCamaras(): Camara[] {
         puerta_abierta: false,
       },
       valor_en_riesgo_mxn: 0,
+      valor_inventario_mxn: 0,
     },
     {
       id: 3,
@@ -146,6 +148,7 @@ function crearCamaras(): Camara[] {
         puerta_abierta: false,
       },
       valor_en_riesgo_mxn: 0,
+      valor_inventario_mxn: 0,
     },
     {
       id: 4,
@@ -162,6 +165,7 @@ function crearCamaras(): Camara[] {
         puerta_abierta: false,
       },
       valor_en_riesgo_mxn: 0,
+      valor_inventario_mxn: 0,
     },
     {
       id: 5,
@@ -178,6 +182,7 @@ function crearCamaras(): Camara[] {
         puerta_abierta: false,
       },
       valor_en_riesgo_mxn: 0,
+      valor_inventario_mxn: 0,
     },
   ]
 }
@@ -241,6 +246,23 @@ describe('vista general', () => {
     renderizarApp()
 
     expect(await screen.findByText('MODO DEMO ×30')).toBeInTheDocument()
+  })
+
+  it('explica qué es el resumen de hoy al abrir el detalle', async () => {
+    renderizarApp()
+    await screen.findAllByRole('article')
+
+    const resumen = screen.getByText('¿Qué es esto?')
+    const details = resumen.closest('details')
+    expect(details).not.toBeNull()
+    expect(details).not.toHaveAttribute('open')
+
+    fireEvent.click(resumen)
+
+    expect(details).toHaveAttribute('open')
+    expect(
+      screen.getByText(/El % en rango cubre las últimas 24 horas/),
+    ).toBeInTheDocument()
   })
 
   it('el filtro Crítica deja solo Pescados y mariscos y Alerta queda vacío', async () => {
@@ -317,6 +339,8 @@ describe('vista general', () => {
     expect(within(pescados).getByText('Crítica')).toBeInTheDocument()
     expect(within(pescados).getByText('Abierta')).toBeInTheDocument()
     expect(within(pescados).getByText('$4,850')).toBeInTheDocument()
+    expect(within(pescados).getByText('Inventario')).toBeInTheDocument()
+    expect(within(pescados).getByText('$12,340')).toBeInTheDocument()
   })
 
   it('muestra datos en vivo y la alerta real del detector', async () => {
@@ -331,10 +355,10 @@ describe('vista general', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByText('Alta')).toBeInTheDocument()
+    expect(screen.getByText('192.168.0.4 · IP bloqueada')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('¿Qué pasó?'))
     expect(
-      screen.getByText(
-        '192.168.0.4 · clave: ip:192.168.0.4 · rutas: /api/telemetria · intentos: 15 · ventana s: 300 · IP bloqueada',
-      ),
+      screen.getByText(/Detectamos muchos intentos rechazados/),
     ).toBeInTheDocument()
     expect(screen.queryByText(/Datos de ejemplo/)).not.toBeInTheDocument()
     expect(

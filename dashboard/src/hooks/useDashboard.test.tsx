@@ -114,6 +114,7 @@ function crearCamaras(): Camara[] {
         puerta_abierta: false,
       },
       valor_en_riesgo_mxn: 0,
+      valor_inventario_mxn: 0,
     },
     {
       id: 2,
@@ -130,6 +131,7 @@ function crearCamaras(): Camara[] {
         puerta_abierta: false,
       },
       valor_en_riesgo_mxn: 0,
+      valor_inventario_mxn: 0,
     },
   ]
 }

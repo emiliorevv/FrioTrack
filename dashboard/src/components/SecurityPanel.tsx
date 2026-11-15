@@ -1,8 +1,9 @@
-import type {
-  AccionSeguridad,
-  AlertaSeguridad,
-  SeveridadSeguridad,
-} from '../types'
+import type { AlertaSeguridad, SeveridadSeguridad } from '../types'
+import {
+  datosDeAlerta,
+  etiquetaAccionDeAlerta,
+  explicacionDeAlerta,
+} from '../lib/siem'
 import { TiempoRelativo } from './TiempoRelativo'
 
 type TonoSeguridad = 'danger' | 'warn' | 'neutral'
@@ -21,45 +22,12 @@ const TONO_SEVERIDAD: Record<SeveridadSeguridad, TonoSeguridad> = {
   critical: 'danger',
 }
 
-const ETIQUETA_ACCION: Record<AccionSeguridad, string> = {
-  bloquear_ip: 'IP bloqueada',
-  revocar_token: 'Token revocado',
-  marcar_lecturas: 'Lecturas marcadas',
-}
-
-/**
- * El backend guarda strings libres. Los conocidos se etiquetan aquí; el
- * resto cae al fallback para no romper el render.
- */
 function etiquetaSeveridad(valor: string): string {
   return (ETIQUETA_SEVERIDAD as Record<string, string>)[valor] ?? 'Desconocida'
 }
 
 function tonoSeveridad(valor: string): TonoSeguridad {
   return (TONO_SEVERIDAD as Record<string, TonoSeguridad>)[valor] ?? 'neutral'
-}
-
-function etiquetaAccion(valor: string): string {
-  return (ETIQUETA_ACCION as Record<string, string>)[valor] ?? 'Sin acción'
-}
-
-function formatearValor(valor: unknown): string {
-  if (Array.isArray(valor)) {
-    return valor.map((item) => String(item)).join(', ')
-  }
-  if (valor !== null && typeof valor === 'object') {
-    return JSON.stringify(valor)
-  }
-  return String(valor)
-}
-
-/** Vuelve legible el JSON de `detalle` sin inventar campos que no vengan ahí. */
-function resumirDetalle(detalle: Record<string, unknown>): string {
-  const partes = Object.entries(detalle).map(
-    ([clave, valor]) =>
-      `${clave.replaceAll('_', ' ')}: ${formatearValor(valor)}`,
-  )
-  return partes.length > 0 ? partes.join(' · ') : 'Sin detalle'
 }
 
 interface SecurityPanelProps {
@@ -115,10 +83,24 @@ export function SecurityPanel({ alertas, cargado, error }: SecurityPanelProps) {
                     </span>
                   </p>
                   <p className="security__detail">
-                    {alerta.ip_origen && `${alerta.ip_origen} · `}
-                    {resumirDetalle(alerta.detalle)} ·{' '}
-                    {etiquetaAccion(alerta.accion)}
+                    {alerta.ip_origen ?? 'Origen desconocido'} ·{' '}
+                    {etiquetaAccionDeAlerta(alerta)}
                   </p>
+
+                  <details className="security__details">
+                    <summary>¿Qué pasó?</summary>
+                    <div className="security__explicacion">
+                      <p>{explicacionDeAlerta(alerta)}</p>
+                      <dl className="security__datos">
+                        {datosDeAlerta(alerta).map((dato) => (
+                          <div key={dato.etiqueta}>
+                            <dt>{dato.etiqueta}</dt>
+                            <dd>{dato.valor}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  </details>
                 </div>
                 <TiempoRelativo className="security__time" ts={alerta.ts} />
               </li>

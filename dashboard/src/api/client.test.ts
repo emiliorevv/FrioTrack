@@ -291,6 +291,7 @@ describe('obtenerAlertasSeguridad', () => {
       ventana_s: 300,
     },
     accion: 'bloquear_ip',
+    descripcion: 'Descripción del backend',
   }
 
   it('pide las alertas del detector y las tipa', async () => {

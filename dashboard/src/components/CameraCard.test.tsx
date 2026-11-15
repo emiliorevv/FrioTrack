@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Camara } from '../types'
 import { CameraCard } from './CameraCard'
@@ -13,6 +13,7 @@ const camaraSinLecturas: Camara = {
   estado: 'en_rango',
   ultima_lectura: null,
   valor_en_riesgo_mxn: 0,
+  valor_inventario_mxn: 12500,
 }
 
 const camaraConLectura: Camara = {
@@ -53,5 +54,30 @@ describe('CameraCard', () => {
     render(<CameraCard camara={camaraConLectura} serie={[3, 3.1]} />)
 
     expect(screen.getByText('hace 5 s')).toBeInTheDocument()
+  })
+
+  it('muestra el inventario junto a las demás métricas', () => {
+    render(<CameraCard camara={camaraSinLecturas} serie={[]} />)
+
+    const metrica = screen.getByText('Inventario').closest('div')
+    expect(metrica).not.toBeNull()
+    expect(
+      within(metrica as HTMLElement).getByText('$12,500'),
+    ).toBeInTheDocument()
+  })
+
+  it('muestra “Sin dato” si la API vieja no manda valor_inventario_mxn', () => {
+    const sinInventario = {
+      ...camaraSinLecturas,
+      valor_inventario_mxn: undefined,
+    }
+
+    render(<CameraCard camara={sinInventario} serie={[]} />)
+
+    const metrica = screen.getByText('Inventario').closest('div')
+    expect(metrica).not.toBeNull()
+    expect(
+      within(metrica as HTMLElement).getByText('Sin dato'),
+    ).toBeInTheDocument()
   })
 })

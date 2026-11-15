@@ -141,6 +141,17 @@ function App({ usuario, rol, onLogout }: AppProps) {
                 <div>
                   <h2 id="resumen-title">Resumen de hoy</h2>
                   <p>Últimas 24 horas · turno de comida</p>
+                  <details className="explicacion">
+                    <summary>¿Qué es esto?</summary>
+                    <div className="explicacion__cuerpo">
+                      <p>
+                        El % en rango cubre las últimas 24 horas. Las alertas
+                        activas y el valor en riesgo son del momento actual. El
+                        tiempo de respuesta es el promedio de las alertas ya
+                        atendidas. La merma es de hoy y del mes en curso.
+                      </p>
+                    </div>
+                  </details>
                 </div>
               </div>
               {kpis && <KpiStrip kpis={kpis} />}
