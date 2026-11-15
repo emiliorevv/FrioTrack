@@ -17,7 +17,7 @@ La rúbrica pide una regla SIEM estructurada con condición, umbral, severidad y
 |---|---|---|---|---|
 | Fuerza bruta de tokens | Respuestas `401` o `403` en `/api/telemetria` desde la misma IP | 10 o más en 5 minutos | Alta | Bloquear la IP 1 hora y avisar |
 | Token de sensor desde IP desconocida | `credencial = sensor` con `ip_origen` fuera de la lista del restaurante | 1 evento | Alta | Revocar el token y avisar |
-| Lecturas imposibles | Cambio de temperatura de más de 8 °C en menos de 1 minuto en la misma cámara | 1 evento | Media | Marcar las lecturas como sospechosas y avisar |
+| Lecturas imposibles | Cambio de temperatura de más de 8 °C en 60 segundos o menos en la misma cámara | 1 evento | Media | Marcar las lecturas como sospechosas y avisar |
 
 Ejemplo de la primera en Sigma (la versión final va en `security/siem/`):
 
