@@ -1,4 +1,5 @@
-import type { Camara, Health, Kpis, Lectura } from '../types'
+import type { AlertaSeguridad, Camara, Health, Kpis, Lectura } from '../types'
+import { esObjeto } from '../lib/validacion'
 import { resolverApiUrl } from './url'
 
 const TIEMPO_LIMITE_MS = 10_000
@@ -116,4 +117,68 @@ export function obtenerLecturas(
   senal?: AbortSignal,
 ): Promise<Lectura[]> {
   return pedir<Lectura[]>(`/camaras/${camaraId}/lecturas`, { signal: senal })
+}
+
+/**
+ * Alertas del detector SIEM.
+ *
+ * El backend guarda `severidad` y `accion` como strings libres: se conservan
+ * tal cual y el panel decide la etiqueta (con fallback). Si la respuesta no
+ * es un arreglo se lanza para que el hook conserve las alertas anteriores.
+ */
+export async function obtenerAlertasSeguridad(
+  senal?: AbortSignal,
+): Promise<AlertaSeguridad[]> {
+  const datos = await pedir<unknown>('/seguridad/alertas', { signal: senal })
+
+  if (!Array.isArray(datos)) {
+    throw new Error(
+      'La API devolvió un formato inesperado para las alertas de seguridad.',
+    )
+  }
+
+  return datos
+    .map(normalizarAlertaSeguridad)
+    .filter((alerta): alerta is AlertaSeguridad => alerta !== null)
+}
+
+function normalizarAlertaSeguridad(valor: unknown): AlertaSeguridad | null {
+  if (!esObjeto(valor)) {
+    return null
+  }
+
+  const {
+    id,
+    regla_id: reglaId,
+    regla,
+    severidad,
+    ts,
+    ip_origen: ipOrigen,
+    detalle,
+    accion,
+  } = valor
+
+  if (
+    typeof id !== 'number' ||
+    typeof reglaId !== 'string' ||
+    typeof regla !== 'string' ||
+    typeof severidad !== 'string' ||
+    typeof ts !== 'string' ||
+    !esObjeto(detalle) ||
+    typeof accion !== 'string'
+  ) {
+    return null
+  }
+
+  return {
+    id,
+    regla_id: reglaId,
+    regla,
+    severidad,
+    ts,
+    // El contrato permite null; una clave ausente también se normaliza a null.
+    ip_origen: typeof ipOrigen === 'string' ? ipOrigen : null,
+    detalle,
+    accion,
+  }
 }

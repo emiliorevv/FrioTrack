@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  obtenerAlertasSeguridad,
   obtenerCamaras,
   obtenerHealth,
   obtenerKpis,
@@ -9,6 +10,7 @@ import { parsearJson } from '../lib/sse'
 import { esObjeto } from '../lib/validacion'
 import { useStreamEvent, useStreamReconexion } from '../realtime/StreamProvider'
 import type {
+  AlertaSeguridad,
   Camara,
   EstadoCamara,
   Health,
@@ -31,6 +33,12 @@ export interface EstadoDashboard {
   health: Health | null
   camaras: Camara[]
   kpis: Kpis | null
+  /** Alertas del detector SIEM, en su propio carril. */
+  alertasSeguridad: AlertaSeguridad[]
+  /** `true` cuando la última carga de alertas terminó bien. */
+  alertasCargadas: boolean
+  /** Fallo del carril de alertas; no afecta cámaras ni KPIs. */
+  errorAlertas: string | null
   /** Temperaturas por cámara, de la más vieja a la más reciente. */
   series: Record<number, SerieCamara>
   /** Solo la primera carga (o un reintento sin datos) marca `true`. */
@@ -47,14 +55,20 @@ export interface EstadoDashboard {
 /**
  * Une la carga inicial de la API, el respaldo por polling y el stream SSE.
  *
- * Cada carril (resumen, series, health y, en el PR apilado, alertas) tiene su
- * propio `AbortController` e id: un evento de alerta no cancela el polling y
- * una respuesta vieja no pisa a otra más reciente.
+ * Cada carril (resumen, series, health y alertas) tiene su propio
+ * `AbortController` e id: un evento de alerta no cancela el polling, una
+ * respuesta lenta de seguridad no bloquea cámaras/KPIs y una respuesta vieja
+ * no pisa a otra más reciente.
  */
 export function useDashboard(): EstadoDashboard {
   const [health, setHealth] = useState<Health | null>(null)
   const [camaras, setCamaras] = useState<Camara[]>([])
   const [kpis, setKpis] = useState<Kpis | null>(null)
+  const [alertasSeguridad, setAlertasSeguridad] = useState<AlertaSeguridad[]>(
+    [],
+  )
+  const [alertasCargadas, setAlertasCargadas] = useState(false)
+  const [errorAlertas, setErrorAlertas] = useState<string | null>(null)
   const [puntosSeries, setPuntosSeries] = useState<
     Record<number, PuntoSerie[]>
   >({})
@@ -92,6 +106,10 @@ export function useDashboard(): EstadoDashboard {
   const healthControladorRef = useRef<AbortController | null>(null)
   const healthSolicitudRef = useRef(0)
   const healthRef = useRef<Health | null>(null)
+
+  // Carril de alertas: no comparte señal ni orden con cámaras/KPIs.
+  const alertasControladorRef = useRef<AbortController | null>(null)
+  const alertasSolicitudRef = useRef(0)
 
   const timerResumenRef = useRef<number | null>(null)
 
@@ -184,6 +202,34 @@ export function useDashboard(): EstadoDashboard {
       setHealth(salud)
     } catch {
       // Es opcional: solo controla la etiqueta de demo.
+    }
+  }, [])
+
+  const cargarAlertas = useCallback(async () => {
+    alertasControladorRef.current?.abort()
+    const controlador = new AbortController()
+    alertasControladorRef.current = controlador
+    alertasSolicitudRef.current += 1
+    const idSolicitud = alertasSolicitudRef.current
+
+    try {
+      const alertas = await obtenerAlertasSeguridad(controlador.signal)
+      if (!activoRef.current || alertasSolicitudRef.current !== idSolicitud) {
+        return
+      }
+      setAlertasSeguridad(alertas)
+      setAlertasCargadas(true)
+      setErrorAlertas(null)
+    } catch (fallo) {
+      if (
+        !activoRef.current ||
+        alertasSolicitudRef.current !== idSolicitud ||
+        esAbortado(fallo)
+      ) {
+        return
+      }
+      // Se conservan las alertas previas; el panel muestra el estado de error.
+      setErrorAlertas(mensajeDeError(fallo))
     }
   }, [])
 
@@ -322,9 +368,13 @@ export function useDashboard(): EstadoDashboard {
     void cargarResumen()
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void cargarHealth()
+    void cargarAlertas()
 
-    const intervalo = window.setInterval(() => {
+    const intervaloResumen = window.setInterval(() => {
       void cargarResumen()
+    }, INTERVALO_REFRESCO_MS)
+    const intervaloAlertas = window.setInterval(() => {
+      void cargarAlertas()
     }, INTERVALO_REFRESCO_MS)
 
     return () => {
@@ -333,13 +383,15 @@ export function useDashboard(): EstadoDashboard {
       resumenEventoControladorRef.current?.abort()
       seriesControladorRef.current?.abort()
       healthControladorRef.current?.abort()
-      window.clearInterval(intervalo)
+      alertasControladorRef.current?.abort()
+      window.clearInterval(intervaloResumen)
+      window.clearInterval(intervaloAlertas)
       if (timerResumenRef.current !== null) {
         window.clearTimeout(timerResumenRef.current)
         timerResumenRef.current = null
       }
     }
-  }, [cargarResumen, cargarHealth])
+  }, [cargarResumen, cargarHealth, cargarAlertas])
 
   const reconexiones = useStreamReconexion()
   const reconexionesPreviasRef = useRef(reconexiones)
@@ -419,8 +471,8 @@ export function useDashboard(): EstadoDashboard {
     if (!hayDatosRef.current) {
       setCargando(true)
     }
-    await Promise.all([cargarResumen(), cargarHealth()])
-  }, [cargarResumen, cargarHealth])
+    await Promise.all([cargarResumen(), cargarHealth(), cargarAlertas()])
+  }, [cargarResumen, cargarHealth, cargarAlertas])
 
   const series = useMemo(() => {
     const resultado: Record<number, SerieCamara> = {}
@@ -434,6 +486,9 @@ export function useDashboard(): EstadoDashboard {
     health,
     camaras,
     kpis,
+    alertasSeguridad,
+    alertasCargadas,
+    errorAlertas,
     series,
     cargando,
     errorResumen,

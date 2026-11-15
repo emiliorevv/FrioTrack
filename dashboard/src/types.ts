@@ -75,10 +75,10 @@ export interface Kpis {
   merma_mes_mxn: number
 }
 
-/** Misma forma que la tabla `alertas_seguridad` de docs/modelo-datos.md. */
+/** Valores conocidos de severidad; el backend puede guardar otros strings. */
 export type SeveridadSeguridad = 'low' | 'medium' | 'high' | 'critical'
 
-/** Acciones de respuesta que ejecuta el detector SIEM. */
+/** Acciones conocidas que ejecuta el detector SIEM. */
 export type AccionSeguridad =
   'bloquear_ip' | 'revocar_token' | 'marcar_lecturas'
 
@@ -88,12 +88,14 @@ export interface AlertaSeguridad {
   regla_id: string
   /** Título corto de la regla. */
   regla: string
-  severidad: SeveridadSeguridad
+  /** String libre del backend; el panel usa “Desconocida” si no la conoce. */
+  severidad: string
   ts: string
   ip_origen: string | null
   /** Conteos, sensor y lecturas involucradas. */
   detalle: Record<string, unknown>
-  accion: AccionSeguridad
+  /** String libre del backend; el panel usa “Sin acción” si no la conoce. */
+  accion: string
 }
 
 export const TIPOS_NOTIFICACION = [

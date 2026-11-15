@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ErrorApi,
+  obtenerAlertasSeguridad,
   obtenerCamaras,
   obtenerHealth,
   obtenerKpis,
@@ -155,5 +156,66 @@ describe('pedir', () => {
 
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toContain('tardó más de 10 s')
+  })
+})
+
+describe('obtenerAlertasSeguridad', () => {
+  const alerta = {
+    id: 1,
+    regla_id: '3b8e2f6a-9c41-4d7e-8a15-2f6c0d9e7b41',
+    regla: 'Fuerza bruta de tokens',
+    severidad: 'high',
+    ts: '2026-11-14T23:30:25+00:00',
+    ip_origen: '192.168.0.4',
+    detalle: {
+      clave: 'ip:192.168.0.4',
+      rutas: ['/api/telemetria'],
+      intentos: 15,
+      ventana_s: 300,
+    },
+    accion: 'bloquear_ip',
+  }
+
+  it('pide las alertas del detector y las tipa', async () => {
+    fetchFalso.mockResolvedValue(respuesta([alerta]))
+
+    await expect(obtenerAlertasSeguridad()).resolves.toEqual([alerta])
+    expect(fetchFalso).toHaveBeenCalledWith(
+      `${BASE}/seguridad/alertas`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('conserva severidades y acciones desconocidas y normaliza ip_origen ausente', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta([
+        alerta,
+        {
+          ...alerta,
+          id: 2,
+          severidad: 'informational',
+          ip_origen: undefined,
+        },
+        { ...alerta, id: 3, accion: 'notificar' },
+        null,
+      ]),
+    )
+
+    const alertas = await obtenerAlertasSeguridad()
+
+    expect(alertas.map((item) => item.id)).toEqual([1, 2, 3])
+    expect(alertas[1]).toMatchObject({
+      severidad: 'informational',
+      ip_origen: null,
+    })
+    expect(alertas[2].accion).toBe('notificar')
+  })
+
+  it('lanza si la respuesta no es un arreglo para conservar las alertas previas', async () => {
+    fetchFalso.mockResolvedValue(respuesta({ detail: 'contrato roto' }))
+
+    await expect(obtenerAlertasSeguridad()).rejects.toThrow(
+      /formato inesperado/,
+    )
   })
 })

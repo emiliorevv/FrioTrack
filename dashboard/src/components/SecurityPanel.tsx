@@ -27,6 +27,22 @@ const ETIQUETA_ACCION: Record<AccionSeguridad, string> = {
   marcar_lecturas: 'Lecturas marcadas',
 }
 
+/**
+ * El backend guarda strings libres. Los conocidos se etiquetan aquí; el
+ * resto cae al fallback para no romper el render.
+ */
+function etiquetaSeveridad(valor: string): string {
+  return (ETIQUETA_SEVERIDAD as Record<string, string>)[valor] ?? 'Desconocida'
+}
+
+function tonoSeveridad(valor: string): TonoSeguridad {
+  return (TONO_SEVERIDAD as Record<string, TonoSeguridad>)[valor] ?? 'neutral'
+}
+
+function etiquetaAccion(valor: string): string {
+  return (ETIQUETA_ACCION as Record<string, string>)[valor] ?? 'Sin acción'
+}
+
 function formatearValor(valor: unknown): string {
   if (Array.isArray(valor)) {
     return valor.map((item) => String(item)).join(', ')
@@ -48,11 +64,19 @@ function resumirDetalle(detalle: Record<string, unknown>): string {
 
 interface SecurityPanelProps {
   alertas: AlertaSeguridad[]
-  /** Aclaración visible, por ejemplo mientras el detector SIEM no existe. */
-  nota?: string
+  /** `false` mientras no termina la primera carga. */
+  cargado: boolean
+  /** Fallo del carril de alertas; puede convivir con alertas previas. */
+  error: string | null
 }
 
-export function SecurityPanel({ alertas, nota }: SecurityPanelProps) {
+export function SecurityPanel({ alertas, cargado, error }: SecurityPanelProps) {
+  const mensajeVacio = error
+    ? 'No se pudieron cargar las alertas del detector.'
+    : cargado
+      ? 'Sin alertas del detector.'
+      : 'Cargando alertas del detector…'
+
   return (
     <section className="security" aria-labelledby="seguridad-title">
       <div className="section-heading">
@@ -63,36 +87,45 @@ export function SecurityPanel({ alertas, nota }: SecurityPanelProps) {
         <span className="tag">SIEM</span>
       </div>
 
-      {nota && <p className="security__nota">{nota}</p>}
+      {error && alertas.length > 0 && (
+        <p className="security__aviso">
+          No se pudieron actualizar las alertas; mostrando las últimas
+          conocidas.
+        </p>
+      )}
 
-      <ul className="security__list">
-        {alertas.map((alerta) => {
-          const tono = TONO_SEVERIDAD[alerta.severidad]
+      {alertas.length === 0 ? (
+        <p className="security__empty">{mensajeVacio}</p>
+      ) : (
+        <ul className="security__list">
+          {alertas.map((alerta) => {
+            const tono = tonoSeveridad(alerta.severidad)
 
-          return (
-            <li className="security__item" key={alerta.id}>
-              <span
-                className={`security__dot security__dot--${tono}`}
-                aria-hidden="true"
-              />
-              <div className="security__body">
-                <p className="security__title">
-                  {alerta.regla}
-                  <span className={`tag tag--${tono}`}>
-                    {ETIQUETA_SEVERIDAD[alerta.severidad]}
-                  </span>
-                </p>
-                <p className="security__detail">
-                  {alerta.ip_origen && `${alerta.ip_origen} · `}
-                  {resumirDetalle(alerta.detalle)} ·{' '}
-                  {ETIQUETA_ACCION[alerta.accion]}
-                </p>
-              </div>
-              <TiempoRelativo className="security__time" ts={alerta.ts} />
-            </li>
-          )
-        })}
-      </ul>
+            return (
+              <li className="security__item" key={alerta.id}>
+                <span
+                  className={`security__dot security__dot--${tono}`}
+                  aria-hidden="true"
+                />
+                <div className="security__body">
+                  <p className="security__title">
+                    {alerta.regla}
+                    <span className={`tag tag--${tono}`}>
+                      {etiquetaSeveridad(alerta.severidad)}
+                    </span>
+                  </p>
+                  <p className="security__detail">
+                    {alerta.ip_origen && `${alerta.ip_origen} · `}
+                    {resumirDetalle(alerta.detalle)} ·{' '}
+                    {etiquetaAccion(alerta.accion)}
+                  </p>
+                </div>
+                <TiempoRelativo className="security__time" ts={alerta.ts} />
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </section>
   )
 }
