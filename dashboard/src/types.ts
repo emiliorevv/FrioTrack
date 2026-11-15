@@ -98,6 +98,20 @@ export interface AlertaSeguridad {
   accion: string
 }
 
+/** Alerta operativa de `GET /alertas` y de los eventos del stream. */
+export interface AlertaOperativa {
+  id: number
+  camara_id: number
+  /** `temperatura` o `puerta`; el backend guarda string. */
+  tipo: string
+  abierta_en: string
+  cerrada_en: string | null
+  /** Usuario del seed (`jefe`) mientras no hay auth/JWT. */
+  atendida_por: number | null
+  temperatura_max_c: number | null
+  sms_enviados: number
+}
+
 export const TIPOS_NOTIFICACION = [
   'alerta_temperatura',
   'alerta_puerta',

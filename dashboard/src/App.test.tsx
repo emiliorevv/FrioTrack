@@ -1,6 +1,15 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  atenderAlerta,
+  obtenerAlertasActivas,
   obtenerAlertasSeguridad,
   obtenerCamaras,
   obtenerHealth,
@@ -9,9 +18,17 @@ import {
 } from './api/client'
 import App from './App'
 import { useStreamEvent } from './realtime/StreamProvider'
-import type { AlertaSeguridad, Camara, Kpis, Lectura } from './types'
+import type {
+  AlertaOperativa,
+  AlertaSeguridad,
+  Camara,
+  Kpis,
+  Lectura,
+} from './types'
 
 vi.mock('./api/client', () => ({
+  atenderAlerta: vi.fn(),
+  obtenerAlertasActivas: vi.fn(),
   obtenerAlertasSeguridad: vi.fn(),
   obtenerHealth: vi.fn(),
   obtenerCamaras: vi.fn(),
@@ -51,6 +68,17 @@ const alertaSeguridad: AlertaSeguridad = {
     ventana_s: 300,
   },
   accion: 'bloquear_ip',
+}
+
+const alertaOperativa: AlertaOperativa = {
+  id: 31,
+  camara_id: 1,
+  tipo: 'temperatura',
+  abierta_en: new Date().toISOString(),
+  cerrada_en: null,
+  atendida_por: null,
+  temperatura_max_c: 3.4,
+  sms_enviados: 1,
 }
 
 function crearCamaras(): Camara[] {
@@ -165,6 +193,11 @@ beforeEach(() => {
   vi.mocked(obtenerCamaras).mockResolvedValue(crearCamaras())
   vi.mocked(obtenerKpis).mockResolvedValue(kpis)
   vi.mocked(obtenerAlertasSeguridad).mockResolvedValue([alertaSeguridad])
+  vi.mocked(obtenerAlertasActivas).mockResolvedValue([alertaOperativa])
+  vi.mocked(atenderAlerta).mockResolvedValue({
+    ...alertaOperativa,
+    atendida_por: 3,
+  })
   vi.mocked(obtenerLecturas).mockImplementation(async (id) => crearSerie(id))
 })
 
@@ -179,7 +212,7 @@ describe('vista general', () => {
     expect(await screen.findAllByRole('article')).toHaveLength(5)
     expect(screen.getByText('97.3%')).toBeInTheDocument()
     expect(screen.getByText('6.5 min')).toBeInTheDocument()
-    expect(screen.getByText('Alertas activas')).toBeInTheDocument()
+    expect(screen.getAllByText('Alertas activas').length).toBeGreaterThan(0)
     expect(screen.getByText('Valor en riesgo')).toBeInTheDocument()
     expect(screen.getByText('$1,720')).toBeInTheDocument()
     expect(
@@ -305,6 +338,45 @@ describe('vista general', () => {
       await screen.findByText('Sin alertas del detector.'),
     ).toBeInTheDocument()
     expect(screen.queryByText(/Datos de ejemplo/)).not.toBeInTheDocument()
+  })
+
+  it('muestra la sección de alertas activas con la alerta de la API', async () => {
+    render(<App />)
+    await screen.findAllByRole('article')
+
+    const seccion = screen.getByRole('region', { name: /Alertas activas/ })
+    expect(
+      await within(seccion).findByRole('button', { name: 'Atender' }),
+    ).toBeEnabled()
+    expect(within(seccion).getByText('Pescados y mariscos')).toBeInTheDocument()
+    expect(within(seccion).getByText('Temperatura')).toBeInTheDocument()
+    expect(within(seccion).getByText(/Máx\. 3\.4 °C/)).toBeInTheDocument()
+  })
+
+  it('atiende desde la sección y marca la alerta como atendida', async () => {
+    render(<App />)
+    await screen.findAllByRole('article')
+
+    const seccion = screen.getByRole('region', { name: /Alertas activas/ })
+    fireEvent.click(
+      await within(seccion).findByRole('button', { name: 'Atender' }),
+    )
+
+    await waitFor(() => {
+      expect(
+        within(seccion).getByRole('button', { name: 'Atendida' }),
+      ).toBeDisabled()
+    })
+    expect(atenderAlerta).toHaveBeenCalledWith(31, undefined)
+  })
+
+  it('muestra el estado vacío de alertas activas', async () => {
+    vi.mocked(obtenerAlertasActivas).mockResolvedValueOnce([])
+
+    render(<App />)
+    await screen.findAllByRole('article')
+
+    expect(await screen.findByText('Sin alertas activas')).toBeInTheDocument()
   })
 
   it('muestra el skeleton mientras no llega la primera respuesta', () => {

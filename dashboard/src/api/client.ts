@@ -1,4 +1,11 @@
-import type { AlertaSeguridad, Camara, Health, Kpis, Lectura } from '../types'
+import type {
+  AlertaOperativa,
+  AlertaSeguridad,
+  Camara,
+  Health,
+  Kpis,
+  Lectura,
+} from '../types'
 import { esObjeto } from '../lib/validacion'
 import { resolverApiUrl } from './url'
 
@@ -117,6 +124,84 @@ export function obtenerLecturas(
   senal?: AbortSignal,
 ): Promise<Lectura[]> {
   return pedir<Lectura[]>(`/camaras/${camaraId}/lecturas`, { signal: senal })
+}
+
+/** Alertas operativas que siguen abiertas (`GET /alertas?activas=true`). */
+export async function obtenerAlertasActivas(
+  senal?: AbortSignal,
+): Promise<AlertaOperativa[]> {
+  const datos = await pedir<unknown>('/alertas?activas=true&limite=200', {
+    signal: senal,
+  })
+
+  if (!Array.isArray(datos)) {
+    throw new Error(
+      'La API devolvió un formato inesperado para las alertas activas.',
+    )
+  }
+
+  return datos
+    .map(normalizarAlertaOperativa)
+    .filter((alerta): alerta is AlertaOperativa => alerta !== null)
+}
+
+/**
+ * Marca una alerta como atendida. El backend responde 409 si ya está cerrada;
+ * el hook usa ese status para refrescar la lista en vez de romper.
+ */
+export async function atenderAlerta(
+  id: number,
+  nota?: string,
+): Promise<AlertaOperativa> {
+  const datos = await pedir<unknown>(`/alertas/${id}/atender`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nota: nota ?? null }),
+  })
+
+  const alerta = normalizarAlertaOperativa(datos)
+  if (!alerta) {
+    throw new Error('La API devolvió una alerta operativa inválida.')
+  }
+  return alerta
+}
+
+function normalizarAlertaOperativa(valor: unknown): AlertaOperativa | null {
+  if (!esObjeto(valor)) {
+    return null
+  }
+
+  const {
+    id,
+    camara_id: camaraId,
+    tipo,
+    abierta_en: abiertaEn,
+    cerrada_en: cerradaEn,
+    atendida_por: atendidaPor,
+    temperatura_max_c: temperaturaMax,
+    sms_enviados: smsEnviados,
+  } = valor
+
+  if (
+    typeof id !== 'number' ||
+    typeof camaraId !== 'number' ||
+    typeof tipo !== 'string' ||
+    typeof abiertaEn !== 'string'
+  ) {
+    return null
+  }
+
+  return {
+    id,
+    camara_id: camaraId,
+    tipo,
+    abierta_en: abiertaEn,
+    cerrada_en: typeof cerradaEn === 'string' ? cerradaEn : null,
+    atendida_por: typeof atendidaPor === 'number' ? atendidaPor : null,
+    temperatura_max_c:
+      typeof temperaturaMax === 'number' ? temperaturaMax : null,
+    sms_enviados: typeof smsEnviados === 'number' ? smsEnviados : 0,
+  }
 }
 
 /**
