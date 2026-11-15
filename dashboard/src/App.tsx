@@ -90,6 +90,7 @@ function App({ usuario, rol, onLogout }: AppProps) {
 
   const equiposEnAlerta = conteos.alerta + conteos.critica
   const sinDatos = camaras.length === 0 && kpis === null
+  const mostrarBienvenida = camaras.length === 0 && !cargando && !errorResumen
   const actualizadoEn = fechaMasReciente(ultimoExitoHttp, ultimaActividadSse)
 
   return (
@@ -134,7 +135,9 @@ function App({ usuario, rol, onLogout }: AppProps) {
               />
             )}
 
-            <OnboardingBanner />
+            {camaras.length > 0 && <OnboardingBanner />}
+
+            {mostrarBienvenida && <BienvenidaRestaurante />}
 
             <section className="section" aria-labelledby="resumen-title">
               <div className="section-heading">
@@ -179,14 +182,16 @@ function App({ usuario, rol, onLogout }: AppProps) {
                 </div>
               </div>
 
-              <FilterBar
-                filtro={filtro}
-                onFiltro={setFiltro}
-                busqueda={busqueda}
-                onBusqueda={setBusqueda}
-                conteos={conteos}
-                visibles={camarasFiltradas.length}
-              />
+              {camaras.length > 0 && (
+                <FilterBar
+                  filtro={filtro}
+                  onFiltro={setFiltro}
+                  busqueda={busqueda}
+                  onBusqueda={setBusqueda}
+                  conteos={conteos}
+                  visibles={camarasFiltradas.length}
+                />
+              )}
 
               {camarasFiltradas.length > 0 ? (
                 <div className="camera-grid">
@@ -198,12 +203,12 @@ function App({ usuario, rol, onLogout }: AppProps) {
                     />
                   ))}
                 </div>
-              ) : (
+              ) : camaras.length > 0 ? (
                 <p className="empty-state">
-                  {camaras.length === 0
-                    ? 'Todavía no hay cámaras registradas.'
-                    : 'No hay cámaras que coincidan con el filtro.'}
+                  No hay cámaras que coincidan con el filtro.
                 </p>
+              ) : (
+                <p className="empty-state">Aquí aparecerán tus cámaras.</p>
               )}
             </section>
 
@@ -230,6 +235,82 @@ function App({ usuario, rol, onLogout }: AppProps) {
         />
       )}
     </div>
+  )
+}
+
+/** Estado vacío de un restaurante recién creado: guía los primeros pasos. */
+function BienvenidaRestaurante() {
+  return (
+    <section className="bienvenida" aria-labelledby="bienvenida-title">
+      <p className="bienvenida__eyebrow">Primeros pasos</p>
+      <h2 className="bienvenida__title" id="bienvenida-title">
+        Tu restaurante está listo
+      </h2>
+      <p className="bienvenida__text">
+        Aún no tienes cámaras. El siguiente paso es agregar la primera y
+        conectar su sensor.
+      </p>
+
+      <ol className="bienvenida__pasos">
+        <li className="bienvenida__paso bienvenida__paso--hecho">
+          <span className="bienvenida__numero" aria-hidden="true">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m5 13 4 4L19 7" />
+            </svg>
+          </span>
+          <span className="bienvenida__paso-texto">
+            <span className="bienvenida__paso-titulo">Crea tu restaurante</span>
+            <span className="bienvenida__paso-estado">Completado</span>
+          </span>
+        </li>
+
+        <li
+          className="bienvenida__paso bienvenida__paso--siguiente"
+          aria-current="step"
+        >
+          <span className="bienvenida__numero" aria-hidden="true">
+            2
+          </span>
+          <span className="bienvenida__paso-texto">
+            <span className="bienvenida__paso-titulo">Agrega una cámara</span>
+            <span className="bienvenida__paso-estado">Siguiente</span>
+          </span>
+        </li>
+
+        <li className="bienvenida__paso">
+          <span className="bienvenida__numero" aria-hidden="true">
+            3
+          </span>
+          <span className="bienvenida__paso-texto">
+            <span className="bienvenida__paso-titulo">Conecta el sensor</span>
+            <span className="bienvenida__paso-estado">Después</span>
+          </span>
+        </li>
+      </ol>
+
+      <div className="bienvenida__accion">
+        <button
+          type="button"
+          className="bienvenida__boton"
+          disabled
+          aria-describedby="bienvenida-nota"
+        >
+          Agregar cámara
+        </button>
+        <p className="bienvenida__nota" id="bienvenida-nota">
+          Disponible en la siguiente actualización
+        </p>
+      </div>
+    </section>
   )
 }
 

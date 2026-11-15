@@ -327,6 +327,64 @@ describe('vista general', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('muestra la bienvenida y el botón deshabilitado en un restaurante sin cámaras', async () => {
+    vi.mocked(obtenerCamaras).mockResolvedValueOnce([])
+
+    renderizarApp()
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Tu restaurante está listo',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Aún no tienes cámaras. El siguiente paso es agregar la primera y conectar su sensor.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Crea tu restaurante')).toBeInTheDocument()
+    expect(screen.getByText('Agrega una cámara')).toBeInTheDocument()
+    expect(screen.getByText('Conecta el sensor')).toBeInTheDocument()
+    expect(screen.getByText('Completado')).toBeInTheDocument()
+    expect(screen.getByText('Siguiente')).toBeInTheDocument()
+    expect(screen.getByText('Después')).toBeInTheDocument()
+
+    const boton = screen.getByRole('button', { name: 'Agregar cámara' })
+    expect(boton).toBeDisabled()
+    expect(
+      screen.getByText('Disponible en la siguiente actualización'),
+    ).toBeInTheDocument()
+
+    expect(
+      screen.queryByText(/FríoTrack vigila tus cámaras/),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Todavía no hay cámaras registradas.'),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText('Aquí aparecerán tus cámaras.')).toBeInTheDocument()
+  })
+
+  it('no muestra la bienvenida cuando el restaurante ya tiene cámaras', async () => {
+    renderizarApp()
+    await screen.findAllByRole('article')
+
+    expect(
+      screen.queryByRole('heading', { name: 'Tu restaurante está listo' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('el dueño ve su rol y puede atender alertas', async () => {
+    renderizarApp({ usuario: 'dueno-nuevo', rol: 'dueno' })
+    await screen.findAllByRole('article')
+
+    expect(screen.getByText('Dueño')).toBeInTheDocument()
+
+    const seccion = screen.getByRole('region', { name: /Alertas activas/ })
+    expect(
+      await within(seccion).findByRole('button', { name: 'Atender' }),
+    ).toBeEnabled()
+  })
+
   it('el estado crítico se anuncia en texto y con estilo propio', async () => {
     renderizarApp()
     await screen.findAllByRole('article')

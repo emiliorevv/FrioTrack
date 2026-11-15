@@ -8,7 +8,12 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { ErrorApi, iniciarSesion } from '../api/client'
+import {
+  ErrorApi,
+  iniciarSesion,
+  registrar as registrarApi,
+  type RespuestaLogin,
+} from '../api/client'
 import { decodificarJwt } from './jwt'
 import { leerTokenGuardado, setToken, suscribirNoAutorizado } from './token'
 
@@ -21,11 +26,19 @@ interface Sesion {
 }
 
 interface BaseAuth {
-  /** `true` mientras se procesa el login. */
+  /** `true` mientras se procesa el login o el registro. */
   cargando: boolean
   error: string | null
   login: (usuario: string, password: string) => Promise<boolean>
+  /** Crea restaurante y dueño; con éxito deja la sesión iniciada. */
+  registro: (
+    restaurante: string,
+    usuario: string,
+    password: string,
+  ) => Promise<boolean>
   logout: () => void
+  /** Limpia el error al cambiar de pestaña del formulario. */
+  limpiarError: () => void
 }
 
 export interface Autenticado extends BaseAuth {
@@ -78,33 +91,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const login = useCallback(async (usuario: string, password: string) => {
-    setCargando(true)
-    setError(null)
+  const aplicarSesion = useCallback((respuesta: RespuestaLogin): boolean => {
+    const payload = decodificarJwt(respuesta.access_token)
 
-    try {
-      const respuesta = await iniciarSesion(usuario, password)
-      const payload = decodificarJwt(respuesta.access_token)
-
-      if (!payload || payload.exp * 1000 <= Date.now()) {
-        setError('La sesión recibida no es válida. Intenta de nuevo.')
-        return false
-      }
-
-      setToken(respuesta.access_token)
-      setSesion({
-        token: respuesta.access_token,
-        usuario: payload.usuario,
-        rol: payload.rol,
-        exp: payload.exp,
-      })
-      return true
-    } catch (fallo) {
-      setError(mensajeDeLogin(fallo))
+    if (!payload || payload.exp * 1000 <= Date.now()) {
+      setError('La sesión recibida no es válida. Intenta de nuevo.')
       return false
-    } finally {
-      setCargando(false)
     }
+
+    setToken(respuesta.access_token)
+    setSesion({
+      token: respuesta.access_token,
+      usuario: payload.usuario,
+      rol: payload.rol,
+      exp: payload.exp,
+    })
+    return true
+  }, [])
+
+  const login = useCallback(
+    async (usuario: string, password: string) => {
+      setCargando(true)
+      setError(null)
+
+      try {
+        const respuesta = await iniciarSesion(usuario, password)
+        return aplicarSesion(respuesta)
+      } catch (fallo) {
+        setError(mensajeDeLogin(fallo))
+        return false
+      } finally {
+        setCargando(false)
+      }
+    },
+    [aplicarSesion],
+  )
+
+  const registro = useCallback(
+    async (restaurante: string, usuario: string, password: string) => {
+      setCargando(true)
+      setError(null)
+
+      try {
+        const respuesta = await registrarApi(restaurante, usuario, password)
+        return aplicarSesion(respuesta)
+      } catch (fallo) {
+        setError(mensajeDeRegistro(fallo))
+        return false
+      } finally {
+        setCargando(false)
+      }
+    },
+    [aplicarSesion],
+  )
+
+  const limpiarError = useCallback(() => {
+    setError(null)
   }, [])
 
   const logout = useCallback(() => {
@@ -141,7 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [logout])
 
   const valor = useMemo<ContextoAuth>(() => {
-    const base = { cargando, error, login, logout }
+    const base = { cargando, error, login, registro, logout, limpiarError }
     return sesion
       ? {
           ...base,
@@ -150,7 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           rol: sesion.rol,
         }
       : { ...base, token: null, usuario: null, rol: null }
-  }, [sesion, cargando, error, login, logout])
+  }, [sesion, cargando, error, login, registro, logout, limpiarError])
 
   return <AuthContext.Provider value={valor}>{children}</AuthContext.Provider>
 }
@@ -177,4 +219,24 @@ function mensajeDeLogin(fallo: unknown): string {
     return fallo.detalle ?? 'No se pudo iniciar sesión.'
   }
   return 'No se pudo iniciar sesión. Revisa tu conexión.'
+}
+
+function mensajeDeRegistro(fallo: unknown): string {
+  if (fallo instanceof ErrorApi) {
+    if (fallo.status === 409) {
+      return 'No se pudo completar el registro. Revisa los datos o prueba con otro usuario.'
+    }
+    if (fallo.status === 422) {
+      return 'Revisa los datos: usuario mínimo 3 caracteres y contraseña mínimo 8.'
+    }
+    if (fallo.status === 429) {
+      const base = 'Demasiados registros desde esta red.'
+      return fallo.retryAfterSegundos !== null
+        ? `${base} Intenta de nuevo en ${fallo.retryAfterSegundos} s.`
+        : `${base} Intenta de nuevo más tarde.`
+    }
+    // Sin detalles técnicos del backend: el alta solo necesita una salida clara.
+    return 'No se pudo crear la cuenta. Intenta de nuevo.'
+  }
+  return 'No se pudo crear la cuenta. Revisa tu conexión e intenta de nuevo.'
 }
