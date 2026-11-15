@@ -2,12 +2,18 @@
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy.engine import make_url
 
 RUTA_BASELINE = (
     Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0001_esquema_inicial.py"
+)
+URL_SUPABASE = (
+    "postgresql+psycopg://postgres:secreta"
+    "@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
 )
 
 
@@ -19,17 +25,39 @@ def _cargar_baseline() -> Any:
     return modulo
 
 
-def test_downgrade_del_baseline_falla_en_render(monkeypatch):
-    monkeypatch.setenv("RENDER", "1")
-    monkeypatch.setenv("ENTORNO", "local")
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql+psycopg://postgres@localhost:5432/friotrack",
+        "postgresql+psycopg://postgres@127.0.0.1:5432/friotrack",
+        "postgresql+psycopg://postgres@[::1]:5432/friotrack",
+        "postgresql+psycopg://postgres@/friotrack?host=/tmp",
+    ],
+)
+def test_puede_degradar_baseline_acepta_destinos_locales(url, monkeypatch):
+    monkeypatch.delenv("PERMITIR_DOWNGRADE_BASELINE", raising=False)
 
-    with pytest.raises(RuntimeError, match="borraría todas las tablas"):
-        _cargar_baseline().downgrade()
+    assert _cargar_baseline().puede_degradar_baseline(url) is True
 
 
-def test_downgrade_del_baseline_falla_fuera_de_local(monkeypatch):
-    monkeypatch.delenv("RENDER", raising=False)
-    monkeypatch.setenv("ENTORNO", "produccion")
+def test_puede_degradar_baseline_rechaza_supabase(monkeypatch):
+    monkeypatch.delenv("PERMITIR_DOWNGRADE_BASELINE", raising=False)
 
-    with pytest.raises(RuntimeError, match="borraría todas las tablas"):
-        _cargar_baseline().downgrade()
+    assert _cargar_baseline().puede_degradar_baseline(URL_SUPABASE) is False
+
+
+def test_puede_degradar_baseline_acepta_opt_in(monkeypatch):
+    monkeypatch.setenv("PERMITIR_DOWNGRADE_BASELINE", "1")
+
+    assert _cargar_baseline().puede_degradar_baseline(URL_SUPABASE) is True
+
+
+def test_downgrade_usa_la_url_del_bind(monkeypatch):
+    """El guard no se fía de ENTORNO local: mira el target real de la conexión."""
+    monkeypatch.delenv("PERMITIR_DOWNGRADE_BASELINE", raising=False)
+    modulo = _cargar_baseline()
+    bind = SimpleNamespace(engine=SimpleNamespace(url=make_url(URL_SUPABASE)))
+    monkeypatch.setattr(modulo, "op", SimpleNamespace(get_bind=lambda: bind))
+
+    with pytest.raises(RuntimeError, match="PERMITIR_DOWNGRADE_BASELINE"):
+        modulo.downgrade()

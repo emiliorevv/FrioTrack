@@ -7,17 +7,11 @@ Uso desde cualquier cwd:
     python -m app.db.init_db
 """
 
-from pathlib import Path
-
-from alembic.config import Config
-from alembic.migration import MigrationContext
-from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Engine
 
+from app.db.migrar import config_alembic, head, revision_actual
 from app.db.seed import cargar_seed
 from app.db.session import SessionLocal, get_engine
-
-RUTA_ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
 
 MENSAJE_FALTA_ESQUEMA = (
     "Falta el esquema o está desactualizado: ejecuta `python -m app.db.migrar` "
@@ -27,11 +21,8 @@ MENSAJE_FALTA_ESQUEMA = (
 
 def esquema_actualizado(engine: Engine) -> bool:
     """Indica si la base está en la última revisión de Alembic."""
-    config = Config(str(RUTA_ALEMBIC_INI))
-    head = ScriptDirectory.from_config(config).get_current_head()
-    with engine.connect() as conn:
-        actual = MigrationContext.configure(conn).get_current_revision()
-    return actual == head
+    config = config_alembic()
+    return revision_actual(engine) == head(config)
 
 
 def inicializar_db() -> bool:

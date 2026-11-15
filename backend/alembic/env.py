@@ -7,6 +7,7 @@ raíz con `alembic -c backend/alembic.ini`.
 
 from __future__ import annotations
 
+from logging.config import fileConfig
 from typing import Any
 
 import app.db.models  # noqa: F401  (registra las 9 tablas en Base.metadata)
@@ -16,6 +17,11 @@ from app.db.base import Base
 from app.db.session import crear_engine
 
 config = context.config
+
+# Usa los loggers de alembic.ini: así se ven "Running upgrade/stamp_revision".
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
+
 target_metadata = Base.metadata
 
 

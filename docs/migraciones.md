@@ -102,20 +102,24 @@ Reglas:
 ## CI
 
 El job `backend` de `.github/workflows/ci.yml` levanta un service `postgres:16`
-y, antes de pytest, ejecuta:
+y, antes de pytest, ejecuta el mismo entrypoint que Render:
 
 ```bash
-alembic upgrade head
+python -m app.db.migrar      # base vacía: aplica el baseline
+python -m app.db.migrar      # segunda vez: debe imprimir “Esquema al día”
 alembic check
-alembic downgrade base
+# base legada: tablas con create_all y sin alembic_version
+python -m app.db.migrar      # hace stamp, no DDL
+alembic current              # 0001 (head)
+alembic check
+alembic downgrade base       # permitido: el host del service es localhost
 alembic upgrade head
 ```
 
-Así cada PR valida que el baseline aplica desde cero, que no hay drift entre
-modelos y migraciones, y que el `downgrade` funciona. `ENTORNO=local` y
-`DATABASE_URL` se definen solo en ese step, así que pytest sigue sin conectarse a
-la base; además, el guard del baseline permite el `downgrade` porque CI corre en
-local.
+Así cada PR valida el entrypoint real de producción, que el baseline aplica
+desde cero, que no hay drift entre modelos y migraciones, y que el `downgrade`
+funciona. `ENTORNO=local` y `DATABASE_URL` se definen solo en ese step, así que
+pytest sigue sin conectarse a la base.
 
 ## Deploy en Render
 
@@ -131,6 +135,13 @@ head, imprime “Esquema al día” y sale sin `upgrade` ni DDL. Solo migra cuan
 falta la revisión o la base está vacía, y solo marca una base legada si el
 esquema coincide. Ese chequeo no llama a `validar_configuracion()`; la
 validación de producción sigue ocurriendo cuando arranca `app.main`.
+
+Si haces rollback de Render a un deploy que solo conoce `0001` y la base ya está
+en `0002`, el entrypoint detecta que la revisión aplicada no existe en ese código,
+imprime una advertencia (“La BD está en una revisión más nueva que este deploy”)
+y arranca la app **sin ejecutar DDL**, en vez de fallar con “Can't locate
+revision”. Un `alembic_version` sin fila pero con tablas también se trata como
+base legada (compara y marca), no como base vacía.
 
 Tradeoff de Free: cada cold start paga importar Python/modelos y una ida y
 vuelta a la base para confirmar que está al día, antes de que uvicorn pueda
@@ -157,8 +168,19 @@ devuelve la forma del esquema.
 
 > **Peligro con el baseline:** `alembic downgrade base` sobre `0001` borra las
 > 9 tablas y todos los datos. Nunca lo uses para “revertir un deploy” en
-> producción. El `downgrade()` del baseline se niega a correr si `RENDER` está
-> definido o si `ENTORNO` no es `local`; solo se permite en local/CI.
+> producción. El `downgrade()` del baseline mira el **target real** de la
+> conexión (`op.get_bind().engine.url`), no `ENTORNO` ni `RENDER`: solo se
+> permite si el host es local (`localhost`, `127.0.0.1`, `::1` o socket Unix)
+> **o** si defines `PERMITIR_DOWNGRADE_BASELINE=1`. Un portátil con
+> `ENTORNO=local` apuntando a Supabase también queda bloqueado.
+>
+> ```bash
+> # base local: pasa el guard
+> alembic downgrade base
+>
+> # base remota (por ejemplo Supabase): solo con opt-in explícito
+> PERMITIR_DOWNGRADE_BASELINE=1 alembic downgrade base
+> ```
 
 ## Probar migraciones en local sin Supabase
 
@@ -175,7 +197,7 @@ export DATABASE_URL='postgresql+psycopg://postgres@127.0.0.1:55432/friotrack'
 export ENTORNO=local
 .venv/bin/python -m app.db.migrar   # base vacía: aplica el baseline
 .venv/bin/alembic check
-.venv/bin/alembic downgrade base    # permitido solo con ENTORNO=local
+.venv/bin/alembic downgrade base    # permitido: el host es 127.0.0.1
 .venv/bin/alembic upgrade head
 
 pg_ctl -D "$TMP/data" stop

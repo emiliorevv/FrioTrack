@@ -57,8 +57,28 @@ jobs:
           DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/friotrack
           ENTORNO: local
         run: |
-          alembic upgrade head
+          # Base vacía: el entrypoint aplica el baseline.
+          python -m app.db.migrar
+          # Segunda corrida: debe salir sin DDL.
+          python -m app.db.migrar | tee /tmp/migrar.log
+          grep -q "Esquema al día" /tmp/migrar.log
           alembic check
+
+          # Base legada: create_all sin alembic_version; el entrypoint hace stamp.
+          alembic downgrade base
+          python - <<'PY'
+          from sqlalchemy import text
+          from app.db.session import get_engine
+
+          with get_engine().begin() as conn:
+              conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+          PY
+          python -c "import app.db.models; from app.db.base import Base; from app.db.session import get_engine; Base.metadata.create_all(get_engine())"
+          python -m app.db.migrar
+          alembic current | grep -q "0001"
+          alembic check
+
+          # Ciclo de downgrade/upgrade del baseline en local.
           alembic downgrade base
           alembic upgrade head
       - name: Pruebas con pytest
