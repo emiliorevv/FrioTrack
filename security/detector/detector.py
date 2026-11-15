@@ -39,13 +39,15 @@ logger = logging.getLogger("friotrack.siem")
 
 # IDs y títulos deben coincidir con los YAML de security/siem/.
 REGLA_FUERZA_BRUTA_ID = "3b8e2f6a-9c41-4d7e-8a15-2f6c0d9e7b41"
-REGLA_FUERZA_BRUTA = "Fuerza bruta de tokens en ingesta de telemetría y cron"
+REGLA_FUERZA_BRUTA = "Fuerza bruta de credenciales en la API"
 REGLA_TOKEN_DESCONOCIDO_ID = "e26aa409-804c-47fb-b852-1786ddaa172d"
 REGLA_TOKEN_DESCONOCIDO = "Token de sensor usado desde una IP desconocida"
 REGLA_LECTURAS_IMPOSIBLES_ID = "26f277c2-6d7a-4ff2-b44c-452f2788f824"
 REGLA_LECTURAS_IMPOSIBLES = "Lecturas imposibles de temperatura"
 
-RUTAS_FUERZA_BRUTA = frozenset({"/api/telemetria", "/api/simulador/tick"})
+RUTAS_FUERZA_BRUTA = frozenset(
+    {"/api/telemetria", "/api/simulador/tick", "/api/auth/login"}
+)
 ESTADOS_FUERZA_BRUTA = frozenset({401, 403})
 RUTA_TELEMETRIA = "/api/telemetria"
 
@@ -212,7 +214,7 @@ def validar_ips_produccion(
 
 
 def evaluar_fuerza_bruta(filas: Sequence[FilaLog], ahora: datetime) -> list[Hallazgo]:
-    """IPs con 10 o más respuestas 401/403 en las rutas de ingesta en 5 minutos."""
+    """IPs con 10 o más respuestas 401/403 en ingesta, cron o login en 5 minutos."""
     desde = ahora - timedelta(seconds=VENTANA_FUERZA_BRUTA_SEG)
     por_ip: dict[str, list[FilaLog]] = defaultdict(list)
     for fila in filas:

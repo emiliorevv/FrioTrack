@@ -7,7 +7,6 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.config import limpiar_cache_settings
-from app.db.session import get_db
 from app.main import create_app
 from app.realtime.bus import EVENTO_CERRAR, EventBus
 from app.routers import stream as stream_mod
@@ -48,20 +47,9 @@ def _kpis_y_cupo_limpios(monkeypatch):
     )
 
 
-def _app_sin_base():
-    """El stream no consulta la base: la dependencia de auth ya devolvió None."""
-    app = create_app()
-
-    def sesion_sin_base():
-        yield None
-
-    app.dependency_overrides[get_db] = sesion_sin_base
-    return app
-
-
 @pytest.mark.parametrize("params", [{}, {"token": "jwt-pendiente"}], ids=["sin-token", "con-token"])
 def test_stream_responde_sse_con_retry_y_kpis_iniciales(params):
-    app = _app_sin_base()
+    app = create_app()
 
     with TestClient(app) as cliente:
         with cliente.stream("GET", "/api/stream", params=params) as respuesta:
@@ -81,7 +69,7 @@ def test_stream_responde_sse_con_retry_y_kpis_iniciales(params):
 
 def test_stream_regresa_503_cuando_se_llena_el_cupo(monkeypatch):
     monkeypatch.setattr(stream_mod, "limite_conexiones", stream_mod.LimiteConexiones(1))
-    app = _app_sin_base()
+    app = create_app()
 
     with TestClient(app) as cliente:
         with cliente.stream("GET", "/api/stream") as primera:

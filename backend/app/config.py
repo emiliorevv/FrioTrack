@@ -52,11 +52,19 @@ class Settings(BaseSettings):
         """Falla al arrancar si producción conserva valores de demo.
 
         En `local` no valida nada. En producción (`ENTORNO` distinto de `local` o
-        `RENDER=true`, como en Render) exige JWT_SECRET fuerte, CRON_TOKEN,
-        SEED_PASSWORD propia y un token no vacío para cada sensor.
+        `RENDER=true`, como en Render) exige JWT_SECRET fuerte, AUTH_REQUERIDA
+        prendida, CRON_TOKEN, SEED_PASSWORD propia y un token no vacío para cada
+        sensor.
         """
         if not self.es_produccion():
             return
+
+        if not self.auth_requerida:
+            raise RuntimeError(
+                "Configuración insegura en producción: define AUTH_REQUERIDA=1 para "
+                "exigir el JWT de usuario en las consultas y el stream. "
+                "AUTH_REQUERIDA=0 solo sirve en local o pruebas."
+            )
 
         if (
             self.jwt_secret == JWT_SECRET_POR_DEFECTO

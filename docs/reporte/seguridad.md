@@ -53,11 +53,11 @@ Las reglas están en **Sigma** (YAML) para convertirlas a Splunk, Elastic, Senti
 
 | Regla | Archivo | Condición | Umbral | Severidad | Acción |
 |---|---|---|---|---|---|
-| Fuerza bruta de tokens | `security/siem/fuerza-bruta-tokens.yml` | `401` o `403` en `/api/telemetria` o `/api/simulador/tick` desde la misma IP | 10 o más en 5 minutos | Alta (`high`) | Bloquear la IP 60 minutos y alertar |
+| Fuerza bruta de credenciales | `security/siem/fuerza-bruta-tokens.yml` | `401` o `403` en `/api/telemetria`, `/api/simulador/tick` o `/api/auth/login` desde la misma IP | 10 o más en 5 minutos | Alta (`high`) | Bloquear la IP 60 minutos y alertar |
 | Token de sensor desde IP desconocida | `security/siem/token-ip-desconocida.yml` | `credencial = sensor`, `status = 202` en `/api/telemetria` y `ip_origen` fuera de la lista de confianza | 1 evento | Alta (`high`) | Revocar el token del sensor y alertar |
 | Lecturas imposibles | `security/siem/lecturas-imposibles.yml` | Cambio de más de 8 °C en 60 segundos o menos en la misma cámara | 1 evento | Media (`medium`) | Marcar las lecturas como sospechosas y alertar |
 
-La primera cubre también el cron por un `CRON_TOKEN` viejo. La segunda castiga el origen, no el token. La tercera usa `recibida_en` (hora del servidor), no el `ts` del sensor. Los umbrales son de prototipo; cada YAML documenta sus falsos positivos.
+La primera cubre también el cron por un `CRON_TOKEN` viejo y el login del dashboard con contraseñas incorrectas. La segunda castiga el origen, no el token. La tercera usa `recibida_en` (hora del servidor), no el `ts` del sensor. Los umbrales son de prototipo; cada YAML documenta sus falsos positivos.
 
 ## Detector SIEM
 

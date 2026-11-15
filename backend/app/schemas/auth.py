@@ -1,13 +1,13 @@
 """Esquemas de `POST /api/auth/login`."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class LoginEntrada(BaseModel):
-    """Credenciales del dashboard."""
+    """Credenciales del dashboard, con topes para no aceptar cuerpos enormes."""
 
-    usuario: str
-    password: str
+    usuario: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class TokenSalida(BaseModel):

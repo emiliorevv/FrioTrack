@@ -26,6 +26,10 @@ CREDENCIAL_POR_RUTA = {
     "/api/simulador/tick": "cron",
 }
 
+# El health check de Render pega cada pocos minutos: no debe llenar `logs_acceso`
+# ni quedar fuera por una IP bloqueada.
+RUTAS_SIN_LOG = frozenset({"/api/health"})
+
 # La caché evita una consulta a `ips_bloqueadas` por petición. Con este TTL una
 # IP recién bloqueada tarda como máximo 15 s en recibir 403 (y una desbloqueada
 # en volver a pasar).
@@ -240,11 +244,16 @@ class AccesoLogMiddleware:
             await self.app(scope, receive, send)
             return
 
+        ruta = ruta_de_scope(scope)
+        if ruta in RUTAS_SIN_LOG:
+            # Sin consulta de bloqueos, sin INSERT y sin línea de stdout.
+            await self.app(scope, receive, send)
+            return
+
         inicio = perf_counter()
         db_activa = get_settings().middleware_acceso_db
         ip = ip_de_scope(scope)
         metodo = scope.get("method", "")
-        ruta = ruta_de_scope(scope)
         user_agent = Headers(scope=scope).get("user-agent", "")
 
         if db_activa and await self._esta_bloqueada(ip):

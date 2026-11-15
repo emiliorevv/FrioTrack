@@ -30,10 +30,12 @@ de la de demo y un token no vacío por cada sensor en `SENSOR_TOKENS`.
 
 Autenticación de usuario: `POST /api/auth/login` entrega un JWT firmado con
 `JWT_SECRET` que dura `JWT_EXPIRA_HORAS` (8 por default). `AUTH_REQUERIDA=1` lo
-exige en cámaras, lecturas, lotes, alertas, KPIs, seguridad y stream; en local se
-deja en `0` para no romper el dashboard mientras no tenga login. Cuando se active,
-el dashboard debe iniciar sesión y mandar el token; el stream lo recibe en
-`?token=<jwt>`.
+exige en cámaras, lecturas, lotes, alertas, KPIs, seguridad y stream; es
+obligatorio en producción (la API no arranca sin él). `AUTH_REQUERIDA=0` solo se
+usa en local y pruebas, para no romper el dashboard mientras no tenga login.
+Cuando se active, el dashboard debe iniciar sesión y mandar el token; el stream lo
+recibe en `?token=<jwt>` y el access log de uvicorn se desactiva con
+`--no-access-log` para que el token no quede en los logs del proveedor.
 
 Render define `RENDER=true` por su cuenta, así que también se detecta producción
 cuando `ENTORNO` se queda en `local` u olvida definirse: si el despliegue corre en

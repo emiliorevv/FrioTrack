@@ -198,19 +198,32 @@ def test_fuerza_bruta_ignora_eventos_fuera_de_la_ventana():
     assert evaluar_fuerza_bruta(filas, AHORA) == []
 
 
-def test_fuerza_bruta_cuenta_telemetria_y_tick_pero_no_otras_rutas():
+def test_fuerza_bruta_cuenta_ingesta_cron_y_login_pero_no_otras_rutas():
     otras = [fila_log(ruta="/api/camaras", segundos_atras=indice) for indice in range(15)]
     ingesta = [
         fila_log(ruta="/api/telemetria", segundos_atras=indice, status=403) for indice in range(5)
     ] + [
         fila_log(ruta="/api/simulador/tick", segundos_atras=indice, status=401)
-        for indice in range(5)
+        for indice in range(3)
+    ] + [
+        fila_log(
+            ruta="/api/auth/login",
+            segundos_atras=indice,
+            status=401,
+            credencial="usuario",
+            sujeto=None,
+        )
+        for indice in range(2)
     ]
 
     assert evaluar_fuerza_bruta(otras, AHORA) == []
     hallazgos = evaluar_fuerza_bruta(ingesta, AHORA)
     assert len(hallazgos) == 1
-    assert hallazgos[0].detalle["rutas"] == ["/api/simulador/tick", "/api/telemetria"]
+    assert hallazgos[0].detalle["rutas"] == [
+        "/api/auth/login",
+        "/api/simulador/tick",
+        "/api/telemetria",
+    ]
 
 
 # --- Token desde IP desconocida --------------------------------------------

@@ -32,9 +32,9 @@ Respuesta `200`:
 { "access_token": "<jwt>", "token_type": "bearer", "expira_en_segundos": 28800 }
 ```
 
-El JWT usa HS256 y lleva `sub` (usuario), `rol`, `iat` y `exp`; `JWT_EXPIRA_HORAS` define su vigencia (8 h por defecto). Si el usuario no existe o la contraseña no coincide, la respuesta es `401` con el mismo mensaje (`Usuario o contraseña incorrectos.`) y `WWW-Authenticate: Bearer`, sin revelar cuál de los dos falló.
+El JWT usa HS256 y lleva `sub` (usuario), `uid` (id del usuario), `rol`, `pwd` (huella corta del hash de la contraseña), `iat` y `exp`; `JWT_EXPIRA_HORAS` define su vigencia (8 h por defecto). Un cambio de contraseña invalida los tokens anteriores, igual que un usuario borrado o recreado. Si el usuario no existe o la contraseña no coincide, la respuesta es `401` con el mismo mensaje (`Usuario o contraseña incorrectos.`) y `WWW-Authenticate: Bearer`, sin revelar cuál de los dos falló. Tras 10 intentos por IP en 5 minutos el login responde `429` con `Retry-After`.
 
-Las rutas de consulta y el stream exigen este JWT cuando `AUTH_REQUERIDA=1` (el valor con el que se despliega junto con el login del dashboard). Con `AUTH_REQUERIDA=0`, que es el default para desarrollo local, quedan abiertas como antes. `POST /telemetria` y `POST /simulador/tick` conservan sus tokens de sensor y de cron, y `GET /health` sigue sin autenticación. Un token ausente, inválido o expirado devuelve `401` con `WWW-Authenticate: Bearer`; un rol sin permiso devuelve `403`.
+Las rutas de consulta y el stream exigen este JWT cuando `AUTH_REQUERIDA=1`, que es **obligatorio en producción** (la API no arranca en Render sin él). Con `AUTH_REQUERIDA=0`, permitido solo en local y pruebas, quedan abiertas como antes. `POST /telemetria` y `POST /simulador/tick` conservan sus tokens de sensor y de cron, y `GET /health` sigue sin autenticación. Un token ausente, inválido o expirado devuelve `401` con `WWW-Authenticate: Bearer`; un rol sin permiso devuelve `403`.
 
 ## Endpoints
 
@@ -177,3 +177,5 @@ La API escribe una línea JSON por petición en la salida estándar (Render la g
 ```
 
 `credencial` es `sensor`, `cron`, `usuario` o `ninguna`. `sujeto` es el `sensor_id`, el usuario o `null`.
+
+En producción el access log de uvicorn se desactiva (`--no-access-log`, coordinado con el `render.yaml` del PR #42): el middleware de la API es el único que registra y nunca incluye el query string, así que el JWT de `?token=` no aparece en los logs. `GET /health` queda fuera del middleware: no escribe en `logs_acceso` ni consulta o aplica bloqueos de IP.
