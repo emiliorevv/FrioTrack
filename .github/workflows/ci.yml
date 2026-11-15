@@ -75,7 +75,8 @@ jobs:
           PY
           python -c "import app.db.models; from app.db.base import Base; from app.db.session import get_engine; Base.metadata.create_all(get_engine())"
           python -m app.db.migrar
-          alembic current | grep -q "0001"
+          HEAD_ACTUAL=$(alembic heads | awk '{print $1}')
+          alembic current | grep -q "$HEAD_ACTUAL"
           alembic check
 
           # Ciclo de downgrade/upgrade del baseline en local.

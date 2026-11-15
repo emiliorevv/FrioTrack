@@ -12,6 +12,7 @@ from sqlalchemy.sql import operators, visitors
 from sqlalchemy.sql.elements import Case
 
 from app.config import limpiar_cache_settings
+from app.core.auth import get_restaurante_id
 from app.db.models import Camara, Lectura, Lote
 from app.db.session import get_db
 from app.main import create_app
@@ -67,7 +68,9 @@ class SesionFalsa:
         self.consultas.append(stmt)
 
         if "group by" in sql:
-            return _Resultado(self._sumas_por_camara(self._condiciones_agregadas(stmt)))
+            return _Resultado(
+                self._sumas_por_camara(self._condiciones_agregadas(stmt), params)
+            )
         if "from lotes" in sql:
             return _Resultado(self._lotes(params))
         if "from lecturas" in sql:
@@ -75,7 +78,14 @@ class SesionFalsa:
             limite = getattr(stmt, "_limit", None)
             return _Resultado(self._lecturas(sql, params, limite))
         if "from camaras" in sql:
-            return _Resultado(sorted(self.camaras, key=lambda camara: camara.id))
+            filas = sorted(self.camaras, key=lambda camara: camara.id)
+            if "restaurante_id_1" in params:
+                filas = [
+                    camara
+                    for camara in filas
+                    if camara.restaurante_id == params["restaurante_id_1"]
+                ]
+            return _Resultado(filas)
         raise AssertionError(f"Consulta no soportada por la sesión falsa:\n{stmt}")
 
     @staticmethod
@@ -105,11 +115,11 @@ class SesionFalsa:
         return condiciones
 
     def _sumas_por_camara(
-        self, condiciones: list[tuple[Any, Any]]
+        self, condiciones: list[tuple[Any, Any]], params: dict[str, Any]
     ) -> list[tuple[int, ...]]:
         """Evalúa cada condición del `Case` y suma los costos por cámara."""
         totales: dict[int, list[Decimal]] = {}
-        for lote in self.lotes:
+        for lote in self._lotes_del_tenant(params):
             for indice, (operador, estado) in enumerate(condiciones):
                 coincide = (
                     lote.estado == estado
@@ -128,8 +138,16 @@ class SesionFalsa:
             return valor in esperado
         return valor == esperado
 
+    def _lotes_del_tenant(self, params: dict[str, Any]) -> list[Lote]:
+        """Lotes cuyo tenant (el de su cámara) pasa el filtro de la consulta."""
+        if "restaurante_id_1" not in params:
+            return list(self.lotes)
+        tenant = params["restaurante_id_1"]
+        camaras = {camara.id: camara.restaurante_id for camara in self.camaras}
+        return [lote for lote in self.lotes if camaras.get(lote.camara_id) == tenant]
+
     def _lotes(self, params: dict[str, Any]) -> list[Lote]:
-        filas = list(self.lotes)
+        filas = self._lotes_del_tenant(params)
         if "camara_id_1" in params:
             filas = [
                 lote for lote in filas if self._coincide(lote.camara_id, params["camara_id_1"])
@@ -182,9 +200,11 @@ def _entorno_local(monkeypatch):
     limpiar_cache_settings()
 
 
-def _cliente(sesion: SesionFalsa) -> TestClient:
+def _cliente(sesion: SesionFalsa, restaurante_id: int | None = None) -> TestClient:
     app = create_app()
     app.dependency_overrides[get_db] = lambda: sesion
+    if restaurante_id is not None:
+        app.dependency_overrides[get_restaurante_id] = lambda: restaurante_id
     return TestClient(app)
 
 
@@ -197,9 +217,11 @@ def _camara(
     min_para_merma: int,
     estado: str,
     ultima_lectura_id: int | None,
+    restaurante_id: int = 1,
 ) -> Camara:
     return Camara(
         id=id,
+        restaurante_id=restaurante_id,
         nombre=nombre,
         rango_min_c=Decimal(rango_min_c),
         rango_max_c=Decimal(rango_max_c),
@@ -553,3 +575,66 @@ def test_lotes_de_camara_inexistente_devuelve_404(mundo):
 
     assert respuesta.status_code == 404
     assert respuesta.json() == {"detail": "Cámara no encontrada"}
+
+
+# --- Aislamiento por restaurante -------------------------------------------
+
+
+def _mundo_de_dos_tenants() -> dict[str, Any]:
+    """Dos restaurantes con una cámara y un lote cada uno."""
+    ahora = datetime.now(UTC)
+    camaras = [
+        _camara(1, "Pescados y mariscos", "0.0", "2.0", 10, 60, "en_rango", 101),
+        _camara(6, "Barra fría", "0.0", "4.0", 15, 120, "en_rango", None, restaurante_id=2),
+    ]
+    lecturas = [_lectura(101, 1, ahora - timedelta(minutes=5))]
+    lotes = [
+        _lote(1, 1, "Robalo fresco", "12.00", "3240.00", "ok", date(2026, 11, 20)),
+        _lote(9, 6, "Tiramisú", "2.00", "300.00", "ok", date(2026, 11, 22)),
+    ]
+    return {
+        "sesion": SesionFalsa(camaras=camaras, lecturas=lecturas, lotes=lotes),
+        "ahora": ahora,
+    }
+
+
+def test_tenant_2_solo_ve_sus_camaras_y_lotes():
+    mundo = _mundo_de_dos_tenants()
+
+    with _cliente(mundo["sesion"], restaurante_id=2) as cliente:
+        camaras = cliente.get("/api/camaras").json()
+        lotes = cliente.get("/api/lotes").json()
+
+    assert [camara["id"] for camara in camaras] == [6]
+    assert [lote["id"] for lote in lotes] == [9]
+
+
+def test_tenant_2_no_puede_leer_lecturas_de_otra_camara():
+    mundo = _mundo_de_dos_tenants()
+
+    with _cliente(mundo["sesion"], restaurante_id=2) as cliente:
+        respuesta = cliente.get("/api/camaras/1/lecturas")
+
+    assert respuesta.status_code == 404
+    assert respuesta.json() == {"detail": "Cámara no encontrada"}
+
+
+def test_tenant_2_no_puede_filtrar_lotes_por_camara_ajena():
+    mundo = _mundo_de_dos_tenants()
+
+    with _cliente(mundo["sesion"], restaurante_id=2) as cliente:
+        respuesta = cliente.get("/api/lotes", params={"camara_id": 1})
+
+    assert respuesta.status_code == 404
+
+
+def test_tenant_1_no_ve_camaras_ni_lotes_del_tenant_2():
+    """El lote hereda el tenant de su cámara, no de una columna propia."""
+    mundo = _mundo_de_dos_tenants()
+
+    with _cliente(mundo["sesion"], restaurante_id=1) as cliente:
+        camaras = cliente.get("/api/camaras").json()
+        lotes = cliente.get("/api/lotes").json()
+
+    assert [camara["id"] for camara in camaras] == [1]
+    assert [lote["id"] for lote in lotes] == [1]

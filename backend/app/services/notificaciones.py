@@ -47,6 +47,7 @@ class Notificacion:
 
     tipo: str
     camara_id: int
+    restaurante_id: int
     mensaje: str
     ts: datetime
     canal: str = CANAL_SIMULADO
@@ -79,6 +80,7 @@ class NotificadorSimulado:
                 "ts": iso(notificacion.ts),
                 "url": notificacion.url,
             },
+            notificacion.restaurante_id,
         )
 
 
@@ -208,6 +210,7 @@ def notificar_cambios(
             Notificacion(
                 tipo=tipo,
                 camara_id=camara.id,
+                restaurante_id=camara.restaurante_id,
                 mensaje=mensaje,
                 ts=ahora,
                 url=url,
@@ -219,6 +222,7 @@ def notificar_cambios(
             Notificacion(
                 tipo=NOTIFICACION_MERMA,
                 camara_id=camara.id,
+                restaurante_id=camara.restaurante_id,
                 mensaje=_mensaje_merma(camara.nombre, len(lotes_a_merma), monto_merma),
                 ts=ahora,
                 url=url,

@@ -10,7 +10,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 
 from app.config import limpiar_cache_settings
-from app.db.models import Alerta, AlertaSeguridad, Usuario
+from app.core.auth import get_restaurante_id
+from app.db.models import Alerta, AlertaSeguridad, Camara, Usuario
 from app.db.session import get_db
 from app.erp.kpis import merma_en_periodo, pct_en_rango, promedio_respuesta_min, valor_en_riesgo
 from app.main import create_app
@@ -80,9 +81,11 @@ class SesionFalsa:
         self.commits += 1
 
 
-def _cliente(sesion: SesionFalsa) -> TestClient:
+def _cliente(sesion: SesionFalsa, restaurante_id: int | None = None) -> TestClient:
     app = create_app()
     app.dependency_overrides[get_db] = lambda: sesion
+    if restaurante_id is not None:
+        app.dependency_overrides[get_restaurante_id] = lambda: restaurante_id
     return TestClient(app)
 
 
@@ -101,6 +104,10 @@ def _alerta(**cambios: object) -> Alerta:
     }
     datos.update(cambios)
     return Alerta(**datos)
+
+
+def _camara(camara_id: int = 1, restaurante_id: int = 1) -> Camara:
+    return Camara(id=camara_id, restaurante_id=restaurante_id, nombre=f"Cámara {camara_id}")
 
 
 # --- GET /api/alertas -------------------------------------------------------
@@ -183,8 +190,14 @@ def test_get_alertas_rechaza_limite_fuera_de_rango(limite):
 
 def test_atender_alerta_marca_usuario_y_fecha_sin_cerrarla():
     alerta = _alerta()
-    jefe = Usuario(id=1, usuario="jefe", password_hash="hash", rol="jefe_cocina")
-    sesion = SesionFalsa(obtener=[alerta], unicos=[jefe])
+    jefe = Usuario(
+        id=1,
+        restaurante_id=1,
+        usuario="jefe",
+        password_hash="hash",
+        rol="jefe_cocina",
+    )
+    sesion = SesionFalsa(obtener=[alerta, _camara()], unicos=[jefe])
 
     with _cliente(sesion) as cliente:
         respuesta = cliente.post(
@@ -205,8 +218,16 @@ def test_atender_alerta_marca_usuario_y_fecha_sin_cerrarla():
 def test_atender_alerta_sin_nota_la_deja_intacta():
     alerta = _alerta()
     sesion = SesionFalsa(
-        obtener=[alerta],
-        unicos=[Usuario(id=1, usuario="jefe", password_hash="hash", rol="jefe_cocina")],
+        obtener=[alerta, _camara()],
+        unicos=[
+            Usuario(
+                id=1,
+                restaurante_id=1,
+                usuario="jefe",
+                password_hash="hash",
+                rol="jefe_cocina",
+            )
+        ],
     )
 
     with _cliente(sesion) as cliente:
@@ -224,7 +245,7 @@ def test_atender_alerta_ya_atendida_conserva_la_fecha_y_actualiza_la_nota():
         nota="Primera nota",
     )
     # Sin `unicos`: un segundo atender no debe volver a buscar al jefe.
-    sesion = SesionFalsa(obtener=[alerta])
+    sesion = SesionFalsa(obtener=[alerta, _camara()])
 
     with _cliente(sesion) as cliente:
         respuesta = cliente.post(
@@ -236,7 +257,7 @@ def test_atender_alerta_ya_atendida_conserva_la_fecha_y_actualiza_la_nota():
     assert alerta.atendida_por == 1
     assert alerta.nota == "Nota corregida"
     assert sesion.commits == 1
-    assert sesion.sentencias == [(Alerta, 31)]
+    assert sesion.sentencias[:2] == [(Alerta, 31), (Camara, 1)]
 
 
 def test_atender_alerta_inexistente_regresa_404():
@@ -252,7 +273,7 @@ def test_atender_alerta_inexistente_regresa_404():
 
 def test_atender_alerta_cerrada_regresa_409():
     alerta = _alerta(cerrada_en=datetime(2026, 11, 12, 18, 30, tzinfo=UTC))
-    sesion = SesionFalsa(obtener=[alerta])
+    sesion = SesionFalsa(obtener=[alerta, _camara()])
 
     with _cliente(sesion) as cliente:
         respuesta = cliente.post("/api/alertas/31/atender", json={})
@@ -265,8 +286,16 @@ def test_atender_alerta_cerrada_regresa_409():
 def test_atender_alerta_publica_alerta_cerrada_en_el_bus(monkeypatch):
     alerta = _alerta()
     sesion = SesionFalsa(
-        obtener=[alerta],
-        unicos=[Usuario(id=1, usuario="jefe", password_hash="hash", rol="jefe_cocina")],
+        obtener=[alerta, _camara()],
+        unicos=[
+            Usuario(
+                id=1,
+                restaurante_id=1,
+                usuario="jefe",
+                password_hash="hash",
+                rol="jefe_cocina",
+            )
+        ],
     )
     app = create_app()
     app.dependency_overrides[get_db] = lambda: sesion
@@ -274,7 +303,7 @@ def test_atender_alerta_publica_alerta_cerrada_en_el_bus(monkeypatch):
     monkeypatch.setattr(operacion, "bus", bus)
 
     async def escenario():
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         try:
             transporte = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(
@@ -297,7 +326,7 @@ def test_atender_alerta_publica_alerta_cerrada_en_el_bus(monkeypatch):
 
 
 def test_atender_alerta_sin_usuario_jefe_regresa_500_con_mensaje_claro():
-    sesion = SesionFalsa(obtener=[_alerta()], unicos=[None])
+    sesion = SesionFalsa(obtener=[_alerta(), _camara()], unicos=[None])
 
     with _cliente(sesion) as cliente:
         respuesta = cliente.post("/api/alertas/31/atender", json={})
@@ -347,13 +376,14 @@ def test_kpis_con_datos_calculan_todo(monkeypatch):
 
 
 def test_consulta_pct_en_rango_compila_para_postgres():
-    consulta = kpis_servicio._consulta_pct_en_rango(AHORA - timedelta(hours=24))
+    consulta = kpis_servicio._consulta_pct_en_rango(AHORA - timedelta(hours=24), 1)
     sql = str(consulta.compile(dialect=postgresql.dialect()))
 
     assert "count(*)" in sql
     assert "FILTER (WHERE" in sql
     assert "BETWEEN camaras.rango_min_c AND camaras.rango_max_c" in sql
     assert "JOIN camaras ON camaras.id = lecturas.camara_id" in sql
+    assert "camaras.restaurante_id = " in sql
 
 
 def test_kpis_sin_datos_regresan_ceros(monkeypatch):
@@ -400,7 +430,7 @@ def test_seguridad_alertas_regresa_ultimas_veinte():
             accion="revocar_token",
         ),
     ]
-    sesion = SesionFalsa(escalares=[filas])
+    sesion = SesionFalsa(unicos=[1], escalares=[filas])
 
     with _cliente(sesion) as cliente:
         respuesta = cliente.get("/api/seguridad/alertas")
@@ -417,9 +447,89 @@ def test_seguridad_alertas_regresa_ultimas_veinte():
         "detalle": {"intentos": 12},
         "accion": "bloquear_ip",
     }
-    consulta = str(sesion.sentencias[0])
+    consulta = str(sesion.sentencias[1])
     assert "ORDER BY alertas_seguridad.ts DESC" in consulta
     assert "LIMIT" in consulta.upper()
+
+
+# --- Aislamiento por restaurante -------------------------------------------
+
+
+def test_tenant_2_solo_lista_sus_alertas():
+    sesion = SesionFalsa(escalares=[[_alerta(camara_id=6)]])
+
+    with _cliente(sesion, restaurante_id=2) as cliente:
+        respuesta = cliente.get("/api/alertas")
+
+    assert respuesta.status_code == 200
+    assert [alerta["id"] for alerta in respuesta.json()] == [31]
+    consulta = sesion.sentencias[0]
+    assert consulta.compile().params["restaurante_id_1"] == 2
+    assert "JOIN camaras" in str(consulta)
+    assert "camaras.restaurante_id" in str(consulta)
+
+
+def test_atender_alerta_de_otro_tenant_regresa_404():
+    sesion = SesionFalsa(obtener=[_alerta(camara_id=6), _camara(6, restaurante_id=2)])
+
+    with _cliente(sesion, restaurante_id=1) as cliente:
+        respuesta = cliente.post("/api/alertas/31/atender", json={})
+
+    assert respuesta.status_code == 404
+    assert respuesta.json()["detail"] == "Alerta no encontrada"
+    assert sesion.commits == 0
+
+
+def test_atender_sin_jwt_busca_al_jefe_del_tenant():
+    sesion = SesionFalsa(
+        obtener=[_alerta(camara_id=6), _camara(6, restaurante_id=2)],
+        unicos=[None],
+    )
+
+    with _cliente(sesion, restaurante_id=2) as cliente:
+        respuesta = cliente.post("/api/alertas/31/atender", json={})
+
+    assert respuesta.status_code == 500
+    consulta_jefe = sesion.sentencias[2]
+    assert consulta_jefe.compile().params["restaurante_id_1"] == 2
+
+
+def test_kpis_filtran_las_cinco_consultas_por_restaurante(monkeypatch):
+    monkeypatch.setattr(kpis_servicio, "_ahora", lambda: AHORA)
+    sesion = SesionFalsa(ejecutar=[[(0, 0)], [], []], escalares=[[]], unicos=[0])
+
+    with _cliente(sesion, restaurante_id=2) as cliente:
+        respuesta = cliente.get("/api/kpis")
+
+    assert respuesta.status_code == 200
+    assert len(sesion.sentencias) == 5
+    for sentencia in sesion.sentencias:
+        assert sentencia.compile().params["restaurante_id_1"] == 2
+
+
+def test_seguridad_alertas_de_otro_tenant_devuelve_lista_vacia():
+    sesion = SesionFalsa()
+
+    with _cliente(sesion, restaurante_id=2) as cliente:
+        respuesta = cliente.get("/api/seguridad/alertas")
+
+    assert respuesta.status_code == 200
+    assert respuesta.json() == []
+    # El feed global del SIEM solo lo ve la demo: ni siquiera se consulta.
+    assert sesion.sentencias == []
+
+
+def test_seguridad_alertas_con_dos_restaurantes_no_se_muestra():
+    """Con más de un tenant nadie ve el feed global: podría traer datos ajenos."""
+    sesion = SesionFalsa(unicos=[2])
+
+    with _cliente(sesion, restaurante_id=1) as cliente:
+        respuesta = cliente.get("/api/seguridad/alertas")
+
+    assert respuesta.status_code == 200
+    assert respuesta.json() == []
+    # Se consultó el conteo de restaurantes, pero no el feed.
+    assert len(sesion.sentencias) == 1
 
 
 # --- Funciones puras de KPIs ------------------------------------------------

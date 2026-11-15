@@ -6,14 +6,22 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user, require_rol
+from app.core.auth import RestauranteId, get_current_user, require_rol
 from app.db.base import utcnow
-from app.db.models import Alerta, AlertaSeguridad, Usuario
+from app.db.models import (
+    RESTAURANTE_DEMO_ID,
+    Alerta,
+    AlertaSeguridad,
+    Camara,
+    Restaurante,
+    Usuario,
+)
 from app.db.session import get_db
 from app.realtime.bus import bus
+from app.routers.camaras import camara_del_restaurante
 from app.schemas.operacion import (
     AlertaSalida,
     AlertaSeguridadSalida,
@@ -39,15 +47,21 @@ class AtenderEntrada(BaseModel):
 @router.get("/alertas", response_model=list[AlertaSalida])
 def listar_alertas(
     db: SesionDb,
+    restaurante_id: RestauranteId,
     activas: bool = False,
     limite: int = Query(50, ge=1, le=200),
 ) -> list[AlertaSalida]:
-    """Lista las alertas de la más reciente a la más antigua.
+    """Lista las alertas del restaurante de la más reciente a la más antigua.
 
     `activas` filtra las que siguen abiertas; `limite` acota cuántas se
     devuelven y por defecto son 50 (máximo 200).
     """
-    consulta = select(Alerta).order_by(Alerta.abierta_en.desc(), Alerta.id.desc())
+    consulta = (
+        select(Alerta)
+        .join(Camara, Camara.id == Alerta.camara_id)
+        .where(Camara.restaurante_id == restaurante_id)
+        .order_by(Alerta.abierta_en.desc(), Alerta.id.desc())
+    )
     if activas:
         consulta = consulta.where(Alerta.cerrada_en.is_(None))
     consulta = consulta.limit(limite)
@@ -60,17 +74,26 @@ def atender_alerta(
     entrada: AtenderEntrada,
     db: SesionDb,
     usuario: JefeCocina,
+    restaurante_id: RestauranteId,
 ) -> AlertaSalida:
     """Marca quién atendió la alerta y cuándo; no la cierra.
 
     Es idempotente: si la alerta ya estaba atendida conserva `atendida_en` y
     `atendida_por` (para no empeorar el KPI de tiempo de respuesta) y solo
     actualiza la nota cuando viene en el cuerpo. Solo puede llamarlo el rol
-    `jefe_cocina` cuando la autenticación está activa.
+    `jefe_cocina` cuando la autenticación está activa. Una alerta de otro
+    restaurante responde 404, igual que una inexistente.
     """
     alerta = db.get(Alerta, alerta_id)
     if alerta is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alerta no encontrada")
+    # La alerta hereda el tenant de su cámara; el helper responde 404 si es ajena.
+    camara = camara_del_restaurante(
+        db,
+        alerta.camara_id,
+        restaurante_id,
+        detalle="Alerta no encontrada",
+    )
     if alerta.cerrada_en is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="La alerta ya está cerrada"
@@ -80,14 +103,24 @@ def atender_alerta(
         if entrada.nota is not None:
             alerta.nota = entrada.nota
             db.commit()
-            bus.publicar("alerta_cerrada", alerta_salida(alerta).model_dump())
+            bus.publicar(
+                "alerta_cerrada",
+                alerta_salida(alerta).model_dump(),
+                camara.restaurante_id,
+            )
         return alerta_salida(alerta)
 
     if usuario is None:
-        # Sin JWT (AUTH_REQUERIDA=0) se atribuye al primer `jefe_cocina`, que en
-        # el seed es el usuario `jefe`.
+        # Sin JWT (AUTH_REQUERIDA=0) se atribuye al primer `jefe_cocina` del
+        # restaurante de la petición, que en la demo es el usuario `jefe`.
         usuario = db.scalar(
-            select(Usuario).where(Usuario.rol == "jefe_cocina").order_by(Usuario.id).limit(1)
+            select(Usuario)
+            .where(
+                Usuario.rol == "jefe_cocina",
+                Usuario.restaurante_id == restaurante_id,
+            )
+            .order_by(Usuario.id)
+            .limit(1)
         )
     if usuario is None:
         raise HTTPException(
@@ -106,23 +139,36 @@ def atender_alerta(
 
     # El contrato dice que `alerta_cerrada` también se manda cuando la atienden.
     salida = alerta_salida(alerta)
-    bus.publicar("alerta_cerrada", salida.model_dump())
+    bus.publicar("alerta_cerrada", salida.model_dump(), camara.restaurante_id)
     return salida
 
 
 # Con AUTH_REQUERIDA=0 este endpoint queda abierto; con 1 exige JWT.
 @router.get("/kpis", response_model=KpisSalida)
-def obtener_kpis(db: SesionDb) -> KpisSalida:
-    """Calcula los KPIs del dashboard a partir de lecturas, alertas y lotes."""
-    return KpisSalida(**calcular_kpis(db))
+def obtener_kpis(db: SesionDb, restaurante_id: RestauranteId) -> KpisSalida:
+    """Calcula los KPIs del restaurante a partir de lecturas, alertas y lotes."""
+    return KpisSalida(**calcular_kpis(db, restaurante_id))
 
 
 # Con AUTH_REQUERIDA=0 este endpoint queda abierto; con 1 exige JWT.
 @router.get("/seguridad/alertas", response_model=list[AlertaSeguridadSalida])
 def listar_alertas_seguridad(
     db: SesionDb,
+    restaurante_id: RestauranteId,
 ) -> list[AlertaSeguridadSalida]:
-    """Devuelve las últimas 20 alertas del detector SIEM."""
+    """Devuelve las últimas 20 alertas del detector SIEM.
+
+    El SIEM es de plataforma y todavía no guarda el restaurante de cada
+    hallazgo. Mientras solo exista el restaurante demo, el demo puede ver el
+    feed; en cuanto hay un segundo restaurante nadie lo ve (fail closed) para no
+    filtrar usuarios, IPs y detalles de un tenant a otro. Se aislará cuando el
+    detector sea tenant-aware.
+    """
+    if restaurante_id != RESTAURANTE_DEMO_ID:
+        return []
+    total_restaurantes = db.scalar(select(func.count()).select_from(Restaurante))
+    if total_restaurantes != 1:
+        return []
     filas = db.scalars(
         select(AlertaSeguridad)
         .order_by(AlertaSeguridad.ts.desc(), AlertaSeguridad.id.desc())

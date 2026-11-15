@@ -32,9 +32,9 @@ Respuesta `200`:
 { "access_token": "<jwt>", "token_type": "bearer", "expira_en_segundos": 28800 }
 ```
 
-El JWT usa HS256 y lleva `sub` (usuario), `uid` (id del usuario), `rol`, `pwd` (huella corta del hash de la contraseña), `iat` y `exp`; `JWT_EXPIRA_HORAS` define su vigencia (8 h por defecto). Un cambio de contraseña invalida los tokens anteriores, igual que un usuario borrado o recreado. Si el usuario no existe o la contraseña no coincide, la respuesta es `401` con el mismo mensaje (`Usuario o contraseña incorrectos.`) y `WWW-Authenticate: Bearer`, sin revelar cuál de los dos falló. Tras 10 intentos por IP en 5 minutos el login responde `429` con `Retry-After`.
+El JWT usa HS256 y lleva `sub` (usuario), `uid` (id del usuario), `rol`, `pwd` (huella corta del hash de la contraseña), `restaurante_id` (tenant del usuario), `iat` y `exp`; `JWT_EXPIRA_HORAS` define su vigencia (8 h por defecto). Un cambio de contraseña invalida los tokens anteriores, igual que un usuario borrado o recreado. Si el usuario no existe o la contraseña no coincide, la respuesta es `401` con el mismo mensaje (`Usuario o contraseña incorrectos.`) y `WWW-Authenticate: Bearer`, sin revelar cuál de los dos falló. Tras 10 intentos por IP en 5 minutos el login responde `429` con `Retry-After`.
 
-Las rutas de consulta y el stream exigen este JWT cuando `AUTH_REQUERIDA=1`, que es **obligatorio en producción** (la API no arranca en Render sin él). Con `AUTH_REQUERIDA=0`, permitido solo en local y pruebas, quedan abiertas como antes. `POST /telemetria` y `POST /simulador/tick` conservan sus tokens de sensor y de cron, y `GET /health` sigue sin autenticación. Un token ausente, inválido o expirado devuelve `401` con `WWW-Authenticate: Bearer`; un rol sin permiso devuelve `403`.
+Las rutas de consulta y el stream exigen este JWT cuando `AUTH_REQUERIDA=1`, que es **obligatorio en producción** (la API no arranca en Render sin él). Con `AUTH_REQUERIDA=0`, permitido solo en local y pruebas, quedan abiertas como antes sobre el restaurante demo. Los datos se aíslan por `restaurante_id`: un recurso de otro restaurante responde `404`, igual que uno inexistente. Un token sin el claim `restaurante_id`, o con un tenant distinto al de la fila del usuario, responde `401`; los tokens emitidos antes de este cambio dejan de servir (vigencia máxima 8 h). `POST /telemetria` y `POST /simulador/tick` conservan sus tokens de sensor y de cron, y `GET /health` sigue sin autenticación. Un token ausente, inválido o expirado devuelve `401` con `WWW-Authenticate: Bearer`; un rol sin permiso devuelve `403`.
 
 ## Endpoints
 
@@ -70,9 +70,11 @@ Sin autenticación. Regresa `{ "ok": true, "escala_tiempo": 30 }`. Sirve para de
 ### Seguridad
 
 #### `GET /seguridad/alertas`
-Usuario con cualquier rol. Lista las últimas 20 filas de `alertas_seguridad` para mostrarlas en el dashboard durante la demo del SIEM.
+Usuario con cualquier rol. Lista las últimas 20 filas de `alertas_seguridad` para mostrarlas en el dashboard durante la demo del SIEM. El SIEM es global y todavía no guarda el restaurante de cada hallazgo: mientras exista **un solo** restaurante (la demo), el demo ve el feed; en cuanto hay un segundo restaurante todos reciben `[]` hasta que el detector se aísle por restaurante.
 
 ### Consulta
+
+Todas las consultas devuelven solo filas del restaurante del JWT (o del restaurante demo con `AUTH_REQUERIDA=0`). Pedir por ID un recurso de otro restaurante responde `404`, igual que uno inexistente.
 
 #### `GET /camaras`
 ```json
@@ -115,7 +117,7 @@ Lista de lecturas de una cámara para la gráfica. Si no se manda rango, regresa
 `tipo` puede ser `temperatura` o `puerta`.
 
 #### `POST /alertas/{id}/atender`
-Solo rol `jefe_cocina`. Body `{ "nota": "Se cerró la puerta" }`. Marca quién la atendió y cuánto tardó. Con `AUTH_REQUERIDA=1` se atribuye al usuario del JWT y un `gerente` recibe `403`; con la bandera apagada se atribuye al primer `jefe_cocina` del seed.
+Solo rol `jefe_cocina`. Body `{ "nota": "Se cerró la puerta" }`. Marca quién la atendió y cuánto tardó. Con `AUTH_REQUERIDA=1` se atribuye al usuario del JWT y un `gerente` recibe `403`; con la bandera apagada se atribuye al primer `jefe_cocina` del restaurante de la petición (en la demo, `jefe`). Una alerta de otro restaurante responde `404`.
 
 #### `GET /kpis`
 ```json
@@ -132,7 +134,7 @@ Solo rol `jefe_cocina`. Body `{ "nota": "Se cerró la puerta" }`. Marca quién l
 ### Tiempo real
 
 #### `GET /stream?token=<jwt>`
-Server-Sent Events. Va el token en la URL porque `EventSource` del navegador no deja mandar headers. Con `AUTH_REQUERIDA=1` el token se valida y, si falta o es inválido, la conexión responde `401`; con la bandera apagada se acepta sin token. La conexión se queda abierta y la API manda estos eventos:
+Server-Sent Events. Va el token en la URL porque `EventSource` del navegador no deja mandar headers. Con `AUTH_REQUERIDA=1` el token se valida y, si falta o es inválido, la conexión responde `401`; con la bandera apagada se acepta sin token. La conexión solo recibe eventos de las cámaras de su restaurante. La conexión se queda abierta y la API manda estos eventos:
 
 | Evento | Cuándo | `data` |
 |---|---|---|
@@ -141,7 +143,7 @@ Server-Sent Events. Va el token en la URL porque `EventSource` del navegador no 
 | `alerta_cerrada` | La cámara vuelve a rango o la atienden | El objeto de la alerta |
 | `lote_actualizado` | Un lote cambia de estado | El objeto del lote |
 | `notificacion` | Se abre una alerta o lotes pasan a merma | `{ canal, tipo, camara_id, mensaje, ts, url }` (`canal` es `"simulado"`; `tipo` es `alerta_temperatura`, `alerta_puerta` o `merma`) |
-| `kpis` | Cada 30 segundos | El mismo objeto que `GET /kpis` |
+| `kpis` | Cada 30 segundos | El mismo objeto que `GET /kpis`, calculado para el restaurante de la conexión |
 
 Ejemplo de lo que llega por la conexión:
 ```

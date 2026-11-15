@@ -19,14 +19,18 @@ solo carga el seed y falla si el esquema falta o está desactualizado.
 ## Baseline
 
 La revisión `0001` (`backend/alembic/versions/0001_esquema_inicial.py`) crea las
-9 tablas actuales con sus FKs, índices, JSONB y columnas `BIGSERIAL`. Se generó
+9 tablas originales con sus FKs, índices, JSONB y columnas `BIGSERIAL`. Se generó
 contra un Postgres vacío y se verificó con `alembic check` sin drift.
+
+La revisión `0002` (`0002_restaurantes_tenant.py`) agrega `restaurantes` y
+`restaurante_id` en `usuarios` y `camaras`; `lotes` y `alertas` derivan su tenant
+de la cámara. Es la revisión head actual.
 
 ### Base nueva
 
 ```bash
 cd backend
-.venv/bin/python -m app.db.migrar   # aplica el baseline 0001
+.venv/bin/python -m app.db.migrar   # aplica 0001 + 0002
 .venv/bin/python -m app.db.init_db  # carga el seed
 ```
 
@@ -40,7 +44,8 @@ usuarios. Si `DATABASE_URL` no está en el entorno, se lee de `backend/.env`
 El entrypoint detecta el caso: si no existe `alembic_version` pero sí la tabla
 `camaras`, compara `Base.metadata` contra la base (`compare_type=True`) y:
 
-- si el esquema coincide, marca `0001` como aplicada (`stamp`) sin ejecutar DDL;
+- si el esquema coincide, marca la revisión head actual (hoy `0002`) como aplicada
+  (`stamp`) sin ejecutar DDL;
 - si hay diferencias, **falla sin marcar nada** con un mensaje que pide revisar
   el drift y crear una migración.
 
@@ -51,7 +56,7 @@ esquema:
 ```bash
 cd backend
 DATABASE_URL='postgresql+psycopg://...' .venv/bin/alembic stamp head
-DATABASE_URL='postgresql+psycopg://...' .venv/bin/alembic current   # 0001 (head)
+DATABASE_URL='postgresql+psycopg://...' .venv/bin/alembic current   # 0002 (head actual)
 DATABASE_URL='postgresql+psycopg://...' .venv/bin/alembic check     # sin drift
 ```
 
@@ -110,7 +115,7 @@ python -m app.db.migrar      # segunda vez: debe imprimir “Esquema al día”
 alembic check
 # base legada: tablas con create_all y sin alembic_version
 python -m app.db.migrar      # hace stamp, no DDL
-alembic current              # 0001 (head)
+alembic current              # 0002 (head actual)
 alembic check
 alembic downgrade base       # permitido: el host del service es localhost
 alembic upgrade head
@@ -166,9 +171,8 @@ pero **no** recupera datos borrados por un `DROP` o un cambio de tipo. Si hubo
 pérdida de datos, restaura el dump o el point-in-time; el downgrade solo
 devuelve la forma del esquema.
 
-> **Peligro con el baseline:** `alembic downgrade base` sobre `0001` borra las
-> 9 tablas y todos los datos. Nunca lo uses para “revertir un deploy” en
-> producción. El `downgrade()` del baseline mira el **target real** de la
+> **Peligro con el baseline:** `alembic downgrade base` borra las 10 tablas y
+> todos los datos. Nunca lo uses para “revertir un deploy” en producción. El `downgrade()` del baseline mira el **target real** de la
 > conexión (`op.get_bind().engine.url`), no `ENTORNO` ni `RENDER`: solo se
 > permite si el host es local (`localhost`, `127.0.0.1`, `::1` o socket Unix)
 > **o** si defines `PERMITIR_DOWNGRADE_BASELINE=1`. Un portátil con

@@ -10,7 +10,14 @@ import pytest
 
 from app.config import limpiar_cache_settings
 from app.core.security import verify_password
-from app.db.models import Camara, Lote, Sensor, Usuario
+from app.db.models import (
+    RESTAURANTE_DEMO_ID,
+    Camara,
+    Lote,
+    Restaurante,
+    Sensor,
+    Usuario,
+)
 from app.db.seed import cargar_seed, construir_seed
 
 TOKENS = {
@@ -52,6 +59,7 @@ def test_construir_seed_arma_las_cinco_camaras():
     ]
     assert all(c.estado == "en_rango" for c in camaras)
     assert all(c.fuera_de_rango_desde is None and c.ultima_lectura_id is None for c in camaras)
+    assert all(c.restaurante_id == RESTAURANTE_DEMO_ID for c in camaras)
 
 
 def test_construir_seed_arma_un_sensor_por_camara_con_token_hasheado():
@@ -143,6 +151,7 @@ def test_construir_seed_arma_los_dos_usuarios_con_password_verificable():
     assert por_nombre["gerente"].rol == "gerente"
     assert all(u.password_hash.startswith("pbkdf2_sha256$") for u in usuarios)
     assert all(u.password_hash != "demo" for u in usuarios)
+    assert all(u.restaurante_id == RESTAURANTE_DEMO_ID for u in usuarios)
     assert verify_password("demo", por_nombre["jefe"].password_hash)
     assert not verify_password("incorrecta", por_nombre["jefe"].password_hash)
 
@@ -150,14 +159,30 @@ def test_construir_seed_arma_los_dos_usuarios_con_password_verificable():
 class FakeSession:
     """Sesión falsa: registra llamadas sin abrir conexión ni tocar una base."""
 
-    def __init__(self, hay_camaras: bool = False) -> None:
-        self.hay_camaras = hay_camaras
+    def __init__(
+        self,
+        hay_camaras_demo: bool = False,
+        restaurante: Restaurante | None = None,
+    ) -> None:
+        self.hay_camaras_demo = hay_camaras_demo
+        self.restaurante = restaurante
         self.agregados: list[object] = []
+        self.sentencias: list[object] = []
         self.flushes = 0
         self.commits = 0
 
-    def scalar(self, _sentencia: object) -> int | None:
-        return 1 if self.hay_camaras else None
+    def scalar(self, sentencia: object) -> int | None:
+        self.sentencias.append(sentencia)
+        return 1 if self.hay_camaras_demo else None
+
+    def execute(self, sentencia: object) -> None:
+        self.sentencias.append(sentencia)
+
+    def get(self, _modelo: object, _ident: int) -> Restaurante | None:
+        return self.restaurante
+
+    def add(self, fila: object) -> None:
+        self.agregados.append(fila)
 
     def add_all(self, filas: list[object]) -> None:
         self.agregados.extend(filas)
@@ -173,19 +198,52 @@ def test_cargar_seed_inserta_todo_y_hace_commit():
     sesion = FakeSession()
 
     assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is True
-    assert sesion.flushes == 1
+    assert sesion.flushes == 2
     assert sesion.commits == 1
-    assert len(sesion.agregados) == 5 + 5 + 15 + 2
+    assert len(sesion.agregados) == 1 + 5 + 5 + 15 + 2
+    restaurantes = [fila for fila in sesion.agregados if isinstance(fila, Restaurante)]
+    assert [(r.id, r.nombre) for r in restaurantes] == [(1, "FríoTrack Demo")]
     assert sum(isinstance(fila, Camara) for fila in sesion.agregados) == 5
     assert sum(isinstance(fila, Sensor) for fila in sesion.agregados) == 5
     assert sum(isinstance(fila, Lote) for fila in sesion.agregados) == 15
     assert sum(isinstance(fila, Usuario) for fila in sesion.agregados) == 2
 
 
-def test_cargar_seed_es_idempotente_si_ya_hay_camaras():
-    sesion = FakeSession(hay_camaras=True)
+def test_cargar_seed_no_duplica_el_restaurante_demo():
+    existente = Restaurante(id=RESTAURANTE_DEMO_ID, nombre="FríoTrack Demo")
+    sesion = FakeSession(restaurante=existente)
+
+    assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is True
+    assert not any(isinstance(fila, Restaurante) for fila in sesion.agregados)
+    # Sin restaurante que insertar, solo queda el flush de las cámaras.
+    assert sesion.flushes == 1
+
+
+def test_cargar_seed_es_idempotente_si_el_demo_ya_tiene_camaras():
+    sesion = FakeSession(hay_camaras_demo=True)
 
     assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is False
     assert sesion.agregados == []
     assert sesion.flushes == 0
     assert sesion.commits == 0
+
+
+def test_cargar_seed_solo_mira_las_camaras_del_restaurante_demo():
+    """Una cámara de otro tenant no debe impedir repoblar la demo."""
+    sesion = FakeSession(hay_camaras_demo=False)
+
+    assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is True
+    guardia = sesion.sentencias[0]
+    assert "camaras.restaurante_id" in str(guardia)
+    assert guardia.compile().params["restaurante_id_1"] == RESTAURANTE_DEMO_ID
+
+
+def test_cargar_seed_ajusta_la_secuencia_del_restaurante_demo():
+    """El id 1 fue explícito: la secuencia debe quedar después de MAX(id)."""
+    sesion = FakeSession()
+
+    cargar_seed(sesion, sensor_tokens=TOKENS, password="demo")
+
+    setval = [str(sentencia) for sentencia in sesion.sentencias if "setval" in str(sentencia)]
+    assert len(setval) == 1
+    assert "pg_get_serial_sequence('restaurantes', 'id')" in setval[0]

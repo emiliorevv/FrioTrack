@@ -1,7 +1,10 @@
 """Bus de eventos en memoria para empujar cambios a las conexiones SSE.
 
 Una sola instancia de la API (ADR-0004): cada conexión de `/api/stream` se
-suscribe con su propia `asyncio.Queue` y la ingesta publica sin bloquearse.
+suscribe con su propia `asyncio.Queue` y su restaurante, y la ingesta publica sin
+bloquearse. El tenant viaja en el evento (no en una allowlist por conexión), así
+que un evento de otro restaurante jamás llega a la cola y uno sin restaurante no
+se entrega a nadie.
 """
 
 from __future__ import annotations
@@ -51,13 +54,15 @@ class EventBus:
     """Reparte eventos a las colas suscritas sin bloquear al publicador."""
 
     def __init__(self) -> None:
-        self._suscriptores: dict[ColaEventos, asyncio.AbstractEventLoop] = {}
+        # Cola -> (restaurante, loop). El tenant acompaña a la suscripción para
+        # que el reparto filtre por igualdad sin consultas por conexión.
+        self._suscriptores: dict[ColaEventos, tuple[int, asyncio.AbstractEventLoop]] = {}
 
-    def suscribir(self) -> ColaEventos:
-        """Crea la cola de una conexión y la asocia al loop donde vive."""
+    def suscribir(self, restaurante_id: int) -> ColaEventos:
+        """Crea la cola de una conexión del restaurante y la asocia a su loop."""
         loop = asyncio.get_running_loop()
         cola: ColaEventos = asyncio.Queue(maxsize=TAMANO_COLA)
-        self._suscriptores[cola] = loop
+        self._suscriptores[cola] = (restaurante_id, loop)
         return cola
 
     def desuscribir(self, cola: ColaEventos) -> None:
@@ -68,14 +73,27 @@ class EventBus:
         """Indica si vale la pena calcular eventos que nadie va a recibir."""
         return bool(self._suscriptores)
 
-    def publicar(self, evento: str, data: dict[str, Any]) -> None:
-        """Encola el evento en cada conexión, en el loop de esa conexión.
+    def publicar(
+        self,
+        evento: str,
+        data: dict[str, Any],
+        restaurante_id: int | None,
+    ) -> None:
+        """Encola el evento solo en las conexiones de su restaurante.
 
-        Se puede llamar desde cualquier hilo: `call_soon_threadsafe` devuelve el
-        reparto al loop donde vive cada cola (no todas las conexiones comparten
-        loop, por ejemplo entre TestClient o un segundo loop de pruebas).
+        Un evento sin `restaurante_id` no se entrega a nadie (fail closed): el
+        aislamiento no depende de que el payload traiga `camara_id` ni de una
+        lista de cámaras por conexión. Se puede llamar desde cualquier hilo:
+        `call_soon_threadsafe` devuelve el reparto al loop de cada cola (no
+        todas las conexiones comparten loop, por ejemplo entre TestClient o un
+        segundo loop de pruebas).
         """
-        for cola, loop in list(self._suscriptores.items()):
+        if restaurante_id is None:
+            logger.debug("Evento %s descartado: no trae restaurante_id", evento)
+            return
+        for cola, (tenant, loop) in list(self._suscriptores.items()):
+            if tenant != restaurante_id:
+                continue
             if loop.is_closed():
                 continue
             try:

@@ -116,6 +116,7 @@ class SesionFalsa:
 def _camara(**cambios: object) -> Camara:
     base = {
         "id": 1,
+        "restaurante_id": 1,
         "nombre": "Pescados y mariscos",
         "rango_min_c": Decimal("0.0"),
         "rango_max_c": Decimal("2.0"),
@@ -548,7 +549,7 @@ def test_fallo_del_notificador_no_rompe_la_ingesta(monkeypatch):
 
 async def _eventos_de(accion: Callable[[], object]) -> list[tuple[str, dict[str, object]]]:
     """Suscribe una cola, corre la ingesta y devuelve lo publicado al bus."""
-    cola = bus.suscribir()
+    cola = bus.suscribir(1)
     try:
         accion()
         await asyncio.sleep(0)  # deja correr el `call_soon_threadsafe` del bus
@@ -689,7 +690,7 @@ def test_no_publica_si_falla_el_commit(monkeypatch):
     sesion.commit = commit_roto  # type: ignore[method-assign]
 
     async def escenario() -> int:
-        cola = bus.suscribir()
+        cola = bus.suscribir(1)
         try:
             with pytest.raises(RuntimeError):
                 procesar_telemetria(sesion, _datos(temperatura_c=1.0), token=TOKEN)

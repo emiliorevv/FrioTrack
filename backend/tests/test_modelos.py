@@ -10,6 +10,7 @@ from app.db import models  # noqa: F401  (registra las tablas en Base.metadata)
 from app.db.base import Base
 
 TABLAS_ESPERADAS = {
+    "restaurantes",
     "camaras",
     "sensores",
     "lecturas",
@@ -27,7 +28,7 @@ def _ddl(tabla: Table) -> str:
     return str(CreateTable(tabla).compile(dialect=dialecto_postgres()))
 
 
-def test_metadata_tiene_las_nueve_tablas():
+def test_metadata_tiene_las_diez_tablas():
     assert set(Base.metadata.tables) == TABLAS_ESPERADAS
 
 
@@ -109,3 +110,30 @@ def test_aristas_sin_fk_documentadas():
     # El resto de las relaciones sí son FK reales.
     assert {fk.target_fullname for fk in lecturas.c.camara_id.foreign_keys} == {"camaras.id"}
     assert {fk.target_fullname for fk in sensores.c.camara_id.foreign_keys} == {"camaras.id"}
+
+
+def test_restaurantes_es_la_raiz_del_tenant():
+    tabla = Base.metadata.tables["restaurantes"]
+
+    assert {"id", "nombre", "creado_en"} == set(tabla.c.keys())
+    assert tabla.c.creado_en.default.arg.__name__ == "utcnow"
+
+
+@pytest.mark.parametrize("nombre", ["usuarios", "camaras"])
+def test_tablas_con_tenant_llevan_restaurante_id_con_indice(nombre: str):
+    tabla = Base.metadata.tables[nombre]
+
+    assert {fk.target_fullname for fk in tabla.c.restaurante_id.foreign_keys} == {
+        "restaurantes.id"
+    }
+    assert tabla.c.restaurante_id.nullable is False
+    indices = {
+        indice.name: [columna.name for columna in indice.columns]
+        for indice in tabla.indexes
+    }
+    assert indices[f"ix_{nombre}_restaurante_id"] == ["restaurante_id"]
+
+
+@pytest.mark.parametrize("nombre", ["lecturas", "sensores", "lotes", "alertas"])
+def test_el_resto_deriva_el_tenant_de_la_camara(nombre: str):
+    assert "restaurante_id" not in Base.metadata.tables[nombre].c

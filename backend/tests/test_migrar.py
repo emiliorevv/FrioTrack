@@ -135,4 +135,4 @@ def test_revision_en_codigo_detecta_revisiones_desconocidas():
     config = migrar.config_alembic()
 
     assert migrar._revision_en_codigo(config, "0001") is True
-    assert migrar._revision_en_codigo(config, "0002") is False
+    assert migrar._revision_en_codigo(config, "9999") is False

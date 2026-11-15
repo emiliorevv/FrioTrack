@@ -5,12 +5,20 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings, leer_sensor_tokens
 from app.core.security import hash_password
-from app.db.models import Camara, Lote, Sensor, Usuario
+from app.db.models import (
+    NOMBRE_RESTAURANTE_DEMO,
+    RESTAURANTE_DEMO_ID,
+    Camara,
+    Lote,
+    Restaurante,
+    Sensor,
+    Usuario,
+)
 
 # Rangos y tiempos del README (NOM-251-SSA1-2009 para refrigerados y congelados).
 CAMARAS: list[dict[str, Any]] = [
@@ -53,6 +61,13 @@ LOTES: list[tuple[str, int, Decimal, str, Decimal, int]] = [
     ("Carne de res congelada", 5, Decimal("12.00"), "kg", Decimal("2880.00"), 60),
 ]
 
+# El demo se inserta con id explícito; la secuencia debe quedar en MAX(id) para
+# que el primer restaurante creado sin id (el futuro sign-up) reciba el 2.
+SQL_SECUENCIA_RESTAURANTES = (
+    "SELECT setval(pg_get_serial_sequence('restaurantes', 'id'), "
+    "(SELECT MAX(id) FROM restaurantes))"
+)
+
 
 def _tokens_de_entorno() -> dict[str, str]:
     """Lee SENSOR_TOKENS (JSON) de la configuración; un valor inválido se ignora."""
@@ -89,7 +104,10 @@ def construir_seed(
         )
 
     # `estado` explícito: al no tocar la base, los defaults del modelo no se aplican.
-    camaras = [Camara(estado="en_rango", **datos) for datos in CAMARAS]
+    camaras = [
+        Camara(restaurante_id=RESTAURANTE_DEMO_ID, estado="en_rango", **datos)
+        for datos in CAMARAS
+    ]
 
     sensores = []
     for camara_id, sensor_id in SENSORES.items():
@@ -120,8 +138,18 @@ def construir_seed(
 
     password_hash = hash_password(password)
     usuarios = [
-        Usuario(usuario="jefe", password_hash=password_hash, rol="jefe_cocina"),
-        Usuario(usuario="gerente", password_hash=password_hash, rol="gerente"),
+        Usuario(
+            restaurante_id=RESTAURANTE_DEMO_ID,
+            usuario="jefe",
+            password_hash=password_hash,
+            rol="jefe_cocina",
+        ),
+        Usuario(
+            restaurante_id=RESTAURANTE_DEMO_ID,
+            usuario="gerente",
+            password_hash=password_hash,
+            rol="gerente",
+        ),
     ]
 
     return camaras, sensores, lotes, usuarios
@@ -132,14 +160,28 @@ def cargar_seed(
     sensor_tokens: dict[str, str] | None = None,
     password: str | None = None,
 ) -> bool:
-    """Carga cámaras, sensores, lotes y usuarios si la base está vacía.
+    """Carga cámaras, sensores, lotes y usuarios si el restaurante demo está vacío.
 
-    Regresa True si insertó datos y False si ya había cámaras (idempotente).
+    Regresa True si insertó datos y False si el tenant demo ya tenía cámaras
+    (idempotente). Otras cámaras de otros restaurantes no cuentan: si al demo le
+    borraron sus datos, se repuebla.
     """
-    if session.scalar(select(Camara.id).limit(1)) is not None:
+    if session.scalar(
+        select(Camara.id)
+        .where(Camara.restaurante_id == RESTAURANTE_DEMO_ID)
+        .limit(1)
+    ) is not None:
         return False
 
     camaras, sensores, lotes, usuarios = construir_seed(sensor_tokens, password)
+    if session.get(Restaurante, RESTAURANTE_DEMO_ID) is None:
+        # La migración 0002 ya lo inserta; esto cubre bases sembradas a mano.
+        session.add(
+            Restaurante(id=RESTAURANTE_DEMO_ID, nombre=NOMBRE_RESTAURANTE_DEMO)
+        )
+        session.flush()  # las filas hijas necesitan el restaurante antes del commit
+        # El id del demo fue explícito: alinea la secuencia para el próximo alta.
+        session.execute(text(SQL_SECUENCIA_RESTAURANTES))
     session.add_all(camaras)
     session.flush()
     session.add_all(sensores)

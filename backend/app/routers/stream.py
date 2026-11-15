@@ -8,11 +8,11 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
-from app.core.auth import get_current_user_stream
+from app.core.auth import RestauranteIdStream
 from app.realtime.bus import EVENTO_CERRAR, bus
 from app.realtime.kpis import calcular_kpis_actuales
 
@@ -56,15 +56,23 @@ def _sse(evento: str, datos: dict[str, Any]) -> str:
     return f"event: {evento}\ndata: {cuerpo}\n\n"
 
 
-async def _eventos(request: Request) -> AsyncIterator[str]:
-    """Genera el cuerpo SSE de una conexión hasta que el cliente se desconecta."""
-    cola = bus.suscribir()
+async def _eventos(request: Request, restaurante_id: int) -> AsyncIterator[str]:
+    """Genera el cuerpo SSE de una conexión hasta que el cliente se desconecta.
+
+    El bus entrega solo los eventos del restaurante de la conexión: aquí no hay
+    allowlist ni filtro por `camara_id`. Solo el KPI inicial se calcula por
+    conexión; los siguientes llegan ya calculados desde la tarea periódica.
+    """
+    cola = bus.suscribir(restaurante_id)
     try:
         yield "retry: 3000\n\n"
         # El dashboard no espera los 30 s del ciclo global para ver KPIs; la
-        # tarea global se encarga de los siguientes.
+        # tarea global se encarga de los siguientes, una vez por tenant.
         try:
-            yield _sse("kpis", await run_in_threadpool(calcular_kpis_actuales))
+            yield _sse(
+                "kpis",
+                await run_in_threadpool(calcular_kpis_actuales, restaurante_id),
+            )
         except Exception:  # la conexión sigue viva aunque la base falle un momento
             logger.exception("No se pudieron calcular los KPIs iniciales del stream")
 
@@ -89,17 +97,22 @@ async def _eventos(request: Request) -> AsyncIterator[str]:
         limite_conexiones.liberar()
 
 
-@router.get("/stream", dependencies=[Depends(get_current_user_stream)])
-async def stream(request: Request, token: str | None = None) -> StreamingResponse:
+@router.get("/stream")
+async def stream(
+    request: Request,
+    restaurante_id: RestauranteIdStream,
+    token: str | None = None,
+) -> StreamingResponse:
     """Mantiene abierta la conexión SSE del dashboard.
 
     `EventSource` del navegador no deja mandar headers, así que el contrato
     manda el token en la URL. Cuando `AUTH_REQUERIDA=1`, sin `?token=<jwt>`
-    válido la conexión responde 401; con la bandera apagada se acepta sin token.
+    válido la conexión responde 401; con la bandera apagada se acepta sin token
+    y se transmite el restaurante demo.
     """
     limite_conexiones.adquirir()
     return StreamingResponse(
-        _eventos(request),
+        _eventos(request, restaurante_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
