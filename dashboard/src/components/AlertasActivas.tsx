@@ -21,6 +21,8 @@ interface AlertasActivasProps {
   /** Fallo de la última acción de atender, con el `detail` del backend. */
   errorAtender: string | null
   atendiendo: Record<number, boolean>
+  /** Solo el jefe de cocina puede ejecutar la acción. */
+  puedeAtender: boolean
   onAtender: (id: number) => void
   onLimpiarErrorAtender: () => void
 }
@@ -32,6 +34,7 @@ export function AlertasActivas({
   error,
   errorAtender,
   atendiendo,
+  puedeAtender,
   onAtender,
   onLimpiarErrorAtender,
 }: AlertasActivasProps) {
@@ -65,6 +68,11 @@ export function AlertasActivas({
             <span className="alertas-activas__count">{alertas.length}</span>
           </h2>
           <p>{textoPendientes}</p>
+          {!puedeAtender && (
+            <p className="alertas-activas__permiso" id="alertas-permiso">
+              Solo jefe de cocina puede atender.
+            </p>
+          )}
         </div>
       </div>
 
@@ -134,8 +142,11 @@ export function AlertasActivas({
                   <button
                     type="button"
                     className="retry-button retry-button--sm alerta-activa__accion"
-                    disabled={ocupada || atendida}
+                    disabled={ocupada || atendida || !puedeAtender}
                     aria-busy={ocupada}
+                    aria-describedby={
+                      puedeAtender ? undefined : 'alertas-permiso'
+                    }
                     onClick={() => onAtender(alerta.id)}
                   >
                     {ocupada

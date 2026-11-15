@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import './App.css'
+import { useAuth } from './auth/AuthProvider'
 import { AlertasActivas } from './components/AlertasActivas'
 import { CameraCard } from './components/CameraCard'
 import { FilterBar } from './components/FilterBar'
@@ -45,6 +46,9 @@ function App() {
   const [filtro, setFiltro] = useState<FiltroCamaras>('todas')
   const [busqueda, setBusqueda] = useState('')
   const { notificacion, cerrar } = useNotificaciones()
+  const auth = useAuth()
+  const usuario = auth.usuario ?? 'Usuario'
+  const rol = auth.rol ?? ''
   const {
     health,
     camaras,
@@ -94,6 +98,9 @@ function App() {
       <Header
         actualizadoEn={actualizadoEn}
         escalaTiempo={health?.escala_tiempo}
+        usuario={usuario}
+        rol={rol}
+        onLogout={auth.logout}
       />
 
       <main id="contenido" className="app-main" tabIndex={-1}>
@@ -143,6 +150,7 @@ function App() {
               error={errorAlertas}
               errorAtender={errorAtender}
               atendiendo={atendiendo}
+              puedeAtender={rol === 'jefe_cocina'}
               onAtender={(id) => void atenderAlerta(id)}
               onLimpiarErrorAtender={limpiarErrorAtender}
             />

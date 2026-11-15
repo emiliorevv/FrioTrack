@@ -36,6 +36,16 @@ vi.mock('./api/client', () => ({
   obtenerLecturas: vi.fn(),
 }))
 
+const auth = vi.hoisted(() => ({
+  usuario: 'jefe',
+  rol: 'jefe_cocina',
+  logout: vi.fn(),
+}))
+
+vi.mock('./auth/AuthProvider', () => ({
+  useAuth: () => auth,
+}))
+
 vi.mock('./realtime/StreamProvider', () => ({
   useStreamEvent: vi.fn(),
   useStreamReconexion: vi.fn(() => 0),
@@ -184,6 +194,8 @@ function crearSerie(camaraId: number): Lectura[] {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  auth.usuario = 'jefe'
+  auth.rol = 'jefe_cocina'
   oyentes.clear()
   window.localStorage.clear()
   vi.mocked(useStreamEvent).mockImplementation((evento, oyente) => {
@@ -377,6 +389,33 @@ describe('vista general', () => {
     await screen.findAllByRole('article')
 
     expect(await screen.findByText('Sin alertas activas')).toBeInTheDocument()
+  })
+
+  it('muestra la sesión y permite cerrar sesión', async () => {
+    render(<App />)
+    await screen.findAllByRole('article')
+
+    expect(screen.getByText('jefe')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }))
+
+    expect(auth.logout).toHaveBeenCalledTimes(1)
+  })
+
+  it('el gerente no puede atender alertas', async () => {
+    auth.usuario = 'gerente'
+    auth.rol = 'gerente'
+
+    render(<App />)
+    await screen.findAllByRole('article')
+
+    const seccion = screen.getByRole('region', { name: /Alertas activas/ })
+    const boton = await within(seccion).findByRole('button', {
+      name: 'Atender',
+    })
+    expect(boton).toBeDisabled()
+    expect(
+      within(seccion).getByText('Solo jefe de cocina puede atender.'),
+    ).toBeInTheDocument()
   })
 
   it('muestra el skeleton mientras no llega la primera respuesta', () => {
