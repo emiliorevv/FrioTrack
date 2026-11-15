@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
-import { esObjeto, parsearJson } from '../lib/sse'
+import { parsearJson } from '../lib/sse'
+import { esObjeto } from '../lib/validacion'
 import { useStreamEvent } from '../realtime/StreamProvider'
 import { TIPOS_NOTIFICACION, type Notificacion } from '../types'
 

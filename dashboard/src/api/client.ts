@@ -1,13 +1,5 @@
-import type {
-  AccionSeguridad,
-  AlertaSeguridad,
-  Camara,
-  Health,
-  Kpis,
-  Lectura,
-  SeveridadSeguridad,
-} from '../types'
-import { esObjeto } from '../lib/sse'
+import type { AlertaSeguridad, Camara, Health, Kpis, Lectura } from '../types'
+import { esObjeto } from '../lib/validacion'
 import { resolverApiUrl } from './url'
 
 const TIEMPO_LIMITE_MS = 10_000
@@ -46,8 +38,9 @@ async function leerDetalle(respuesta: Response): Promise<string> {
 /**
  * Petición JSON con la misma base que el stream SSE.
  *
- * Respeta la señal del llamador y la combina con un timeout de 10 s, así
- * `AbortController` puede cancelar un refresco superado sin perder el límite.
+ * Combina el timeout de 10 s con la señal del llamador mediante un
+ * `AbortController` manual: `AbortSignal.any` no existe en Safari < 17.4 ni
+ * Chrome < 116, que están dentro del target de Vite.
  */
 export async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
   const base = resolverApiUrl()
@@ -60,24 +53,44 @@ export async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   headers.set('Accept', 'application/json')
 
-  const senal = init?.signal
-    ? AbortSignal.any([init.signal, AbortSignal.timeout(TIEMPO_LIMITE_MS)])
-    : AbortSignal.timeout(TIEMPO_LIMITE_MS)
+  const controlador = new AbortController()
+  let motivo: 'timeout' | 'llamador' | null = null
+
+  const abortarPorLlamador = () => {
+    motivo = 'llamador'
+    controlador.abort()
+  }
+
+  if (init?.signal) {
+    if (init.signal.aborted) {
+      abortarPorLlamador()
+    } else {
+      init.signal.addEventListener('abort', abortarPorLlamador, { once: true })
+    }
+  }
+
+  const temporizador = setTimeout(() => {
+    motivo = 'timeout'
+    controlador.abort()
+  }, TIEMPO_LIMITE_MS)
 
   let respuesta: Response
   try {
     respuesta = await fetch(`${base}${ruta}`, {
       ...init,
       headers,
-      signal: senal,
+      signal: controlador.signal,
     })
   } catch (error) {
-    if (esTimeout(error)) {
+    if (motivo === 'timeout') {
       throw new Error('La API tardó más de 10 s en responder.', {
         cause: error,
       })
     }
     throw error
+  } finally {
+    clearTimeout(temporizador)
+    init?.signal?.removeEventListener('abort', abortarPorLlamador)
   }
 
   if (!respuesta.ok) {
@@ -107,9 +120,11 @@ export function obtenerLecturas(
 }
 
 /**
- * Alertas del detector SIEM. El backend manda `severidad` y `accion` como
- * strings; se validan antes de tipar y las filas desconocidas se descartan
- * para que el panel nunca reciba un valor fuera del contrato.
+ * Alertas del detector SIEM.
+ *
+ * El backend guarda `severidad` y `accion` como strings libres: se conservan
+ * tal cual y el panel decide la etiqueta (con fallback). Si la respuesta no
+ * es un arreglo se lanza para que el hook conserve las alertas anteriores.
  */
 export async function obtenerAlertasSeguridad(
   senal?: AbortSignal,
@@ -117,7 +132,9 @@ export async function obtenerAlertasSeguridad(
   const datos = await pedir<unknown>('/seguridad/alertas', { signal: senal })
 
   if (!Array.isArray(datos)) {
-    return []
+    throw new Error(
+      'La API devolvió un formato inesperado para las alertas de seguridad.',
+    )
   }
 
   return datos
@@ -145,11 +162,10 @@ function normalizarAlertaSeguridad(valor: unknown): AlertaSeguridad | null {
     typeof id !== 'number' ||
     typeof reglaId !== 'string' ||
     typeof regla !== 'string' ||
-    !esSeveridad(severidad) ||
+    typeof severidad !== 'string' ||
     typeof ts !== 'string' ||
-    (ipOrigen !== null && typeof ipOrigen !== 'string') ||
     !esObjeto(detalle) ||
-    !esAccion(accion)
+    typeof accion !== 'string'
   ) {
     return null
   }
@@ -160,35 +176,9 @@ function normalizarAlertaSeguridad(valor: unknown): AlertaSeguridad | null {
     regla,
     severidad,
     ts,
+    // El contrato permite null; una clave ausente también se normaliza a null.
     ip_origen: typeof ipOrigen === 'string' ? ipOrigen : null,
     detalle,
     accion,
   }
-}
-
-function esSeveridad(valor: unknown): valor is SeveridadSeguridad {
-  return (
-    valor === 'low' ||
-    valor === 'medium' ||
-    valor === 'high' ||
-    valor === 'critical'
-  )
-}
-
-function esAccion(valor: unknown): valor is AccionSeguridad {
-  return (
-    valor === 'bloquear_ip' ||
-    valor === 'revocar_token' ||
-    valor === 'marcar_lecturas'
-  )
-}
-
-/** El `AbortSignal.timeout` rechaza con un DOMException llamado TimeoutError. */
-function esTimeout(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'name' in error &&
-    error.name === 'TimeoutError'
-  )
 }

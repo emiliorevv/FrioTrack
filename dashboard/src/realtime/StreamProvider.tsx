@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -20,7 +21,13 @@ export { resolverApiUrl } from '../api/url'
 export type OyenteStream = (evento: MessageEvent<string>) => void
 type Suscriptores = Map<string, Set<OyenteStream>>
 
-const StreamContext = createContext<Suscriptores | null>(null)
+interface ContextoStream {
+  suscriptores: Suscriptores
+  /** Aperturas del stream después de la primera; 0 al montar. */
+  reconexiones: number
+}
+
+const StreamContext = createContext<ContextoStream | null>(null)
 
 interface StreamProviderProps {
   children: ReactNode
@@ -37,6 +44,8 @@ interface StreamProviderProps {
  */
 export function StreamProvider({ children, token }: StreamProviderProps) {
   const [suscriptores] = useState<Suscriptores>(() => new Map())
+  const [reconexiones, setReconexiones] = useState(0)
+  const primeraAperturaRef = useRef(true)
 
   useEffect(() => {
     const base = resolverApiUrl()
@@ -101,6 +110,15 @@ export function StreamProvider({ children, token }: StreamProviderProps) {
       nueva.onopen = () => {
         // El stream volvió: el próximo corte reintenta desde 5 s.
         intentoReconexion = 0
+
+        if (primeraAperturaRef.current) {
+          primeraAperturaRef.current = false
+          return
+        }
+
+        // Avisa a los consumidores para que rellenen huecos (por ejemplo,
+        // el historial de lecturas que se perdió mientras estuvo caído).
+        setReconexiones((total) => total + 1)
       }
 
       nueva.onerror = () => {
@@ -126,10 +144,13 @@ export function StreamProvider({ children, token }: StreamProviderProps) {
     }
   }, [suscriptores, token])
 
+  const contexto = useMemo(
+    () => ({ suscriptores, reconexiones }),
+    [suscriptores, reconexiones],
+  )
+
   return (
-    <StreamContext.Provider value={suscriptores}>
-      {children}
-    </StreamContext.Provider>
+    <StreamContext.Provider value={contexto}>{children}</StreamContext.Provider>
   )
 }
 
@@ -138,7 +159,7 @@ export function StreamProvider({ children, token }: StreamProviderProps) {
  * `StreamProvider` no hace nada, así la vista se puede montar sin SSE.
  */
 export function useStreamEvent(evento: EventoStream, oyente: OyenteStream) {
-  const suscriptores = useContext(StreamContext)
+  const suscriptores = useContext(StreamContext)?.suscriptores ?? null
   const oyenteRef = useRef(oyente)
 
   useEffect(() => {
@@ -165,4 +186,13 @@ export function useStreamEvent(evento: EventoStream, oyente: OyenteStream) {
       }
     }
   }, [suscriptores, evento])
+}
+
+/**
+ * Contador de reconexiones del stream. La primera apertura no cuenta; cada
+ * reconexión posterior incrementa el valor para que los hooks refresquen los
+ * datos que pudieron quedar con huecos.
+ */
+export function useStreamReconexion(): number {
+  return useContext(StreamContext)?.reconexiones ?? 0
 }

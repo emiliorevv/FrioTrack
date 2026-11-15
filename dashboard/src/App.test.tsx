@@ -21,6 +21,7 @@ vi.mock('./api/client', () => ({
 
 vi.mock('./realtime/StreamProvider', () => ({
   useStreamEvent: vi.fn(),
+  useStreamReconexion: vi.fn(() => 0),
 }))
 
 type Oyente = (evento: MessageEvent<string>) => void
@@ -278,7 +279,7 @@ describe('vista general', () => {
     expect(screen.getByText('Datos en vivo · FríoTrack')).toBeInTheDocument()
     expect(screen.queryByText(/Datos simulados/)).not.toBeInTheDocument()
     expect(
-      screen.getByText(
+      await screen.findByText(
         'Fuerza bruta de tokens en ingesta de telemetría y cron',
       ),
     ).toBeInTheDocument()
@@ -300,7 +301,9 @@ describe('vista general', () => {
     render(<App />)
     await screen.findAllByRole('article')
 
-    expect(screen.getByText('Sin alertas del detector.')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Sin alertas del detector.'),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/Datos de ejemplo/)).not.toBeInTheDocument()
   })
 
@@ -378,14 +381,14 @@ describe('vista general', () => {
 
     expect(screen.getAllByRole('article')).toHaveLength(5)
     expect(
-      screen.getByText(/No se pudo actualizar; mostrando datos de/),
+      screen.getByText(
+        /No se pudo actualizar el resumen HTTP; los eventos en vivo siguen llegando/,
+      ),
     ).toBeInTheDocument()
     expect(screen.getByText('sin red')).toBeInTheDocument()
+    expect(screen.getByText('Datos en vivo · FríoTrack')).toBeInTheDocument()
     expect(
-      screen.getByText('Datos desactualizados · FríoTrack'),
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByText('Datos en vivo · FríoTrack'),
+      screen.queryByText('Datos desactualizados · FríoTrack'),
     ).not.toBeInTheDocument()
   })
 })

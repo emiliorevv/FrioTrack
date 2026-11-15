@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { esObjeto, parsearJson } from './sse'
+import { parsearJson } from './sse'
 
 describe('parsearJson', () => {
   it('parsea JSON válido', () => {
@@ -12,19 +12,5 @@ describe('parsearJson', () => {
   it('devuelve null cuando el texto no es JSON', () => {
     expect(parsearJson('{')).toBeNull()
     expect(parsearJson('')).toBeNull()
-  })
-})
-
-describe('esObjeto', () => {
-  it('acepta objetos planos', () => {
-    expect(esObjeto({ id: 1 })).toBe(true)
-    expect(esObjeto(parsearJson('{"id":1}'))).toBe(true)
-  })
-
-  it('rechaza null, primitivos y arreglos', () => {
-    expect(esObjeto(null)).toBe(false)
-    expect(esObjeto('texto')).toBe(false)
-    expect(esObjeto(7)).toBe(false)
-    expect(esObjeto([1, 2])).toBe(false)
   })
 })

@@ -905,6 +905,15 @@
   text-align: center;
 }
 
+.security__aviso {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
 .security__list {
   display: flex;
   flex-direction: column;

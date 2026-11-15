@@ -20,7 +20,7 @@ afterEach(() => {
 
 describe('SecurityPanel', () => {
   it('deriva título, severidad, acción y resumen del detalle', () => {
-    render(<SecurityPanel alertas={[alerta]} />)
+    render(<SecurityPanel alertas={[alerta]} cargado error={null} />)
 
     expect(screen.getByText('Fuerza bruta de tokens')).toBeInTheDocument()
     expect(screen.getByText('Alta')).toBeInTheDocument()
@@ -35,26 +35,61 @@ describe('SecurityPanel', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-12T16:45:00-06:00'))
 
-    render(<SecurityPanel alertas={[alerta]} />)
+    render(<SecurityPanel alertas={[alerta]} cargado error={null} />)
 
     expect(screen.getByText('hace 3 min')).toBeInTheDocument()
   })
 
   it('muestra el estado vacío cuando no hay alertas', () => {
-    render(<SecurityPanel alertas={[]} />)
+    render(<SecurityPanel alertas={[]} cargado error={null} />)
 
     expect(screen.getByText('Sin alertas del detector.')).toBeInTheDocument()
     expect(screen.queryByText(/Datos de ejemplo/)).not.toBeInTheDocument()
   })
 
-  it('no rompe con una severidad o acción desconocidas', () => {
-    const rara = {
-      ...alerta,
-      severidad: 'rara',
-      accion: 'otra',
-    } as unknown as AlertaSeguridad
+  it('distingue la carga en curso del estado vacío', () => {
+    render(<SecurityPanel alertas={[]} cargado={false} error={null} />)
 
-    render(<SecurityPanel alertas={[rara]} />)
+    expect(
+      screen.getByText('Cargando alertas del detector…'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('Sin alertas del detector.'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('muestra un error distinto cuando no se pudieron cargar', () => {
+    render(
+      <SecurityPanel alertas={[]} cargado={false} error="La API no responde" />,
+    )
+
+    expect(
+      screen.getByText('No se pudieron cargar las alertas del detector.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('Sin alertas del detector.'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('conserva las alertas previas y avisa si falló una actualización', () => {
+    render(
+      <SecurityPanel alertas={[alerta]} cargado error="La API no responde" />,
+    )
+
+    expect(screen.getByText('Fuerza bruta de tokens')).toBeInTheDocument()
+    expect(
+      screen.getByText(/No se pudieron actualizar las alertas/),
+    ).toBeInTheDocument()
+  })
+
+  it('no rompe con una severidad o acción desconocidas', () => {
+    const rara: AlertaSeguridad = {
+      ...alerta,
+      severidad: 'informational',
+      accion: 'notificar',
+    }
+
+    render(<SecurityPanel alertas={[rara]} cargado error={null} />)
 
     expect(screen.getByText('Desconocida')).toBeInTheDocument()
     expect(screen.getByText(/Sin acción/)).toBeInTheDocument()

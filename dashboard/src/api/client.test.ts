@@ -33,6 +33,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -138,15 +139,23 @@ describe('pedir', () => {
   })
 
   it('corta la petición cuando la API tarda más de 10 s', async () => {
-    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(AbortSignal.abort())
+    vi.useFakeTimers()
     fetchFalso.mockImplementation((_url: string, init?: RequestInit) => {
-      expect(init?.signal?.aborted).toBe(true)
-      return Promise.reject(
-        new DOMException('The operation timed out.', 'TimeoutError'),
-      )
+      return new Promise((_resolver, rechazar) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => rechazar(new DOMException('abortado', 'AbortError')),
+          { once: true },
+        )
+      })
     })
 
-    await expect(obtenerHealth()).rejects.toThrow('tardó más de 10 s')
+    const peticion = obtenerHealth().catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(10_000)
+    const error = await peticion
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('tardó más de 10 s')
   })
 })
 
@@ -177,25 +186,36 @@ describe('obtenerAlertasSeguridad', () => {
     )
   })
 
-  it('descarta alertas con severidad o acción fuera del contrato', async () => {
+  it('conserva severidades y acciones desconocidas y normaliza ip_origen ausente', async () => {
     fetchFalso.mockResolvedValue(
       respuesta([
         alerta,
-        { ...alerta, id: 2, severidad: 'rara' },
-        { ...alerta, id: 3, accion: 'otra' },
+        {
+          ...alerta,
+          id: 2,
+          severidad: 'informational',
+          ip_origen: undefined,
+        },
+        { ...alerta, id: 3, accion: 'notificar' },
         null,
-        { ...alerta, id: 4, severidad: 'critical', accion: 'revocar_token' },
       ]),
     )
 
     const alertas = await obtenerAlertasSeguridad()
 
-    expect(alertas.map((item) => item.id)).toEqual([1, 4])
+    expect(alertas.map((item) => item.id)).toEqual([1, 2, 3])
+    expect(alertas[1]).toMatchObject({
+      severidad: 'informational',
+      ip_origen: null,
+    })
+    expect(alertas[2].accion).toBe('notificar')
   })
 
-  it('devuelve [] si la respuesta no es un arreglo', async () => {
+  it('lanza si la respuesta no es un arreglo para conservar las alertas previas', async () => {
     fetchFalso.mockResolvedValue(respuesta({ detail: 'contrato roto' }))
 
-    await expect(obtenerAlertasSeguridad()).resolves.toEqual([])
+    await expect(obtenerAlertasSeguridad()).rejects.toThrow(
+      /formato inesperado/,
+    )
   })
 })
