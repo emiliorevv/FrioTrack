@@ -16,13 +16,14 @@ from app.core.auth import (
     crear_token,
     decodificar_token,
     get_current_user,
+    get_restaurante_id,
     huella_password,
     sesion_si_auth,
     token_bearer,
 )
 from app.core.rate_limit import LimitadorIntentos
 from app.core.security import hash_password, verify_password
-from app.db.models import Alerta, IpBloqueada, LogAcceso, Usuario
+from app.db.models import RESTAURANTE_DEMO_ID, Alerta, IpBloqueada, LogAcceso, Usuario
 from app.db.session import get_db
 from app.main import create_app
 from app.middleware import acceso
@@ -65,6 +66,7 @@ def _token(
     *,
     expira: datetime | None = None,
     secreto: str | None = None,
+    restaurante_id: int | None = None,
 ) -> str:
     """Firma un JWT de prueba; por defecto dura 8 h como el de producción."""
     usuario = usuario or _usuario()
@@ -74,6 +76,9 @@ def _token(
         "uid": usuario.id,
         "rol": usuario.rol,
         "pwd": huella_password(usuario.password_hash),
+        "restaurante_id": (
+            usuario.restaurante_id if restaurante_id is None else restaurante_id
+        ),
         "iat": ahora,
         "exp": expira or ahora + timedelta(hours=8),
     }
@@ -165,13 +170,25 @@ def _parchear_sesion_corta(monkeypatch, sesion: SesionFalsa) -> SesionCortaFalsa
     return contexto
 
 
-def _usuario(id: int = 1, nombre: str = "jefe", rol: str = "jefe_cocina") -> Usuario:
-    return Usuario(id=id, usuario=nombre, password_hash="hash", rol=rol)
+def _usuario(
+    id: int = 1,
+    nombre: str = "jefe",
+    rol: str = "jefe_cocina",
+    restaurante_id: int = 1,
+) -> Usuario:
+    return Usuario(
+        id=id,
+        restaurante_id=restaurante_id,
+        usuario=nombre,
+        password_hash="hash",
+        rol=rol,
+    )
 
 
 def _alerta() -> Alerta:
     return Alerta(
         id=31,
+        restaurante_id=1,
         camara_id=1,
         tipo="temperatura",
         abierta_en=datetime(2026, 11, 12, 18, 5, tzinfo=UTC),
@@ -190,7 +207,11 @@ def _alerta() -> Alerta:
 def test_login_correcto_entrega_jwt_de_ocho_horas(monkeypatch):
     _activar_auth(monkeypatch)
     usuario = Usuario(
-        id=1, usuario="jefe", password_hash=hash_password("secreto"), rol="jefe_cocina"
+        id=1,
+        restaurante_id=1,
+        usuario="jefe",
+        password_hash=hash_password("secreto"),
+        rol="jefe_cocina",
     )
 
     with _cliente(SesionFalsa(usuario=usuario)) as cliente:
@@ -208,13 +229,18 @@ def test_login_correcto_entrega_jwt_de_ocho_horas(monkeypatch):
     assert payload["uid"] == 1
     assert payload["rol"] == "jefe_cocina"
     assert payload["pwd"] == huella_password(usuario.password_hash)
+    assert payload["restaurante_id"] == 1
     assert payload["exp"] - payload["iat"] == 8 * 3600
 
 
 def test_login_sin_auth_requerida_sigue_existiendo(monkeypatch):
     _activar_auth(monkeypatch, activa=False)
     usuario = Usuario(
-        id=2, usuario="gerente", password_hash=hash_password("secreto"), rol="gerente"
+        id=2,
+        restaurante_id=1,
+        usuario="gerente",
+        password_hash=hash_password("secreto"),
+        rol="gerente",
     )
 
     with _cliente(SesionFalsa(usuario=usuario)) as cliente:
@@ -230,7 +256,11 @@ def test_el_token_del_login_sirve_para_consultar(monkeypatch):
     """Flujo completo: login -> token -> ruta de consulta protegida."""
     _activar_auth(monkeypatch)
     usuario = Usuario(
-        id=5, usuario="jefe", password_hash=hash_password("secreto"), rol="jefe_cocina"
+        id=5,
+        restaurante_id=3,
+        usuario="jefe",
+        password_hash=hash_password("secreto"),
+        rol="jefe_cocina",
     )
 
     with _cliente(SesionFalsa(usuario=usuario)) as cliente:
@@ -249,7 +279,13 @@ def test_el_token_del_login_sirve_para_consultar(monkeypatch):
     "usuario_bd",
     [
         None,
-        Usuario(id=1, usuario="jefe", password_hash=hash_password("otra"), rol="jefe_cocina"),
+        Usuario(
+            id=1,
+            restaurante_id=1,
+            usuario="jefe",
+            password_hash=hash_password("otra"),
+            rol="jefe_cocina",
+        ),
     ],
     ids=["usuario-inexistente", "password-incorrecta"],
 )
@@ -350,7 +386,11 @@ def test_login_rate_limit_regresa_429_con_retry_after(monkeypatch):
 
 def test_login_exitoso_limpia_el_limite(monkeypatch):
     usuario = Usuario(
-        id=1, usuario="jefe", password_hash=hash_password("secreto"), rol="jefe_cocina"
+        id=1,
+        restaurante_id=1,
+        usuario="jefe",
+        password_hash=hash_password("secreto"),
+        rol="jefe_cocina",
     )
     limitador = LimitadorIntentos(maximo=2, ventana_seg=300, reloj=lambda: 0.0)
     monkeypatch.setattr(auth_mod, "limitador_login", limitador)
@@ -439,6 +479,62 @@ def test_token_se_invalida_si_el_usuario_recreado_cambia_de_nombre(monkeypatch):
         respuesta = cliente.get("/api/camaras", headers=_cabecera(token))
 
     assert respuesta.status_code == 401
+
+
+def test_token_sin_claim_de_restaurante_regresa_401(monkeypatch):
+    _activar_auth(monkeypatch)
+    usuario = _usuario()
+    ahora = datetime.now(UTC)
+    token = jwt.encode(
+        {
+            "sub": usuario.usuario,
+            "uid": usuario.id,
+            "rol": usuario.rol,
+            "pwd": huella_password(usuario.password_hash),
+            "iat": ahora,
+            "exp": ahora + timedelta(hours=8),
+        },
+        get_settings().jwt_secret,
+        algorithm="HS256",
+    )
+
+    with pytest.raises(jwt.MissingRequiredClaimError):
+        decodificar_token(token)
+
+    with _cliente(SesionFalsa(usuario=usuario)) as cliente:
+        respuesta = cliente.get("/api/camaras", headers=_cabecera(token))
+
+    assert respuesta.status_code == 401
+    assert respuesta.headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize(
+    "restaurante_id",
+    [2, 0, -1, True],
+    ids=["otro", "cero", "negativo", "bool"],
+)
+def test_token_con_restaurante_id_invalido_regresa_401(monkeypatch, restaurante_id):
+    _activar_auth(monkeypatch)
+    usuario = _usuario(restaurante_id=1)
+    token = _token(usuario, restaurante_id=restaurante_id)
+
+    with _cliente(SesionFalsa(usuario=usuario)) as cliente:
+        respuesta = cliente.get("/api/camaras", headers=_cabecera(token))
+
+    assert respuesta.status_code == 401
+    assert respuesta.json()["detail"] == "Token de usuario inválido o expirado."
+
+
+def test_get_restaurante_id_usa_el_del_usuario(monkeypatch):
+    _activar_auth(monkeypatch)
+
+    assert get_restaurante_id(_usuario(restaurante_id=4)) == 4
+
+
+def test_get_restaurante_id_sin_auth_regresa_el_demo(monkeypatch):
+    _activar_auth(monkeypatch, activa=False)
+
+    assert get_restaurante_id(None) == RESTAURANTE_DEMO_ID
 
 
 def test_crear_token_usa_el_secreto_y_la_expiracion_configurados(monkeypatch):
@@ -599,7 +695,8 @@ def test_atender_sin_auth_sigue_usando_al_primer_jefe(monkeypatch):
 @pytest.fixture
 def _stream_aislado(monkeypatch):
     """Evita Postgres y que el cupo de conexiones se arrastre entre pruebas."""
-    monkeypatch.setattr(stream_mod, "calcular_kpis_actuales", lambda: KPIS)
+    monkeypatch.setattr(stream_mod, "calcular_kpis_actuales", lambda _rid: KPIS)
+    monkeypatch.setattr(stream_mod, "_ids_de_camaras", lambda _rid: frozenset())
     monkeypatch.setattr(
         stream_mod,
         "limite_conexiones",

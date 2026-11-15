@@ -116,6 +116,7 @@ class SesionFalsa:
 def _camara(**cambios: object) -> Camara:
     base = {
         "id": 1,
+        "restaurante_id": 1,
         "nombre": "Pescados y mariscos",
         "rango_min_c": Decimal("0.0"),
         "rango_max_c": Decimal("2.0"),
@@ -483,6 +484,7 @@ def test_servicio_notifica_al_abrir_una_alerta(monkeypatch):
     camara_recibida, alertas, lotes, lotes_a_merma, ahora, settings = llamadas[0]
     assert camara_recibida is camara
     assert [alerta.tipo for alerta in alertas] == ["temperatura"]
+    assert alertas[0].restaurante_id == 1  # la alerta nace con el tenant de la cámara
     assert alertas[0].sms_enviados == 0  # el canal simulado no cuenta como SMS
     assert lotes == [lote]
     assert lotes_a_merma == []

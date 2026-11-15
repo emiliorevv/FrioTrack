@@ -24,6 +24,21 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, utcnow
 
+# Restaurante demo que insertan la migración 0002 y el seed. Hasta que exista el
+# sign-up, la demo y las pruebas locales operan siempre sobre este tenant.
+RESTAURANTE_DEMO_ID = 1
+NOMBRE_RESTAURANTE_DEMO = "FríoTrack Demo"
+
+
+class Restaurante(Base):
+    """Inquilino raíz: los datos operativos cuelgan de un restaurante."""
+
+    __tablename__ = "restaurantes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    nombre: Mapped[str] = mapped_column(Text)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
 
 class Camara(Base):
     """Equipo de frío monitoreado y su configuración de tiempos."""
@@ -31,6 +46,7 @@ class Camara(Base):
     __tablename__ = "camaras"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    restaurante_id: Mapped[int] = mapped_column(ForeignKey("restaurantes.id"), index=True)
     nombre: Mapped[str] = mapped_column(Text)
     rango_min_c: Mapped[Decimal] = mapped_column(Numeric(4, 1))
     rango_max_c: Mapped[Decimal] = mapped_column(Numeric(4, 1))
@@ -91,6 +107,7 @@ class Lote(Base):
     __tablename__ = "lotes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    restaurante_id: Mapped[int] = mapped_column(ForeignKey("restaurantes.id"), index=True)
     producto: Mapped[str] = mapped_column(Text)
     camara_id: Mapped[int] = mapped_column(ForeignKey("camaras.id"))
     cantidad: Mapped[Decimal] = mapped_column(Numeric(8, 2))
@@ -119,6 +136,7 @@ class Alerta(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    restaurante_id: Mapped[int] = mapped_column(ForeignKey("restaurantes.id"), index=True)
     camara_id: Mapped[int] = mapped_column(ForeignKey("camaras.id"))
     tipo: Mapped[str] = mapped_column(Text)
     abierta_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -139,6 +157,7 @@ class Usuario(Base):
     __tablename__ = "usuarios"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    restaurante_id: Mapped[int] = mapped_column(ForeignKey("restaurantes.id"), index=True)
     usuario: Mapped[str] = mapped_column(Text, unique=True)
     password_hash: Mapped[str] = mapped_column(Text)
     rol: Mapped[str] = mapped_column(Text)

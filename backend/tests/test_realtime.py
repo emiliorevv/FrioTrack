@@ -271,14 +271,13 @@ def test_loop_cerrado_de_otra_conexion_no_tumba_el_reparto():
     assert resultado == [("lectura", {"camara_id": 3})]
 
 
-def test_tarea_global_de_kpis_no_calcula_sin_suscriptores(monkeypatch):
-    calculos: list[bool] = []
-    monkeypatch.setattr(
-        kpis_mod, "calcular_kpis_actuales", lambda: calculos.append(True) or {}
-    )
+def test_tarea_global_de_kpis_no_publica_sin_suscriptores(monkeypatch):
+    publicados: list[tuple[str, dict]] = []
+    bus = EventBus()
+    monkeypatch.setattr(bus, "publicar", lambda evento, datos: publicados.append((evento, datos)))
+    monkeypatch.setattr(kpis_mod, "bus", bus)
 
     async def escenario():
-        monkeypatch.setattr(kpis_mod, "bus", EventBus())
         tarea = asyncio.create_task(kpis_mod.publicar_kpis_periodicos(0.01))
         await asyncio.sleep(0.05)
         tarea.cancel()
@@ -286,11 +285,11 @@ def test_tarea_global_de_kpis_no_calcula_sin_suscriptores(monkeypatch):
             await tarea
 
     asyncio.run(escenario())
-    assert calculos == []
+    assert publicados == []
 
 
-def test_tarea_global_de_kpis_publica_cuando_hay_suscriptores(monkeypatch):
-    monkeypatch.setattr(kpis_mod, "calcular_kpis_actuales", lambda: {"alertas_activas": 1})
+def test_tarea_global_de_kpis_publica_la_senal_cuando_hay_suscriptores(monkeypatch):
+    """El bus solo avisa; cada conexión recalcula los KPIs de su restaurante."""
 
     async def escenario():
         bus = EventBus()
@@ -305,4 +304,4 @@ def test_tarea_global_de_kpis_publica_cuando_hay_suscriptores(monkeypatch):
                 await tarea
             bus.desuscribir(cola)
 
-    assert asyncio.run(escenario()) == ("kpis", {"alertas_activas": 1})
+    assert asyncio.run(escenario()) == ("kpis", {})

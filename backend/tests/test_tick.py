@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import limpiar_cache_settings
-from app.db.models import Camara
+from app.db.models import RESTAURANTE_DEMO_ID, Camara
 from app.db.session import get_db
 from app.main import create_app
 from app.routers import simulador as router_simulador
@@ -68,6 +68,7 @@ class SesionFalsa:
 def _camara(camara_id: int, nombre: str = "Pescados y mariscos", **cambios: object) -> Camara:
     base = {
         "id": camara_id,
+        "restaurante_id": RESTAURANTE_DEMO_ID,
         "nombre": nombre,
         "rango_min_c": Decimal("0.0"),
         "rango_max_c": Decimal("2.0"),
@@ -364,3 +365,23 @@ def test_post_tick_sin_token_registra_el_intento_del_cron(log_stdout):
     assert evento["credencial"] == "cron"
     assert evento["sujeto"] == "SIM-CRON"
     assert evento["status"] == 401
+
+
+class _SesionDeIds:
+    """Sesión mínima para inspeccionar la consulta de IDs de cámaras."""
+
+    def __init__(self) -> None:
+        self.sentencias: list[Any] = []
+
+    def scalars(self, sentencia: Any) -> list[int]:
+        self.sentencias.append(sentencia)
+        return [1, 2]
+
+
+def test_tick_solo_genera_para_las_camaras_del_restaurante_demo():
+    sesion = _SesionDeIds()
+
+    assert tick._ids_de_camaras(sesion) == [1, 2]
+    consulta = sesion.sentencias[0]
+    assert consulta.compile().params["restaurante_id_1"] == RESTAURANTE_DEMO_ID
+    assert "camaras.restaurante_id" in str(consulta)

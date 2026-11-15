@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.base import utcnow
-from app.db.models import Camara, Lectura
+from app.db.models import RESTAURANTE_DEMO_ID, Camara, Lectura
 from app.schemas.telemetria import TelemetriaIn
 from app.services.telemetria import procesar_lectura
 from simulator.escenarios import (
@@ -31,8 +31,18 @@ VENTANA_TICK = timedelta(seconds=30)
 
 
 def _ids_de_camaras(session: Session) -> list[int]:
-    """IDs de todas las cámaras, ordenados; cada una se bloquea al procesarla."""
-    return list(session.scalars(select(Camara.id).order_by(Camara.id)))
+    """IDs de las cámaras del restaurante demo, ordenados.
+
+    El tick es parte de la demo: los tenants nuevos no reciben lecturas
+    simuladas, solo telemetría de sus sensores.
+    """
+    return list(
+        session.scalars(
+            select(Camara.id)
+            .where(Camara.restaurante_id == RESTAURANTE_DEMO_ID)
+            .order_by(Camara.id)
+        )
+    )
 
 
 def _hay_lectura_reciente(

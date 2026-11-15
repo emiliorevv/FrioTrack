@@ -200,6 +200,7 @@ def procesar_lectura(
         alertas_cerradas.append(alerta_temperatura)
     if resultado.abrir_alerta_temperatura:
         alerta_temperatura = Alerta(
+            restaurante_id=camara.restaurante_id,
             camara_id=camara.id,
             tipo=TIPO_ALERTA_TEMPERATURA,
             abierta_en=ahora,
@@ -217,6 +218,7 @@ def procesar_lectura(
         alertas_cerradas.append(alerta_puerta)
     if resultado.abrir_alerta_puerta:
         alerta_puerta = Alerta(
+            restaurante_id=camara.restaurante_id,
             camara_id=camara.id,
             tipo=TIPO_ALERTA_PUERTA,
             abierta_en=ahora,

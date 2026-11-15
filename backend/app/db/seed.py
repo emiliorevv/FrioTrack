@@ -10,7 +10,15 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings, leer_sensor_tokens
 from app.core.security import hash_password
-from app.db.models import Camara, Lote, Sensor, Usuario
+from app.db.models import (
+    NOMBRE_RESTAURANTE_DEMO,
+    RESTAURANTE_DEMO_ID,
+    Camara,
+    Lote,
+    Restaurante,
+    Sensor,
+    Usuario,
+)
 
 # Rangos y tiempos del README (NOM-251-SSA1-2009 para refrigerados y congelados).
 CAMARAS: list[dict[str, Any]] = [
@@ -89,7 +97,10 @@ def construir_seed(
         )
 
     # `estado` explícito: al no tocar la base, los defaults del modelo no se aplican.
-    camaras = [Camara(estado="en_rango", **datos) for datos in CAMARAS]
+    camaras = [
+        Camara(restaurante_id=RESTAURANTE_DEMO_ID, estado="en_rango", **datos)
+        for datos in CAMARAS
+    ]
 
     sensores = []
     for camara_id, sensor_id in SENSORES.items():
@@ -107,6 +118,7 @@ def construir_seed(
     hoy = date.today()
     lotes = [
         Lote(
+            restaurante_id=RESTAURANTE_DEMO_ID,
             producto=producto,
             camara_id=camara_id,
             cantidad=cantidad,
@@ -120,8 +132,18 @@ def construir_seed(
 
     password_hash = hash_password(password)
     usuarios = [
-        Usuario(usuario="jefe", password_hash=password_hash, rol="jefe_cocina"),
-        Usuario(usuario="gerente", password_hash=password_hash, rol="gerente"),
+        Usuario(
+            restaurante_id=RESTAURANTE_DEMO_ID,
+            usuario="jefe",
+            password_hash=password_hash,
+            rol="jefe_cocina",
+        ),
+        Usuario(
+            restaurante_id=RESTAURANTE_DEMO_ID,
+            usuario="gerente",
+            password_hash=password_hash,
+            rol="gerente",
+        ),
     ]
 
     return camaras, sensores, lotes, usuarios
@@ -140,6 +162,12 @@ def cargar_seed(
         return False
 
     camaras, sensores, lotes, usuarios = construir_seed(sensor_tokens, password)
+    if session.get(Restaurante, RESTAURANTE_DEMO_ID) is None:
+        # La migración 0002 ya lo inserta; esto cubre bases sembradas a mano.
+        session.add(
+            Restaurante(id=RESTAURANTE_DEMO_ID, nombre=NOMBRE_RESTAURANTE_DEMO)
+        )
+        session.flush()  # las filas hijas necesitan el restaurante antes del commit
     session.add_all(camaras)
     session.flush()
     session.add_all(sensores)

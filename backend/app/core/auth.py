@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import Usuario
+from app.db.models import RESTAURANTE_DEMO_ID, Usuario
 from app.db.session import SessionLocal, get_db, get_engine
 
 ALGORITMO_JWT = "HS256"
@@ -51,13 +51,14 @@ def huella_password(password_hash: str) -> str:
 
 
 def crear_token(usuario: Usuario) -> str:
-    """Firma un JWT HS256 con `sub`, `uid`, `rol`, `pwd`, `iat` y `exp`."""
+    """Firma un JWT HS256 con `sub`, `uid`, `rol`, `pwd`, `restaurante_id`, `iat` y `exp`."""
     ahora = datetime.now(UTC)
     payload = {
         "sub": usuario.usuario,
         "uid": usuario.id,
         "rol": usuario.rol,
         "pwd": huella_password(usuario.password_hash),
+        "restaurante_id": usuario.restaurante_id,
         "iat": ahora,
         "exp": ahora + timedelta(hours=get_settings().jwt_expira_horas),
     }
@@ -70,7 +71,7 @@ def decodificar_token(token: str) -> dict[str, Any]:
         token,
         get_settings().jwt_secret,
         algorithms=[ALGORITMO_JWT],
-        options={"require": ["sub", "uid", "rol", "pwd", "exp"]},
+        options={"require": ["sub", "uid", "rol", "pwd", "restaurante_id", "exp"]},
     )
 
 
@@ -114,6 +115,7 @@ def _usuario_del_token(request: Request, db: Session, token: str) -> Usuario:
     sub = payload.get("sub")
     uid = payload.get("uid")
     huella = payload.get("pwd")
+    restaurante_id = payload.get("restaurante_id")
     if (
         not isinstance(sub, str)
         or not sub
@@ -122,6 +124,9 @@ def _usuario_del_token(request: Request, db: Session, token: str) -> Usuario:
         or uid <= 0
         or not isinstance(huella, str)
         or not huella
+        or not isinstance(restaurante_id, int)
+        or isinstance(restaurante_id, bool)
+        or restaurante_id <= 0
     ):
         raise no_autorizado(MENSAJE_TOKEN_INVALIDO)
 
@@ -131,6 +136,9 @@ def _usuario_del_token(request: Request, db: Session, token: str) -> Usuario:
         raise no_autorizado(MENSAJE_TOKEN_INVALIDO)
     if not hmac.compare_digest(huella_password(usuario.password_hash), huella):
         # Cambió la contraseña, o se borró y recreó el usuario con el mismo id.
+        raise no_autorizado(MENSAJE_TOKEN_INVALIDO)
+    if usuario.restaurante_id != restaurante_id:
+        # El usuario cambió de restaurante: el token viejo ya no sirve.
         raise no_autorizado(MENSAJE_TOKEN_INVALIDO)
 
     # El middleware de acceso toma estos valores para `logs_acceso`.
@@ -175,6 +183,29 @@ def get_current_user_stream(
         raise no_autorizado(MENSAJE_TOKEN_STREAM_AUSENTE)
     with SessionLocal(bind=get_engine()) as db:
         return _usuario_del_token(request, db, token)
+
+
+def _restaurante_de(usuario: Usuario | None) -> int:
+    """Tenant del usuario; con `AUTH_REQUERIDA=0` (local/pruebas), el demo."""
+    return RESTAURANTE_DEMO_ID if usuario is None else usuario.restaurante_id
+
+
+def get_restaurante_id(
+    usuario: Annotated[Usuario | None, Depends(get_current_user)],
+) -> int:
+    """Restaurante de la petición; aísla las consultas REST por tenant."""
+    return _restaurante_de(usuario)
+
+
+def get_restaurante_id_stream(
+    usuario: Annotated[Usuario | None, Depends(get_current_user_stream)],
+) -> int:
+    """Restaurante de la conexión SSE (el token viaja en `?token=`)."""
+    return _restaurante_de(usuario)
+
+
+RestauranteId = Annotated[int, Depends(get_restaurante_id)]
+RestauranteIdStream = Annotated[int, Depends(get_restaurante_id_stream)]
 
 
 def require_rol(*roles: str) -> Callable[..., Usuario | None]:

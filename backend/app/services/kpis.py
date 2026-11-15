@@ -21,11 +21,13 @@ def _ahora() -> datetime:
     return datetime.now(UTC)
 
 
-def _consulta_pct_en_rango(desde: datetime) -> Select[tuple[int, int]]:
+def _consulta_pct_en_rango(desde: datetime, restaurante_id: int) -> Select[tuple[int, int]]:
     """Cuenta lecturas totales y lecturas dentro de rango desde `desde`, en SQL.
 
     `count(*) FILTER (...)` compila en Postgres y evita traer las lecturas a
-    Python; los extremos cuentan como dentro de rango, igual que antes.
+    Python; los extremos cuentan como dentro de rango, igual que antes. El join
+    con la cámara aplica el aislamiento por restaurante: `lecturas` no guarda
+    tenant propio.
     """
     dentro = func.count().filter(
         Lectura.temperatura_c.between(Camara.rango_min_c, Camara.rango_max_c)
@@ -34,32 +36,50 @@ def _consulta_pct_en_rango(desde: datetime) -> Select[tuple[int, int]]:
         select(func.count(), dentro)
         .select_from(Lectura)
         .join(Camara, Camara.id == Lectura.camara_id)
-        .where(Lectura.recibida_en >= desde)
+        .where(
+            Lectura.recibida_en >= desde,
+            Camara.restaurante_id == restaurante_id,
+        )
     )
 
 
-def calcular_kpis(db: Session) -> dict[str, Any]:
-    """Calcula los seis KPIs del encabezado con las queries actuales."""
+def calcular_kpis(db: Session, restaurante_id: int) -> dict[str, Any]:
+    """Calcula los seis KPIs del restaurante con las queries actuales."""
     ahora = _ahora()
     desde = ahora - timedelta(hours=24)
 
-    total_lecturas, lecturas_en_rango = db.execute(_consulta_pct_en_rango(desde)).one()
+    total_lecturas, lecturas_en_rango = db.execute(
+        _consulta_pct_en_rango(desde, restaurante_id)
+    ).one()
 
     alertas_activas = db.scalar(
-        select(func.count()).select_from(Alerta).where(Alerta.cerrada_en.is_(None))
+        select(func.count())
+        .select_from(Alerta)
+        .where(
+            Alerta.cerrada_en.is_(None),
+            Alerta.restaurante_id == restaurante_id,
+        )
     )
 
     atendidas = db.execute(
-        select(Alerta.abierta_en, Alerta.atendida_en).where(Alerta.atendida_en.is_not(None))
+        select(Alerta.abierta_en, Alerta.atendida_en).where(
+            Alerta.atendida_en.is_not(None),
+            Alerta.restaurante_id == restaurante_id,
+        )
     ).all()
 
     costos_en_riesgo = db.scalars(
-        select(Lote.costo_total_mxn).where(Lote.estado == "en_riesgo")
+        select(Lote.costo_total_mxn).where(
+            Lote.estado == "en_riesgo",
+            Lote.restaurante_id == restaurante_id,
+        )
     ).all()
 
     mermas = db.execute(
         select(Lote.merma_en, Lote.costo_total_mxn).where(
-            Lote.estado == "merma", Lote.merma_en.is_not(None)
+            Lote.estado == "merma",
+            Lote.merma_en.is_not(None),
+            Lote.restaurante_id == restaurante_id,
         )
     ).all()
 

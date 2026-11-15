@@ -39,7 +39,8 @@ def _sin_cache_settings():
 @pytest.fixture(autouse=True)
 def _kpis_y_cupo_limpios(monkeypatch):
     """Evita tocar Postgres y que el cupo se arrastre entre pruebas."""
-    monkeypatch.setattr(stream_mod, "calcular_kpis_actuales", lambda: KPIS)
+    monkeypatch.setattr(stream_mod, "calcular_kpis_actuales", lambda _rid: KPIS)
+    monkeypatch.setattr(stream_mod, "_ids_de_camaras", lambda _rid: frozenset({1, 2}))
     monkeypatch.setattr(
         stream_mod,
         "limite_conexiones",
@@ -84,7 +85,7 @@ def test_stream_manda_ping_cuando_no_hay_eventos(monkeypatch):
     monkeypatch.setattr(stream_mod, "ESPERA_EVENTO_SEGUNDOS", 0.01)
 
     async def escenario():
-        generador = stream_mod._eventos(_RequestFalsa())
+        generador = stream_mod._eventos(_RequestFalsa(), 1)
         try:
             await anext(generador)  # retry
             await anext(generador)  # kpis inicial
@@ -100,7 +101,7 @@ def test_stream_termina_al_recibir_cerrar(monkeypatch):
     monkeypatch.setattr(stream_mod, "bus", bus)
 
     async def escenario():
-        generador = stream_mod._eventos(_RequestFalsa())
+        generador = stream_mod._eventos(_RequestFalsa(), 1)
         try:
             await anext(generador)  # retry
             await anext(generador)  # kpis inicial
@@ -123,3 +124,53 @@ def test_limite_de_conexiones_se_libera_al_desuscribir():
     limite.adquirir()  # el cupo volvió a estar libre
 
     assert excepcion.value.status_code == 503
+
+
+def test_stream_filtra_camaras_ajenas_y_recalcula_kpis_del_tenant(monkeypatch):
+    bus = EventBus()
+    monkeypatch.setattr(stream_mod, "bus", bus)
+    calculos: list[int] = []
+    monkeypatch.setattr(
+        stream_mod,
+        "calcular_kpis_actuales",
+        lambda rid: calculos.append(rid) or {"restaurante_id": rid},
+    )
+    permitidas = {2}
+    monkeypatch.setattr(
+        stream_mod, "_ids_de_camaras", lambda _rid: frozenset(permitidas)
+    )
+
+    async def escenario():
+        generador = stream_mod._eventos(_RequestFalsa(), 2)
+        try:
+            assert "retry: 3000" in await anext(generador)
+            inicial = await anext(generador)
+            assert '"restaurante_id":2' in inicial
+
+            # La lectura de la cámara 1 es de otro tenant: se descarta.
+            bus.publicar("lectura", {"camara_id": 1, "temperatura_c": 3.0})
+            bus.publicar("lectura", {"camara_id": 2, "temperatura_c": 1.0})
+            propia = await asyncio.wait_for(anext(generador), timeout=1)
+
+            # El evento `kpis` del bus solo es la señal: se recalcula el tenant
+            # y se refresca la lista de cámaras permitidas.
+            permitidas.update({2, 3})
+            bus.publicar("kpis", {})
+            refresco = await asyncio.wait_for(anext(generador), timeout=1)
+            bus.publicar("lectura", {"camara_id": 3, "temperatura_c": 2.0})
+            nueva = await asyncio.wait_for(anext(generador), timeout=1)
+
+            return propia, refresco, nueva
+        finally:
+            await generador.aclose()
+
+    propia, refresco, nueva = asyncio.run(escenario())
+
+    assert propia.startswith("event: lectura")
+    assert '"camara_id":2' in propia
+    assert '"camara_id":1' not in propia
+    assert refresco.startswith("event: kpis")
+    assert '"restaurante_id":2' in refresco
+    assert nueva.startswith("event: lectura")
+    assert '"camara_id":3' in nueva
+    assert calculos == [2, 2]

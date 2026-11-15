@@ -12,22 +12,42 @@ Convenciones:
 ## Diagrama
 
 ```
-camaras 1───* lotes
-   │ 1
-   ├───* sensores
-   ├───* lecturas
-   └───* alertas
+restaurantes 1───* usuarios
+      │ 1
+      └───* camaras 1───* lotes
+             │ 1
+             ├───* sensores
+             ├───* lecturas
+             └───* alertas
 
-usuarios                 logs_acceso ──> (lo lee el detector SIEM)
+logs_acceso ──> (lo lee el detector SIEM)
 alertas_seguridad        ips_bloqueadas <── (lo escribe el detector, lo lee la API)
 ```
+
+## Tenant
+
+### `restaurantes`
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | `serial` PK | 1 = `FríoTrack Demo` |
+| `nombre` | `text` | |
+| `creado_en` | `timestamptz` | Default `utcnow` |
+
+El restaurante 1 lo inserta la migración `0002`; el seed lo reutiliza y no lo
+duplica. Con `AUTH_REQUERIDA=0` (local y pruebas) todas las consultas operan
+sobre ese tenant. `usuarios`, `camaras`, `lotes` y `alertas` llevan
+`restaurante_id` (FK a `restaurantes.id` + índice `ix_<tabla>_restaurante_id`).
+`lecturas` y `sensores` no la llevan: su tenant se deriva de la cámara.
+`logs_acceso`, `alertas_seguridad` e `ips_bloqueadas` siguen globales porque
+pertenecen al SIEM de la plataforma. Ver [multi-tenant.md](multi-tenant.md).
 
 ## Operación (ERP/MES)
 
 ### `camaras`
 | Columna | Tipo | Notas |
 |---|---|---|
-| `id` | `serial` PK | 1 a 5 |
+| `id` | `serial` PK | 1 a 5 en la demo |
+| `restaurante_id` | `int` FK | Tenant dueño de la cámara |
 | `nombre` | `text` | "Pescados y mariscos" |
 | `rango_min_c` | `numeric(4,1)` | |
 | `rango_max_c` | `numeric(4,1)` | |
@@ -73,6 +93,7 @@ token en claro.
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | `serial` PK | |
+| `restaurante_id` | `int` FK | Tenant dueño del inventario |
 | `producto` | `text` | "Robalo fresco" |
 | `camara_id` | `int` FK | |
 | `cantidad` | `numeric(8,2)` | |
@@ -86,6 +107,7 @@ token en claro.
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | `serial` PK | |
+| `restaurante_id` | `int` FK | Tenant que ve y atiende la alerta |
 | `camara_id` | `int` FK | |
 | `tipo` | `text` | `temperatura` o `puerta` |
 | `abierta_en` | `timestamptz` | |
@@ -102,7 +124,8 @@ Solo puede haber una alerta abierta por cámara y tipo.
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | `serial` PK | |
-| `usuario` | `text` unique | |
+| `restaurante_id` | `int` FK | Tenant del usuario; viaja en el JWT |
+| `usuario` | `text` unique | Único a nivel global (el sign-up por tenant llega después) |
 | `password_hash` | `text` | PBKDF2 o bcrypt, nunca en claro |
 | `rol` | `text` | `jefe_cocina` o `gerente` |
 | `telefono` | `text` null | A dónde llegan los SMS (formato `+52...`) |
@@ -152,7 +175,8 @@ La API revisa esta tabla al inicio de cada petición: si la IP está bloqueada y
 
 El backend crea las tablas y carga esto si la base está vacía:
 
-- Las 5 cámaras con los rangos y tiempos del README.
-- Un sensor por cámara.
+- El restaurante demo (`id 1`, `FríoTrack Demo`), si la migración no lo creó ya.
+- Las 5 cámaras del restaurante demo con los rangos y tiempos del README.
+- Un sensor por cámara (el tenant se deriva de la cámara).
 - 2 o 3 lotes por cámara con costos realistas (por ejemplo: robalo 12 kg $3,240; camarón 5 kg $1,610; arrachera 10 kg $3,100; pechuga 15 kg $1,650; crema 6 l $420; queso Oaxaca 4 kg $640; lechuga 20 pz $300; cilantro y hierbas $180; papas congeladas 10 kg $520; helado 8 l $760).
-- Dos usuarios: `jefe` (`jefe_cocina`) y `gerente` (`gerente`), con contraseña desde una variable de entorno.
+- Dos usuarios del restaurante demo: `jefe` (`jefe_cocina`) y `gerente` (`gerente`), con contraseña desde una variable de entorno.

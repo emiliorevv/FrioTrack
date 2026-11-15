@@ -16,7 +16,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user
+from app.core.auth import RestauranteId, get_current_user
 from app.db.models import Camara, Lectura, Lote
 from app.db.session import get_db
 
@@ -81,19 +81,29 @@ def _resumen_lectura(lectura: Lectura | None) -> dict[str, Any] | None:
 
 
 @router.get("/camaras")
-def listar_camaras(db: Db) -> list[dict[str, Any]]:
-    """Lista las cámaras con su última lectura y el valor de sus lotes.
+def listar_camaras(db: Db, restaurante_id: RestauranteId) -> list[dict[str, Any]]:
+    """Lista las cámaras del restaurante con su última lectura y el valor de sus lotes.
 
     `valor_en_riesgo_mxn` solo suma los lotes `en_riesgo`;
     `valor_inventario_mxn` suma todo el inventario salvo lo que ya es merma.
     """
-    camaras = db.execute(select(Camara).order_by(Camara.id)).scalars().all()
+    camaras = (
+        db.execute(
+            select(Camara)
+            .where(Camara.restaurante_id == restaurante_id)
+            .order_by(Camara.id)
+        )
+        .scalars()
+        .all()
+    )
     filas = db.execute(
         select(
             Lote.camara_id,
             func.sum(case((Lote.estado == "en_riesgo", Lote.costo_total_mxn), else_=0)),
             func.sum(case((Lote.estado != "merma", Lote.costo_total_mxn), else_=0)),
-        ).group_by(Lote.camara_id)
+        )
+        .where(Lote.restaurante_id == restaurante_id)
+        .group_by(Lote.camara_id)
     ).all()
     riesgo = {camara_id: float(total or 0) for camara_id, total, _ in filas}
     inventario = {camara_id: float(total or 0) for camara_id, _, total in filas}
@@ -120,15 +130,18 @@ def listar_camaras(db: Db) -> list[dict[str, Any]]:
 def listar_lecturas(
     id: int,
     db: Db,
+    restaurante_id: RestauranteId,
     desde: datetime | None = None,
     hasta: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Lecturas de una cámara; sin rango, las últimas 2 horas por `recibida_en`.
 
     Se piden las más recientes (hasta `LIMITE_LECTURAS`) y se responden en orden
-    ascendente, que es como la gráfica las dibuja.
+    ascendente, que es como la gráfica las dibuja. Una cámara de otro restaurante
+    responde 404, igual que una inexistente: no se filtra su existencia.
     """
-    if db.get(Camara, id) is None:
+    camara = db.get(Camara, id)
+    if camara is None or camara.restaurante_id != restaurante_id:
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
 
     if hasta is None:
@@ -169,14 +182,17 @@ def listar_lecturas(
 @router.get("/lotes")
 def listar_lotes(
     db: Db,
+    restaurante_id: RestauranteId,
     camara_id: int | None = None,
     estado: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Lotes de inventario, opcionalmente filtrados por cámara y estado."""
-    if camara_id is not None and db.get(Camara, camara_id) is None:
-        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    """Lotes del restaurante, opcionalmente filtrados por cámara y estado."""
+    if camara_id is not None:
+        camara = db.get(Camara, camara_id)
+        if camara is None or camara.restaurante_id != restaurante_id:
+            raise HTTPException(status_code=404, detail="Cámara no encontrada")
 
-    consulta = select(Lote)
+    consulta = select(Lote).where(Lote.restaurante_id == restaurante_id)
     if camara_id is not None:
         consulta = consulta.where(Lote.camara_id == camara_id)
     if estado is not None:
