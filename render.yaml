@@ -5,11 +5,13 @@
 # despierta cada minuto con POST /api/simulador/tick.
 #
 # Las variables marcadas con `sync: false` se capturan al crear el servicio
-# (o después, en Environment). No hay secretos en este archivo.
+# (o después, en Environment) y el blueprint NO las sobrescribe. No hay secretos
+# en este archivo.
 #
-# AUTH_REQUERIDA queda en 0 a propósito: el flag lo define el PR de auth y se
-# pondrá en 1 cuando el login del dashboard esté desplegado. Con el flag en 1,
-# el stream se consume como GET /api/stream?token=<jwt>.
+# AUTH_REQUERIDA también usa `sync: false`: al crear el servicio pon 0 mientras
+# no exista login en el dashboard; en producción debe ser 1 en cuanto el login
+# esté desplegado (0 solo para desarrollo/transición). Con el flag en 1, el
+# stream se consume como GET /api/stream?token=<jwt>.
 services:
   - type: web
     name: friotrack-api
@@ -17,19 +19,28 @@ services:
     rootDir: backend
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # --no-access-log: el JWT del stream viaja en ?token= y uvicorn no debe
+    # escribirlo en su access log. AccesoLogMiddleware sigue auditando método,
+    # ruta (sin query string) y status.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-access-log
     healthCheckPath: /api/health
     envVars:
+      # Fija el intérprete igual que CI (3.13) para que las dependencias con
+      # wheels binarios no cambien con el default de Render.
+      - key: PYTHON_VERSION
+        value: "3.13.7"
       # Producción: la API no arranca si JWT_SECRET, CRON_TOKEN, SEED_PASSWORD
       # o SENSOR_TOKENS conservan los valores de demo (ver app/config.py).
       - key: ENTORNO
         value: produccion
-      # 30 = modo demo (los tiempos de las reglas se dividen entre 30).
-      # Para operación real: 1.
+      # Este archivo es la fuente de verdad: para operación real cambia el
+      # value a "1" aquí (cambiarlo solo en el panel se revierte al sincronizar
+      # el blueprint). 30 = modo demo.
       - key: ESCALA_TIEMPO
         value: "30"
+      # sync: false para que el blueprint no pise el valor del panel.
       - key: AUTH_REQUERIDA
-        value: "0"
+        sync: false
 
       # Supabase → Project Settings → Database → Session Pooler.
       # Formato: postgresql+psycopg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
