@@ -1,0 +1,68 @@
+# Blueprint de Render para la API de FríoTrack (plan Free).
+#
+# La API es un monolito FastAPI sin workers en segundo plano: en Free Render
+# duerme tras 15 min sin tráfico y el Cloudflare Worker (cloudflare-cron/) la
+# despierta cada minuto con POST /api/simulador/tick.
+#
+# Las variables marcadas con `sync: false` se capturan al crear el servicio
+# (o después, en Environment). No hay secretos en este archivo.
+#
+# AUTH_REQUERIDA queda en 0 a propósito: el flag lo define el PR de auth y se
+# pondrá en 1 cuando el login del dashboard esté desplegado. Con el flag en 1,
+# el stream se consume como GET /api/stream?token=<jwt>.
+services:
+  - type: web
+    name: friotrack-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      # Producción: la API no arranca si JWT_SECRET, CRON_TOKEN, SEED_PASSWORD
+      # o SENSOR_TOKENS conservan los valores de demo (ver app/config.py).
+      - key: ENTORNO
+        value: produccion
+      # 30 = modo demo (los tiempos de las reglas se dividen entre 30).
+      # Para operación real: 1.
+      - key: ESCALA_TIEMPO
+        value: "30"
+      - key: AUTH_REQUERIDA
+        value: "0"
+
+      # Supabase → Project Settings → Database → Session Pooler.
+      # Formato: postgresql+psycopg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      # Al menos 32 caracteres; genéralo con `openssl rand -hex 32`.
+      - key: JWT_SECRET
+        sync: false
+      # Token compartido con el Cloudflare Worker.
+      - key: CRON_TOKEN
+        sync: false
+      # JSON con un token por sensor: {"S-PES-01":"...","S-CAR-01":"...",...}
+      - key: SENSOR_TOKENS
+        sync: false
+      # Contraseña de los usuarios semilla `jefe` y `gerente`; debe coincidir
+      # con la usada al correr `python -m app.db.init_db`.
+      - key: SEED_PASSWORD
+        sync: false
+
+      # Origen exacto del dashboard, sin slash final; varios separados por comas.
+      - key: CORS_ORIGINS
+        sync: false
+      # URL del dashboard para los enlaces de las notificaciones.
+      - key: DASHBOARD_URL
+        sync: false
+
+      # Twilio (opcional). Sin credenciales, el canal simulado sigue
+      # funcionando y `sms_enviados` queda en 0.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false
+      - key: TELEFONO_JEFE
+        sync: false
