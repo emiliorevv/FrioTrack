@@ -191,7 +191,7 @@ Respuesta `201` con la misma forma que un elemento de `GET /camaras`:
 Reglas de validación (`422` si no se cumplen): `nombre` de 2 a 120 caracteres después de recortar espacios; `-50 <= rango_min_c < rango_max_c <= 50`; `min_para_riesgo >= 1`; `min_para_merma > min_para_riesgo` (la merma es la etapa siguiente al riesgo). Los nombres duplicados están permitidos: no hay restricción de unicidad.
 
 #### `PATCH /camaras/{id}`
-Body parcial con cualquiera de los campos de configuración (`nombre`, `rango_min_c`, `rango_max_c`, `min_para_riesgo`, `min_para_merma`). No acepta `estado`, `ultima_lectura_id` ni `restaurante_id`: enviarlos responde `422`. Las reglas se validan contra la configuración ya guardada. Respuesta `200` con el mismo objeto que `GET /camaras`.
+Body parcial con cualquiera de los campos de configuración (`nombre`, `rango_min_c`, `rango_max_c`, `min_para_riesgo`, `min_para_merma`). No acepta `estado`, `ultima_lectura_id` ni `restaurante_id`: enviarlos responde `422`. Las reglas se validan contra la configuración ya guardada. Después de aplicar el cambio se reconcilia el estado con la última lectura: si queda en rango, limpia `fuera_de_rango_desde` y cierra la alerta de temperatura abierta; si queda fuera, arranca una ventana nueva sin abrir alerta (la decide la siguiente lectura o el tick). Respuesta `200` con el mismo objeto que `GET /camaras`.
 
 #### `DELETE /camaras/{id}`
 `204` si la cámara no tiene sensores, lotes, lecturas ni alertas. Si tiene dependencias responde `409` con el mensaje `La cámara tiene datos asociados; desactívala o elimina primero sus sensores.` No hay endpoint para desactivar cámaras en esta fase.
@@ -214,16 +214,16 @@ Cualquier rol autenticado del tenant. Lista los sensores del restaurante:
 `ultima_lectura` es `null` si el sensor nunca mandó una lectura. **Nunca** se expone `token_hash`: el token en claro solo aparece en el alta y en la rotación.
 
 #### `POST /camaras/{id}/sensores`
-Body opcional `{ "id": "S-BARRA-01" }`; sin `id`, la API genera `S-` + 8 hex. Respuesta `201`:
+Sin body. El servidor genera siempre el id (`S-` + 8 hex); el cliente no puede elegirlo para no sondear ids de otros restaurantes ni reutilizar ids de la demo. Respuesta `201`:
 
 ```json
 {
-  "sensor": { "id": "S-BARRA-01", "camara_id": 6, "activo": true },
+  "sensor": { "id": "S-3f9a2c1d", "camara_id": 6, "activo": true },
   "token": "<token en claro>"
 }
 ```
 
-El token es fuerte y **se muestra una sola vez**: la base solo guarda su SHA-256 en `sensores.token_hash`. `404` si la cámara es de otro restaurante; `409` si el `id` ya existe.
+El token es fuerte y **se muestra una sola vez**: la base solo guarda su SHA-256 en `sensores.token_hash`. `404` si la cámara es de otro restaurante. Si el id aleatorio choca (caso excepcional), la API reintenta y, si no logra uno libre, responde `500` con un mensaje claro.
 
 #### `POST /sensores/{id}/rotar-token`
 Genera un token nuevo, reemplaza el hash y responde `200` con la misma forma que el alta (`sensor` + `token`). El token anterior deja de autenticar inmediatamente.

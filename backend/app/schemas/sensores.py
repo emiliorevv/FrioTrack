@@ -2,15 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class SensorCreacion(BaseModel):
-    """Body opcional de `POST /camaras/{id}/sensores`; el id se autogenera si falta."""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    id: str | None = Field(default=None, min_length=1, max_length=64)
+from pydantic import BaseModel, ConfigDict
 
 
 class SensorActualizacion(BaseModel):

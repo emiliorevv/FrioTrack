@@ -81,7 +81,7 @@ def _cargar_alertas_abiertas(session: Session, camara_id: int) -> list[Alerta]:
 
 def _validar_sensor(
     session: Session, sensor_id: str, camara_id: int, token: str
-) -> None:
+) -> Sensor:
     """Autentica el token del sensor y comprueba que escriba en su propia cámara.
 
     Códigos del contrato: sensor inexistente o token incorrecto -> 401; sensor
@@ -113,6 +113,7 @@ def _validar_sensor(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="El sensor no está autorizado para escribir en esa cámara.",
         )
+    return sensor
 
 
 def procesar_telemetria(
@@ -128,7 +129,10 @@ def procesar_telemetria(
             detail=f"No existe la cámara {datos.camara_id}.",
         )
 
-    _validar_sensor(session, datos.sensor_id, camara.id, token)
+    sensor = _validar_sensor(session, datos.sensor_id, camara.id, token)
+    # Se persiste en el mismo commit que la lectura; el tick no tiene sensor y
+    # no toca esta caché.
+    sensor.ultima_lectura_en = utcnow()
     return procesar_lectura(session, datos, camara)
 
 

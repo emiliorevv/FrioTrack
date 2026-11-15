@@ -10,6 +10,7 @@ import hashlib
 import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -20,6 +21,7 @@ from app.core.auth import crear_token, get_restaurante_id, sesion_si_auth
 from app.db.models import Alerta, Camara, Lectura, Lote, Sensor, Usuario
 from app.db.session import get_db
 from app.main import create_app
+from app.routers import camaras as camaras_mod
 
 DATOS_CAMARA = {
     "nombre": "Barra fría",
@@ -29,14 +31,15 @@ DATOS_CAMARA = {
     "min_para_merma": 60,
 }
 
-PAYLOAD_TELEMETRIA = {
-    "sensor_id": "S-NUEVO",
-    "camara_id": 1,
-    "ts": "2026-11-18T13:05:00-06:00",
-    "temperatura_c": 1.4,
-    "humedad_pct": 88,
-    "puerta_abierta": False,
-}
+def _payload(sensor_id: str, camara_id: int = 1) -> dict[str, object]:
+    return {
+        "sensor_id": sensor_id,
+        "camara_id": camara_id,
+        "ts": "2026-11-18T13:05:00-06:00",
+        "temperatura_c": 1.4,
+        "humedad_pct": 88,
+        "puerta_abierta": False,
+    }
 
 MENSAJE_CAMARA_CON_DATOS = (
     "La cámara tiene datos asociados; desactívala o elimina primero sus sensores."
@@ -147,31 +150,27 @@ class SesionFalsa:
         self.consultas.append(sentencia)
         sql = str(sentencia)
         params = sentencia.compile().params  # type: ignore[attr-defined]
-        if "count(" in sql:
-            return self._contar(sql, params)
+        if "EXISTS" in sql.upper():
+            return self._existe(sql, params)
         raise AssertionError(f"scalar no soportado:\n{sentencia}")
 
-    def _contar(self, sql: str, params: dict[str, Any]) -> int:
-        if "FROM sensores" in sql:
-            camara_id = params.get("camara_id_1")
-            return sum(
-                1 for sensor in self.sensores.values() if sensor.camara_id == camara_id
+    def _existe(self, sql: str, params: dict[str, Any]) -> bool:
+        """Evalúa el EXISTS de borrado de sensor o el combinado de cámara."""
+        if "sensor_id" in sql:
+            return any(
+                lectura.sensor_id == params.get("sensor_id_1")
+                for lectura in self.lecturas
             )
-        if "FROM lotes" in sql:
-            return sum(1 for lote in self.lotes if lote.camara_id == params.get("camara_id_1"))
-        if "FROM alertas" in sql:
-            return sum(
-                1 for alerta in self.alertas if alerta.camara_id == params.get("camara_id_1")
-            )
-        if "FROM lecturas" in sql:
-            if "sensor_id_1" in params:
-                return sum(
-                    1 for lectura in self.lecturas if lectura.sensor_id == params["sensor_id_1"]
-                )
-            return sum(
-                1 for lectura in self.lecturas if lectura.camara_id == params.get("camara_id_1")
-            )
-        raise AssertionError(f"conteo no soportado:\n{sql}")
+        camara_id = next(
+            (valor for valor in params.values() if isinstance(valor, int)),
+            None,
+        )
+        return (
+            any(sensor.camara_id == camara_id for sensor in self.sensores.values())
+            or any(lote.camara_id == camara_id for lote in self.lotes)
+            or any(lectura.camara_id == camara_id for lectura in self.lecturas)
+            or any(alerta.camara_id == camara_id for alerta in self.alertas)
+        )
 
     def scalars(self, sentencia: object) -> Resultado:
         self.consultas.append(sentencia)
@@ -188,8 +187,11 @@ class SesionFalsa:
                     for alerta in self.alertas
                     if alerta.camara_id == params.get("camara_id_1")
                     and alerta.cerrada_en is None
+                    and ("tipo_1" not in params or alerta.tipo == params["tipo_1"])
                 ]
             )
+        if "from lecturas" in sql:
+            return Resultado(self._lecturas(sentencia, sql, params))
         return Resultado([])
 
     def execute(self, sentencia: object) -> Resultado:
@@ -227,22 +229,7 @@ class SesionFalsa:
             return Resultado(list(ultimas.items()))
 
         if "from lecturas" in sql:
-            if "id_1" in params:
-                ids = params["id_1"]
-                return Resultado([lectura for lectura in self.lecturas if lectura.id in ids])
-            camara_ids = params.get("camara_id_1")
-            if isinstance(camara_ids, (list, tuple, set, frozenset)):
-                filas = [lectura for lectura in self.lecturas if lectura.camara_id in camara_ids]
-            else:
-                filas = [lectura for lectura in self.lecturas if lectura.camara_id == camara_ids]
-            if "distinct on" in sql:
-                recientes: dict[int, Lectura] = {}
-                for lectura in sorted(
-                    filas, key=lambda fila: fila.recibida_en, reverse=True
-                ):
-                    recientes.setdefault(lectura.camara_id, lectura)
-                return Resultado(list(recientes.values()))
-            return Resultado(filas)
+            return Resultado(self._lecturas(sentencia, sql, params))
 
         if "from camaras" in sql:
             tenant = params.get("restaurante_id_1")
@@ -255,6 +242,30 @@ class SesionFalsa:
             )
 
         raise AssertionError(f"Consulta no soportada por la sesión falsa:\n{sentencia}")
+
+    def _lecturas(
+        self, sentencia: object, sql: str, params: dict[str, Any]
+    ) -> list[Lectura]:
+        """Filas de lecturas con los filtros, orden y límite que usa la API."""
+        if "id_1" in params:
+            ids = params["id_1"]
+            return [lectura for lectura in self.lecturas if lectura.id in ids]
+        camara_ids = params.get("camara_id_1")
+        if isinstance(camara_ids, (list, tuple, set, frozenset)):
+            filas = [lectura for lectura in self.lecturas if lectura.camara_id in camara_ids]
+        else:
+            filas = [lectura for lectura in self.lecturas if lectura.camara_id == camara_ids]
+        if "distinct on" in sql:
+            recientes: dict[int, Lectura] = {}
+            for lectura in sorted(
+                filas, key=lambda fila: fila.recibida_en, reverse=True
+            ):
+                recientes.setdefault(lectura.camara_id, lectura)
+            return list(recientes.values())
+        if "order by" in sql and "desc" in sql:
+            filas = sorted(filas, key=lambda fila: fila.recibida_en, reverse=True)
+        limite = getattr(sentencia, "_limit", None)
+        return filas[:limite] if limite is not None else filas
 
     @staticmethod
     def _sumas_por_camara(lotes: list[Lote]) -> list[tuple[int, Decimal, Decimal]]:
@@ -281,6 +292,7 @@ def _camara(
     base: dict[str, object] = {
         "id": camara_id,
         "restaurante_id": restaurante_id,
+        "es_demo": False,
         "nombre": nombre,
         "rango_min_c": Decimal("-5.0"),
         "rango_max_c": Decimal("5.0"),
@@ -297,12 +309,14 @@ def _sensor(
     camara_id: int = 1,
     activo: bool = True,
     token: str = "token-viejo",
+    ultima_lectura_en: datetime | None = None,
 ) -> Sensor:
     return Sensor(
         id=sensor_id,
         camara_id=camara_id,
         token_hash=hashlib.sha256(token.encode()).hexdigest(),
         activo=activo,
+        ultima_lectura_en=ultima_lectura_en,
     )
 
 
@@ -311,6 +325,8 @@ def _lectura(
     camara_id: int,
     sensor_id: str,
     recibida_en: datetime,
+    temperatura_c: str = "1.4",
+    puerta_abierta: bool = False,
 ) -> Lectura:
     return Lectura(
         id=lectura_id,
@@ -318,9 +334,9 @@ def _lectura(
         sensor_id=sensor_id,
         ts=recibida_en,
         recibida_en=recibida_en,
-        temperatura_c=Decimal("1.4"),
+        temperatura_c=Decimal(temperatura_c),
         humedad_pct=Decimal("88.0"),
-        puerta_abierta=False,
+        puerta_abierta=puerta_abierta,
         sospechosa=False,
     )
 
@@ -338,13 +354,18 @@ def _lote(camara_id: int = 1, lote_id: int = 1) -> Lote:
     )
 
 
-def _alerta(camara_id: int = 1, alerta_id: int = 1) -> Alerta:
+def _alerta(
+    camara_id: int = 1,
+    alerta_id: int = 1,
+    tipo: str = "temperatura",
+    cerrada_en: datetime | None = None,
+) -> Alerta:
     return Alerta(
         id=alerta_id,
         camara_id=camara_id,
-        tipo="temperatura",
+        tipo=tipo,
         abierta_en=datetime(2026, 11, 18, 19, 0, tzinfo=UTC),
-        cerrada_en=None,
+        cerrada_en=cerrada_en,
         sms_enviados=1,
     )
 
@@ -402,6 +423,21 @@ def test_crear_camara_201_con_shape_completo_y_tenant():
         "valor_inventario_mxn": 0.0,
     }
     assert sesion.camaras[1].restaurante_id == 7
+    assert sesion.camaras[1].es_demo is False
+
+
+def test_crear_camara_acepta_rangos_con_un_decimal():
+    sesion = SesionFalsa()
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.post(
+            "/api/camaras", json={**DATOS_CAMARA, "rango_min_c": 4.0, "rango_max_c": 4.1}
+        )
+
+    assert respuesta.status_code == 201
+    cuerpo = respuesta.json()
+    assert cuerpo["rango_min_c"] == 4.0
+    assert cuerpo["rango_max_c"] == 4.1
 
 
 def test_crear_camara_permite_nombre_duplicado():
@@ -429,6 +465,8 @@ def test_crear_camara_permite_nombre_duplicado():
         {"nombre": "  A  "},
         {"rango_min_c": -51.0},
         {"rango_max_c": 51.0},
+        {"rango_min_c": 4.04},
+        {"rango_max_c": 4.01},
         {"min_para_riesgo": 0},
         {"min_para_merma": 0},
         {"campo_desconocido": 1},
@@ -442,6 +480,8 @@ def test_crear_camara_permite_nombre_duplicado():
         "nombre-corto-con-espacios",
         "min-fuera-de-limite",
         "max-fuera-de-limite",
+        "min-dos-decimales",
+        "max-dos-decimales",
         "riesgo-cero",
         "merma-cero",
         "campo-extra",
@@ -529,6 +569,22 @@ def test_actualizar_camara_valida_contra_lo_guardado():
     assert "rango_min_c" in respuesta.json()["detail"][0]["msg"]
 
 
+@pytest.mark.parametrize(
+    "cambios",
+    [{"rango_min_c": 4.04}, {"rango_max_c": 4.01}],
+    ids=["min", "max"],
+)
+def test_actualizar_camara_rechaza_rangos_con_dos_decimales(cambios):
+    sesion = SesionFalsa()
+    sesion.add(_camara(1))
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.patch("/api/camaras/1", json=cambios)
+
+    assert respuesta.status_code == 422
+    assert sesion.camaras[1].rango_max_c == Decimal("5.0")
+
+
 def test_actualizar_camara_de_otro_tenant_regresa_404():
     sesion = SesionFalsa()
     sesion.add(_camara(2, restaurante_id=2))
@@ -538,6 +594,92 @@ def test_actualizar_camara_de_otro_tenant_regresa_404():
 
     assert respuesta.status_code == 404
     assert respuesta.json()["detail"] == "Cámara no encontrada"
+
+
+def test_patch_que_amplia_rango_cierra_alerta_y_limpia_ventana(monkeypatch):
+    sesion = SesionFalsa()
+    sesion.add(
+        _camara(
+            1,
+            rango_min_c=Decimal("0.0"),
+            rango_max_c=Decimal("4.0"),
+            estado="alerta",
+            fuera_de_rango_desde=datetime(2026, 11, 18, 18, 0, tzinfo=UTC),
+            ultima_lectura_id=1,
+        )
+    )
+    sesion.lecturas.append(
+        _lectura(
+            1,
+            1,
+            "S-A",
+            datetime(2026, 11, 18, 18, 5, tzinfo=UTC),
+            temperatura_c="6.0",
+        )
+    )
+    alerta = _alerta(camara_id=1)
+    sesion.alertas.append(alerta)
+    publicados: list[tuple[str, dict[str, object], int]] = []
+    monkeypatch.setattr(
+        camaras_mod,
+        "bus",
+        SimpleNamespace(
+            publicar=lambda evento, data, tenant: publicados.append((evento, data, tenant))
+        ),
+    )
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.patch("/api/camaras/1", json={"rango_max_c": 8.0})
+
+    assert respuesta.status_code == 200
+    assert respuesta.json()["estado"] == "en_rango"
+    camara = sesion.camaras[1]
+    assert camara.estado == "en_rango"
+    assert camara.fuera_de_rango_desde is None
+    assert alerta.cerrada_en is not None
+    assert [evento for evento, _, _ in publicados] == ["alerta_cerrada"]
+    assert publicados[0][2] == 1
+
+
+def test_patch_que_estrecha_rango_pasa_la_camara_a_alerta():
+    sesion = SesionFalsa()
+    sesion.add(
+        _camara(
+            1,
+            rango_min_c=Decimal("0.0"),
+            rango_max_c=Decimal("4.0"),
+            estado="en_rango",
+            ultima_lectura_id=1,
+        )
+    )
+    sesion.lecturas.append(
+        _lectura(1, 1, "S-A", datetime(2026, 11, 18, 18, 5, tzinfo=UTC), temperatura_c="2.0")
+    )
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.patch("/api/camaras/1", json={"rango_max_c": 1.0})
+
+    assert respuesta.status_code == 200
+    assert respuesta.json()["estado"] == "alerta"
+    camara = sesion.camaras[1]
+    assert camara.estado == "alerta"
+    assert camara.fuera_de_rango_desde is not None
+    assert sesion.alertas == []  # no se abre alerta: la decide la próxima lectura
+
+
+def test_patch_sin_lecturas_cierra_alerta_y_deja_en_rango():
+    sesion = SesionFalsa()
+    sesion.add(_camara(1, estado="alerta", fuera_de_rango_desde=datetime.now(UTC)))
+    alerta = _alerta(camara_id=1)
+    sesion.alertas.append(alerta)
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.patch("/api/camaras/1", json={"min_para_riesgo": 20})
+
+    assert respuesta.status_code == 200
+    assert respuesta.json()["estado"] == "en_rango"
+    assert sesion.camaras[1].fuera_de_rango_desde is None
+    assert alerta.cerrada_en is not None
 
 
 # --- Cámaras: baja ----------------------------------------------------------
@@ -597,20 +739,21 @@ def test_crear_sensor_entrega_token_una_vez_y_guarda_solo_el_hash():
     sesion.add(_camara(1))
 
     with _cliente(sesion) as cliente:
-        respuesta = cliente.post("/api/camaras/1/sensores", json={"id": "S-BARRA"})
+        respuesta = cliente.post("/api/camaras/1/sensores")
         listado = cliente.get("/api/sensores").json()
 
     assert respuesta.status_code == 201
     cuerpo = respuesta.json()
-    assert cuerpo["sensor"] == {"id": "S-BARRA", "camara_id": 1, "activo": True}
+    ident = cuerpo["sensor"]["id"]
+    assert cuerpo["sensor"] == {"id": ident, "camara_id": 1, "activo": True}
     token = cuerpo["token"]
     assert len(token) >= 32
-    assert sesion.sensores["S-BARRA"].token_hash == hashlib.sha256(token.encode()).hexdigest()
+    assert sesion.sensores[ident].token_hash == hashlib.sha256(token.encode()).hexdigest()
     assert token not in json.dumps(listado)
     assert "token_hash" not in json.dumps(listado)
     assert listado == [
         {
-            "id": "S-BARRA",
+            "id": ident,
             "camara_id": 1,
             "activo": True,
             "camara_nombre": "Cámara",
@@ -619,30 +762,19 @@ def test_crear_sensor_entrega_token_una_vez_y_guarda_solo_el_hash():
     ]
 
 
-def test_crear_sensor_sin_id_autogenera_s_mas_ocho_hex():
+def test_crear_sensor_genera_s_mas_ocho_hex_e_ignora_el_id_del_cliente():
     sesion = SesionFalsa()
     sesion.add(_camara(1))
 
     with _cliente(sesion) as cliente:
-        respuesta = cliente.post("/api/camaras/1/sensores", json={})
+        respuesta = cliente.post("/api/camaras/1/sensores", json={"id": "S-PES-01"})
 
     ident = respuesta.json()["sensor"]["id"]
     assert respuesta.status_code == 201
+    assert ident != "S-PES-01"
     assert ident.startswith("S-")
     assert len(ident) == 10
     assert all(caracter in "0123456789abcdef" for caracter in ident[2:])
-
-
-def test_crear_sensor_con_id_existente_regresa_409():
-    sesion = SesionFalsa()
-    sesion.add(_camara(1))
-    sesion.add(_sensor("S-REPETIDO", camara_id=1))
-
-    with _cliente(sesion) as cliente:
-        respuesta = cliente.post("/api/camaras/1/sensores", json={"id": "S-REPETIDO"})
-
-    assert respuesta.status_code == 409
-    assert respuesta.json()["detail"] == "El sensor ya existe."
 
 
 def test_crear_sensor_en_camara_ajena_regresa_404():
@@ -650,7 +782,7 @@ def test_crear_sensor_en_camara_ajena_regresa_404():
     sesion.add(_camara(2, restaurante_id=2))
 
     with _cliente(sesion, restaurante_id=1) as cliente:
-        respuesta = cliente.post("/api/camaras/2/sensores", json={"id": "S-AJENO"})
+        respuesta = cliente.post("/api/camaras/2/sensores")
 
     assert respuesta.status_code == 404
     assert sesion.sensores == {}
@@ -661,37 +793,38 @@ def test_telemetria_acepta_el_token_creado_y_la_rotacion_invalida_el_anterior():
 
     with _cliente(sesion) as cliente:
         camara = cliente.post("/api/camaras", json=DATOS_CAMARA).json()
-        creado = cliente.post(
-            f"/api/camaras/{camara['id']}/sensores", json={"id": "S-NUEVO"}
-        ).json()
+        creado = cliente.post(f"/api/camaras/{camara['id']}/sensores").json()
+        ident = creado["sensor"]["id"]
         token_viejo = creado["token"]
+        payload = _payload(ident, camara["id"])
 
         primera = cliente.post(
             "/api/telemetria",
-            json=PAYLOAD_TELEMETRIA,
+            json=payload,
             headers={"Authorization": f"Bearer {token_viejo}"},
         )
-        rotado = cliente.post("/api/sensores/S-NUEVO/rotar-token").json()
+        rotado = cliente.post(f"/api/sensores/{ident}/rotar-token").json()
         token_nuevo = rotado["token"]
         con_viejo = cliente.post(
             "/api/telemetria",
-            json=PAYLOAD_TELEMETRIA,
+            json=payload,
             headers={"Authorization": f"Bearer {token_viejo}"},
         )
         con_nuevo = cliente.post(
             "/api/telemetria",
-            json=PAYLOAD_TELEMETRIA,
+            json=payload,
             headers={"Authorization": f"Bearer {token_nuevo}"},
         )
 
     assert primera.status_code == 202
-    assert rotado["sensor"] == {"id": "S-NUEVO", "camara_id": 1, "activo": True}
+    assert rotado["sensor"] == {"id": ident, "camara_id": 1, "activo": True}
     assert token_nuevo != token_viejo
     assert con_viejo.status_code == 401
     assert con_nuevo.status_code == 202
-    assert sesion.sensores["S-NUEVO"].token_hash == hashlib.sha256(
+    assert sesion.sensores[ident].token_hash == hashlib.sha256(
         token_nuevo.encode()
     ).hexdigest()
+    assert sesion.sensores[ident].ultima_lectura_en is not None
 
 
 def test_desactivar_sensor_bloquea_la_telemetria_con_403():
@@ -699,18 +832,18 @@ def test_desactivar_sensor_bloquea_la_telemetria_con_403():
 
     with _cliente(sesion) as cliente:
         camara = cliente.post("/api/camaras", json=DATOS_CAMARA).json()
-        token = cliente.post(
-            f"/api/camaras/{camara['id']}/sensores", json={"id": "S-NUEVO"}
-        ).json()["token"]
-        desactivado = cliente.patch("/api/sensores/S-NUEVO", json={"activo": False})
+        creado = cliente.post(f"/api/camaras/{camara['id']}/sensores").json()
+        ident = creado["sensor"]["id"]
+        token = creado["token"]
+        desactivado = cliente.patch(f"/api/sensores/{ident}", json={"activo": False})
         telemetria = cliente.post(
             "/api/telemetria",
-            json=PAYLOAD_TELEMETRIA,
+            json=_payload(ident, camara["id"]),
             headers={"Authorization": f"Bearer {token}"},
         )
 
     assert desactivado.status_code == 200
-    assert desactivado.json() == {"id": "S-NUEVO", "camara_id": 1, "activo": False}
+    assert desactivado.json() == {"id": ident, "camara_id": 1, "activo": False}
     assert telemetria.status_code == 403
     assert "inactivo" in telemetria.json()["detail"]
 
@@ -718,17 +851,17 @@ def test_desactivar_sensor_bloquea_la_telemetria_con_403():
 # --- Sensores: listado y baja -----------------------------------------------
 
 
-def test_listar_sensores_usa_dos_consultas_y_trae_la_ultima_lectura():
+def test_listar_sensores_usa_una_consulta_y_la_cache_de_ultima_lectura():
     sesion = SesionFalsa()
     sesion.add(_camara(1))
-    sesion.add(_sensor("S-A", camara_id=1))
-    sesion.add(_sensor("S-B", camara_id=1))
-    sesion.lecturas.extend(
-        [
-            _lectura(1, 1, "S-A", datetime(2026, 11, 18, 17, 0, tzinfo=UTC)),
-            _lectura(2, 1, "S-A", datetime(2026, 11, 18, 19, 0, tzinfo=UTC)),
-        ]
+    sesion.add(
+        _sensor(
+            "S-A",
+            camara_id=1,
+            ultima_lectura_en=datetime(2026, 11, 18, 19, 0, tzinfo=UTC),
+        )
     )
+    sesion.add(_sensor("S-B", camara_id=1))
 
     with _cliente(sesion) as cliente:
         respuesta = cliente.get("/api/sensores")
@@ -750,8 +883,8 @@ def test_listar_sensores_usa_dos_consultas_y_trae_la_ultima_lectura():
             "ultima_lectura": None,
         },
     ]
-    # Sensores+cámaras y agregado de últimas lecturas: nunca una consulta por sensor.
-    assert len(sesion.consultas) == 2
+    # Una sola consulta de sensores+cámara; la última lectura sale de la caché.
+    assert len(sesion.consultas) == 1
 
 
 def test_listar_sensores_aisla_por_tenant():

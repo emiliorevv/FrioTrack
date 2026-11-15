@@ -6,7 +6,7 @@ import secrets
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import exists, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,6 @@ from app.routers.camaras import camara_del_restaurante
 from app.schemas.sensores import (
     SensorActualizacion,
     SensorConTokenSalida,
-    SensorCreacion,
     SensorListaSalida,
     SensorSalida,
 )
@@ -84,8 +83,8 @@ def _token_nuevo(sensor: Sensor) -> str:
 def listar_sensores(db: Db, restaurante_id: RestauranteId) -> list[SensorListaSalida]:
     """Lista los sensores del restaurante con su cámara y la última lectura.
 
-    Son dos consultas: sensores con el nombre de su cámara y un agregado
-    `max(recibida_en)` por sensor. Nunca se hace una consulta por sensor ni se
+    Una sola consulta: `sensores.ultima_lectura_en` mantiene la fecha al día en
+    la ingesta, así que no hay `GROUP BY` sobre `lecturas` ni N+1. Nunca se
     expone `token_hash`.
     """
     filas = db.execute(
@@ -94,14 +93,6 @@ def listar_sensores(db: Db, restaurante_id: RestauranteId) -> list[SensorListaSa
         .where(Camara.restaurante_id == restaurante_id)
         .order_by(Sensor.id)
     ).all()
-    ultimas = dict(
-        db.execute(
-            select(Lectura.sensor_id, func.max(Lectura.recibida_en))
-            .join(Camara, Camara.id == Lectura.camara_id)
-            .where(Camara.restaurante_id == restaurante_id)
-            .group_by(Lectura.sensor_id)
-        ).all()
-    )
 
     return [
         SensorListaSalida(
@@ -109,7 +100,7 @@ def listar_sensores(db: Db, restaurante_id: RestauranteId) -> list[SensorListaSa
             camara_id=sensor.camara_id,
             activo=sensor.activo,
             camara_nombre=camara_nombre,
-            ultima_lectura=iso(ultimas.get(sensor.id)),
+            ultima_lectura=iso(sensor.ultima_lectura_en),
         )
         for sensor, camara_nombre in filas
     ]
@@ -125,37 +116,36 @@ def crear_sensor(
     db: Db,
     restaurante_id: RestauranteId,
     usuario: Dueno,
-    datos: SensorCreacion | None = None,
 ) -> SensorConTokenSalida:
-    """Crea un sensor para una cámara del tenant y entrega su token una sola vez."""
-    camara = camara_del_restaurante(db, camara_id, restaurante_id)
-    if datos is not None and datos.id is not None:
-        if db.get(Sensor, datos.id) is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="El sensor ya existe."
-            )
-        ident = datos.id
-    else:
-        ident = _id_libre(db)
+    """Crea un sensor para una cámara del tenant y entrega su token una sola vez.
 
-    token = generar_token()
-    sensor = Sensor(
-        id=ident,
-        camara_id=camara.id,
-        token_hash=hash_token(token),
-        activo=True,
+    El id siempre lo genera la API (`S-` + 8 hex): el cliente no puede elegir un
+    id global ni sondear los de otros restaurantes.
+    """
+    camara = camara_del_restaurante(db, camara_id, restaurante_id)
+
+    for _ in range(3):
+        ident = _id_libre(db)
+        token = generar_token()
+        sensor = Sensor(
+            id=ident,
+            camara_id=camara.id,
+            token_hash=hash_token(token),
+            activo=True,
+        )
+        db.add(sensor)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Carrera con otro alta del mismo id aleatorio: se rola con otro.
+            db.rollback()
+            continue
+        return SensorConTokenSalida(sensor=_salida_sensor(sensor), token=token)
+
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="No se pudo generar un id único para el sensor; reintenta.",
     )
-    db.add(sensor)
-    try:
-        db.commit()
-    except IntegrityError as error:
-        # Carrera con otro alta del mismo id (la PK es lo único que puede chocar).
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="El sensor ya existe.",
-        ) from error
-    return SensorConTokenSalida(sensor=_salida_sensor(sensor), token=token)
 
 
 @router.post("/sensores/{sensor_id}/rotar-token", response_model=SensorConTokenSalida)
@@ -196,10 +186,7 @@ def eliminar_sensor(
 ) -> Response:
     """Elimina un sensor sin lecturas; con historial se sugiere desactivarlo."""
     sensor = sensor_del_restaurante(db, sensor_id, restaurante_id)
-    lecturas = db.scalar(
-        select(func.count()).select_from(Lectura).where(Lectura.sensor_id == sensor.id)
-    )
-    if lecturas:
+    if db.scalar(select(exists().where(Lectura.sensor_id == sensor.id))):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=MENSAJE_SENSOR_CON_LECTURAS,

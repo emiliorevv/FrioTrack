@@ -47,8 +47,9 @@ porque pertenecen al SIEM de la plataforma. Ver [multi-tenant.md](multi-tenant.m
 ### `camaras`
 | Columna | Tipo | Notas |
 |---|---|---|
-| `id` | `serial` PK | 1 a 5 en la demo |
+| `id` | `serial` PK | Sin id fijo: lo asigna la secuencia (el seed usa 1 a 5 en una base nueva) |
 | `restaurante_id` | `int` FK | Tenant dueño de la cámara |
+| `es_demo` | `bool` | Solo las cámaras del seed reciben el tick simulado |
 | `nombre` | `text` | "Pescados y mariscos" |
 | `rango_min_c` | `numeric(4,1)` | |
 | `rango_max_c` | `numeric(4,1)` | |
@@ -62,17 +63,18 @@ porque pertenecen al SIEM de la plataforma. Ver [multi-tenant.md](multi-tenant.m
 ### `sensores`
 | Columna | Tipo | Notas |
 |---|---|---|
-| `id` | `text` PK | `S-PES-01`, `S-CAR-01`, `S-LAC-01`, `S-VER-01`, `S-CON-01` |
+| `id` | `text` PK | `S-PES-01`, `S-CAR-01`, `S-LAC-01`, `S-VER-01`, `S-CON-01` en el seed; `S-` + 8 hex si lo crea la API |
 | `camara_id` | `int` FK | Un sensor solo puede escribir en su cámara |
 | `token_hash` | `text` | SHA-256 del token; el token en claro nunca se guarda |
 | `activo` | `bool` | Revocar un token = poner `false` |
+| `ultima_lectura_en` | `timestamptz` null | Caché de la última lectura real; la mantiene la ingesta y la usa `GET /sensores` |
 
 El token en claro **nunca** se guarda: la API y la base guardan únicamente el
 SHA-256 en `token_hash`, y la autenticación del sensor compara el hash. Los
 sensores dados de alta por API (`POST /camaras/{id}/sensores`) viven en esta
-tabla y su token en claro se muestra una sola vez; la rotación
-(`POST /sensores/{id}/rotar-token`) reemplaza el hash y invalida el anterior al
-instante.
+tabla, con id generado por el servidor, y su token en claro se muestra una sola
+vez; la rotación (`POST /sensores/{id}/rotar-token`) reemplaza el hash y
+invalida el anterior al instante.
 
 `SENSOR_TOKENS` solo **siembra** los cinco sensores de la demo la primera vez
 (cuando el restaurante demo todavía no tiene cámaras). `cargar_seed()` no toca
@@ -92,7 +94,8 @@ administran con el CRUD, no con la variable de entorno.
 | `puerta_abierta` | `bool` | |
 | `sospechosa` | `bool` | La marca el detector (regla de lecturas imposibles) |
 
-Índice: `(camara_id, recibida_en desc)`.
+Índices: `(camara_id, recibida_en desc)` para las gráficas y `(sensor_id)` para
+la baja de sensores y los filtros por sensor.
 
 ### `lotes`
 | Columna | Tipo | Notas |
@@ -179,7 +182,10 @@ La API revisa esta tabla al inicio de cada petición: si la IP está bloqueada y
 El backend crea las tablas y carga esto si la base está vacía:
 
 - El restaurante demo (`id 1`, `FríoTrack Demo`), si la migración no lo creó ya.
-- Las 5 cámaras del restaurante demo con los rangos y tiempos del README.
+- Las 5 cámaras del restaurante demo con los rangos y tiempos del README, marcadas
+  `es_demo=true`. No llevan id fijo: la secuencia los asigna y el seed remapea
+  sensores y lotes a las cámaras recién creadas, así que no choca con cámaras de
+  otros tenants que ya ocupen un id.
 - Un sensor por cámara (el tenant se deriva de la cámara).
 - 2 o 3 lotes por cámara con costos realistas (por ejemplo: robalo 12 kg $3,240; camarón 5 kg $1,610; arrachera 10 kg $3,100; pechuga 15 kg $1,650; crema 6 l $420; queso Oaxaca 4 kg $640; lechuga 20 pz $300; cilantro y hierbas $180; papas congeladas 10 kg $520; helado 8 l $760).
 - Dos usuarios del restaurante demo: `jefe` (`jefe_cocina`) y `gerente` (`gerente`), con contraseña desde una variable de entorno. El sign-up crea un usuario `dueno` por cada restaurante nuevo.

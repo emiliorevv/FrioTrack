@@ -275,7 +275,8 @@ def _cliente_con_servicio_real(
 
 
 def test_post_telemetria_con_token_valido_responde_202(monkeypatch):
-    sesion = SesionFalsa(camara=_camara(), sensor=_sensor())
+    sensor = _sensor()
+    sesion = SesionFalsa(camara=_camara(), sensor=sensor)
     cliente = _cliente_con_servicio_real(monkeypatch, sesion)
 
     with cliente:
@@ -289,10 +290,13 @@ def test_post_telemetria_con_token_valido_responde_202(monkeypatch):
         "estado_camara": "en_rango",
     }
     assert sesion.commits == 1
+    # La caché que alimenta GET /sensores se actualiza en la misma ingesta.
+    assert sensor.ultima_lectura_en == AHORA
 
 
 def test_post_telemetria_con_token_incorrecto_responde_401(monkeypatch):
-    sesion = SesionFalsa(camara=_camara(), sensor=_sensor())
+    sensor = _sensor()
+    sesion = SesionFalsa(camara=_camara(), sensor=sensor)
     cliente = _cliente_con_servicio_real(monkeypatch, sesion)
 
     with cliente:
@@ -305,6 +309,7 @@ def test_post_telemetria_con_token_incorrecto_responde_401(monkeypatch):
     assert respuesta.status_code == 401
     assert sesion.commits == 0
     assert sesion.agregados == []
+    assert sensor.ultima_lectura_en is None
 
 
 def test_servicio_camara_inexistente_responde_404():

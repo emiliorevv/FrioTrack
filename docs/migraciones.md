@@ -27,15 +27,19 @@ La revisión `0002` (`0002_restaurantes_tenant.py`) agrega `restaurantes` y
 de la cámara.
 
 La revisión `0003` (`0003_secuencia_camaras.py`) alinea `camaras_id_seq` con
-`MAX(id)` para las bases ya sembradas: el seed inserta las cámaras 1 a 5 con id
-explícito y, sin esto, el primer alta por API chocaba con la PK. El seed hace la
-misma alineación después de insertar. Es la revisión head actual.
+`MAX(id)` para las bases ya sembradas con el seed viejo, que insertaba las
+cámaras 1 a 5 con id explícito.
+
+La revisión `0004` (`0004_camaras_sensores_operacion.py`) agrega
+`camaras.es_demo` (con backfill de las cámaras demo 1–5),
+`sensores.ultima_lectura_en` (con backfill desde `lecturas`) y el índice
+`ix_lecturas_sensor_id`. Es la revisión head actual.
 
 ### Base nueva
 
 ```bash
 cd backend
-.venv/bin/python -m app.db.migrar   # aplica 0001 a 0003
+.venv/bin/python -m app.db.migrar   # aplica 0001 a 0004
 .venv/bin/python -m app.db.init_db  # carga el seed
 ```
 
@@ -49,7 +53,7 @@ usuarios. Si `DATABASE_URL` no está en el entorno, se lee de `backend/.env`
 El entrypoint detecta el caso: si no existe `alembic_version` pero sí la tabla
 `camaras`, compara `Base.metadata` contra la base (`compare_type=True`) y:
 
-- si el esquema coincide, marca la revisión head actual (hoy `0003`) como aplicada
+- si el esquema coincide, marca la revisión head actual (hoy `0004`) como aplicada
   (`stamp`) sin ejecutar DDL;
 - si hay diferencias, **falla sin marcar nada** con un mensaje que pide revisar
   el drift y crear una migración.
@@ -61,7 +65,7 @@ esquema:
 ```bash
 cd backend
 DATABASE_URL='postgresql+psycopg://...' .venv/bin/alembic stamp head
-DATABASE_URL='postgresql+psycopg://...' .venv/bin/alembic current   # 0003 (head actual)
+DATABASE_URL='postgresql+psycopg://...' .venv/bin/alembic current   # 0004 (head actual)
 DATABASE_URL='postgresql+psycopg://...' .venv/bin/alembic check     # sin drift
 ```
 
@@ -120,7 +124,7 @@ python -m app.db.migrar      # segunda vez: debe imprimir “Esquema al día”
 alembic check
 # base legada: tablas con create_all y sin alembic_version
 python -m app.db.migrar      # hace stamp, no DDL
-alembic current              # 0003 (head actual)
+alembic current              # 0004 (head actual)
 alembic check
 alembic downgrade base       # permitido: el host del service es localhost
 alembic upgrade head
@@ -147,7 +151,7 @@ esquema coincide. Ese chequeo no llama a `validar_configuracion()`; la
 validación de producción sigue ocurriendo cuando arranca `app.main`.
 
 Si haces rollback de Render a un deploy que solo conoce `0002` y la base ya está
-en `0003`, el entrypoint detecta que la revisión aplicada no existe en ese código,
+en `0004`, el entrypoint detecta que la revisión aplicada no existe en ese código,
 imprime una advertencia (“La BD está en una revisión más nueva que este deploy”)
 y arranca la app **sin ejecutar DDL**, en vez de fallar con “Can't locate
 revision”. Un `alembic_version` sin fila pero con tablas también se trata como

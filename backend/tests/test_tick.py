@@ -69,6 +69,7 @@ def _camara(camara_id: int, nombre: str = "Pescados y mariscos", **cambios: obje
     base = {
         "id": camara_id,
         "restaurante_id": RESTAURANTE_DEMO_ID,
+        "es_demo": True,
         "nombre": nombre,
         "rango_min_c": Decimal("0.0"),
         "rango_max_c": Decimal("2.0"),
@@ -378,10 +379,12 @@ class _SesionDeIds:
         return [1, 2]
 
 
-def test_tick_solo_genera_para_las_camaras_del_restaurante_demo():
+def test_tick_solo_genera_para_las_camaras_demo_del_restaurante_demo():
     sesion = _SesionDeIds()
 
     assert tick._ids_de_camaras(sesion) == [1, 2]
     consulta = sesion.sentencias[0]
     assert consulta.compile().params["restaurante_id_1"] == RESTAURANTE_DEMO_ID
     assert "camaras.restaurante_id" in str(consulta)
+    # Las cámaras creadas por API quedan fuera del tick simulado.
+    assert "camaras.es_demo IS true" in str(consulta)

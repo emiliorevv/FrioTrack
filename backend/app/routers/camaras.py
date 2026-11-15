@@ -13,18 +13,20 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.exceptions import RequestValidationError
-from sqlalchemy import case, func, select
+from pydantic import ValidationError
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from app.core.auth import RestauranteId, get_current_user, require_rol
+from app.db.base import utcnow
 from app.db.models import Alerta, Camara, Lectura, Lote, Sensor, Usuario
 from app.db.session import get_db
-from app.schemas.camaras import (
-    CamaraActualizacion,
-    CamaraCreacion,
-    validar_camara_actualizada,
-)
+from app.erp import reglas
+from app.erp.procesador import TIPO_ALERTA_TEMPERATURA
+from app.realtime.bus import bus
+from app.schemas.camaras import CamaraActualizacion, CamaraCreacion
+from app.schemas.operacion import alerta_salida
 
 router = APIRouter(prefix="/api", tags=["consulta"], dependencies=[Depends(get_current_user)])
 
@@ -166,13 +168,78 @@ def _salida_camara_con_valores(db: Session, camara: Camara) -> dict[str, Any]:
 
 
 def _tiene_dependencias(db: Session, camara_id: int) -> bool:
-    """Cuenta filas asociadas sin cargarlas; cualquier dependencia bloquea el borrado."""
-    for modelo in (Sensor, Lote, Lectura, Alerta):
-        if db.scalar(
-            select(func.count()).select_from(modelo).where(modelo.camara_id == camara_id)
-        ):
-            return True
-    return False
+    """Una sola query con EXISTS: cualquier fila asociada bloquea el borrado."""
+    return bool(
+        db.scalar(
+            select(
+                or_(
+                    exists().where(Sensor.camara_id == camara_id),
+                    exists().where(Lote.camara_id == camara_id),
+                    exists().where(Lectura.camara_id == camara_id),
+                    exists().where(Alerta.camara_id == camara_id),
+                )
+            )
+        )
+    )
+
+
+def _reconciliar_estado(db: Session, camara: Camara) -> Alerta | None:
+    """Recalcula estado/ventanas con la configuración nueva y cierra alertas si aplica.
+
+    Se llama después de aplicar el PATCH y antes del commit. No abre alertas: la
+    siguiente lectura o el tick deciden con las reglas normales. Regresa la
+    alerta de temperatura que se cerró, para publicarla tras el commit.
+    """
+    ultima = db.scalars(
+        select(Lectura)
+        .where(Lectura.camara_id == camara.id)
+        .order_by(Lectura.recibida_en.desc())
+        .limit(1)
+    ).first()
+    alerta_abierta = db.scalars(
+        select(Alerta).where(
+            Alerta.camara_id == camara.id,
+            Alerta.tipo == TIPO_ALERTA_TEMPERATURA,
+            Alerta.cerrada_en.is_(None),
+        )
+    ).first()
+
+    if ultima is None:
+        camara.estado = "en_rango"
+        camara.fuera_de_rango_desde = None
+        camara.puerta_abierta_desde = None
+        cerrada = alerta_abierta
+    else:
+        en_rango = reglas.esta_en_rango(
+            float(ultima.temperatura_c),
+            float(camara.rango_min_c),
+            float(camara.rango_max_c),
+        )
+        if en_rango:
+            camara.fuera_de_rango_desde = None
+            cerrada = alerta_abierta
+        else:
+            if camara.fuera_de_rango_desde is None:
+                camara.fuera_de_rango_desde = utcnow()
+            cerrada = None
+
+        if ultima.puerta_abierta:
+            if camara.puerta_abierta_desde is None:
+                camara.puerta_abierta_desde = ultima.recibida_en
+        else:
+            camara.puerta_abierta_desde = None
+
+        lotes = list(db.scalars(select(Lote).where(Lote.camara_id == camara.id)))
+        camara.estado = reglas.estado_camara(
+            en_rango=en_rango,
+            puerta_abierta=ultima.puerta_abierta,
+            lotes_en_riesgo=sum(1 for lote in lotes if lote.estado == "en_riesgo"),
+            lotes_en_merma=sum(1 for lote in lotes if lote.estado == "merma"),
+        )
+
+    if cerrada is not None:
+        cerrada.cerrada_en = utcnow()
+    return cerrada
 
 
 @router.get("/camaras")
@@ -212,12 +279,16 @@ def crear_camara(
     restaurante_id: RestauranteId,
     usuario: Dueno,
 ) -> dict[str, Any]:
-    """Crea una cámara en el restaurante del JWT, sin sensores ni lecturas."""
+    """Crea una cámara en el restaurante del JWT, sin sensores ni lecturas.
+
+    Nace con `es_demo=False`: el tick simulado solo alimenta las cámaras del seed.
+    """
     camara = Camara(
         restaurante_id=restaurante_id,
+        es_demo=False,
         nombre=datos.nombre,
-        rango_min_c=Decimal(str(datos.rango_min_c)),
-        rango_max_c=Decimal(str(datos.rango_max_c)),
+        rango_min_c=datos.rango_min_c,
+        rango_max_c=datos.rango_max_c,
         min_para_riesgo=datos.min_para_riesgo,
         min_para_merma=datos.min_para_merma,
         estado="en_rango",
@@ -235,39 +306,38 @@ def actualizar_camara(
     restaurante_id: RestauranteId,
     usuario: Dueno,
 ) -> dict[str, Any]:
-    """Actualiza la configuración de la cámara; ignora/niega campos de sistema.
+    """Actualiza la configuración y reconcilia el estado con los valores nuevos.
 
     Los campos de sistema (`estado`, `ultima_lectura_id`, `restaurante_id`) no
-    existen en el body y el esquema los rechaza con 422. Las reglas de rangos se
-    validan contra la configuración ya guardada al mezclar el PATCH.
+    existen en el body y el esquema los rechaza con 422. La configuración
+    resultante se valida con `CamaraCreacion`, la misma regla del alta.
     """
     camara = camara_del_restaurante(db, id, restaurante_id)
     cambios = datos.model_dump(exclude_unset=True)
+    alerta_cerrada = None
     if cambios:
-        resultado: dict[str, Any] = {
-            "rango_min_c": float(camara.rango_min_c),
-            "rango_max_c": float(camara.rango_max_c),
+        guardada = {
+            "nombre": camara.nombre,
+            "rango_min_c": camara.rango_min_c,
+            "rango_max_c": camara.rango_max_c,
             "min_para_riesgo": camara.min_para_riesgo,
             "min_para_merma": camara.min_para_merma,
         }
-        resultado.update(cambios)
         try:
-            validar_camara_actualizada(resultado)
-        except ValueError as error:
-            raise RequestValidationError(
-                [
-                    {
-                        "type": "value_error",
-                        "loc": ("body",),
-                        "msg": str(error),
-                        "input": cambios,
-                    }
-                ]
-            ) from error
+            validada = CamaraCreacion.model_validate({**guardada, **cambios})
+        except ValidationError as error:
+            raise RequestValidationError(error.errors()) from error
 
-        for campo, valor in cambios.items():
-            setattr(camara, campo, valor)
+        for campo in cambios:
+            setattr(camara, campo, getattr(validada, campo))
+        alerta_cerrada = _reconciliar_estado(db, camara)
         db.commit()
+        if alerta_cerrada is not None:
+            bus.publicar(
+                "alerta_cerrada",
+                alerta_salida(alerta_cerrada).model_dump(),
+                camara.restaurante_id,
+            )
 
     return _salida_camara_con_valores(db, camara)
 
