@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import logging
 from decimal import Decimal
@@ -12,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.sensor_token import hash_token
 from app.db.base import utcnow
 from app.db.models import Alerta, Camara, Lectura, Lote, Sensor
 from app.erp import reglas
@@ -79,11 +79,6 @@ def _cargar_alertas_abiertas(session: Session, camara_id: int) -> list[Alerta]:
     )
 
 
-def _hash_token(token: str) -> str:
-    """SHA-256 en hex del token: lo único que se guarda en `sensores.token_hash`."""
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
 def _validar_sensor(
     session: Session, sensor_id: str, camara_id: int, token: str
 ) -> None:
@@ -106,7 +101,7 @@ def _validar_sensor(
             detail="El sensor está inactivo.",
         )
 
-    if not hmac.compare_digest(sensor.token_hash, _hash_token(token)):
+    if not hmac.compare_digest(sensor.token_hash, hash_token(token)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token de sensor inválido.",

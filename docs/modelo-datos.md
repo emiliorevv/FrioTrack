@@ -67,13 +67,17 @@ porque pertenecen al SIEM de la plataforma. Ver [multi-tenant.md](multi-tenant.m
 | `token_hash` | `text` | SHA-256 del token; el token en claro nunca se guarda |
 | `activo` | `bool` | Revocar un token = poner `false` |
 
-El token en claro vive **solo** en la variable de entorno `SENSOR_TOKENS`, que se
-usa para **sembrar** los sensores la primera vez (cuando la base todavía no tiene
-cámaras). La rotación de tokens no está implementada en el Alfa: habría que
-actualizar `token_hash` a mano o con un script futuro, porque `cargar_seed()` no
-toca los sensores si ya hay cámaras. La API y la base guardan únicamente el
-SHA-256 en `token_hash`; la autenticación del sensor compara el hash, nunca el
-token en claro.
+El token en claro **nunca** se guarda: la API y la base guardan únicamente el
+SHA-256 en `token_hash`, y la autenticación del sensor compara el hash. Los
+sensores dados de alta por API (`POST /camaras/{id}/sensores`) viven en esta
+tabla y su token en claro se muestra una sola vez; la rotación
+(`POST /sensores/{id}/rotar-token`) reemplaza el hash y invalida el anterior al
+instante.
+
+`SENSOR_TOKENS` solo **siembra** los cinco sensores de la demo la primera vez
+(cuando el restaurante demo todavía no tiene cámaras). `cargar_seed()` no toca
+los sensores si el demo ya tiene cámaras, así que en producción los sensores se
+administran con el CRUD, no con la variable de entorno.
 
 ### `lecturas`
 | Columna | Tipo | Notas |

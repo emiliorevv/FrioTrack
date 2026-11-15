@@ -11,21 +11,31 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
-from app.core.auth import RestauranteId, get_current_user
-from app.db.models import Camara, Lectura, Lote
+from app.core.auth import RestauranteId, get_current_user, require_rol
+from app.db.models import Alerta, Camara, Lectura, Lote, Sensor, Usuario
 from app.db.session import get_db
+from app.schemas.camaras import (
+    CamaraActualizacion,
+    CamaraCreacion,
+    validar_camara_actualizada,
+)
 
 router = APIRouter(prefix="/api", tags=["consulta"], dependencies=[Depends(get_current_user)])
 
 VENTANA_POR_DEFECTO = timedelta(hours=2)
 LIMITE_LECTURAS = 5000
+MENSAJE_CAMARA_CON_DATOS = (
+    "La cámara tiene datos asociados; desactívala o elimina primero sus sensores."
+)
 
 Db = Annotated[Session, Depends(get_db)]
+Dueno = Annotated[Usuario | None, Depends(require_rol("dueno"))]
 
 
 def camara_del_restaurante(
@@ -98,6 +108,73 @@ def _resumen_lectura(lectura: Lectura | None) -> dict[str, Any] | None:
     }
 
 
+def _salida_camara(
+    camara: Camara,
+    lectura: Lectura | None = None,
+    valor_en_riesgo_mxn: float = 0.0,
+    valor_inventario_mxn: float = 0.0,
+) -> dict[str, Any]:
+    """Shape de cámara compartido por `GET`, el alta y la edición."""
+    return {
+        "id": camara.id,
+        "nombre": camara.nombre,
+        "rango_min_c": _flotante(camara.rango_min_c),
+        "rango_max_c": _flotante(camara.rango_max_c),
+        "min_para_riesgo": camara.min_para_riesgo,
+        "min_para_merma": camara.min_para_merma,
+        "estado": camara.estado,
+        "ultima_lectura": _resumen_lectura(lectura),
+        "valor_en_riesgo_mxn": valor_en_riesgo_mxn,
+        "valor_inventario_mxn": valor_inventario_mxn,
+    }
+
+
+def _valores_por_camara(
+    db: Session, camara_ids: Sequence[int]
+) -> tuple[dict[int, float], dict[int, float]]:
+    """Riesgo e inventario por cámara en una sola query agregada.
+
+    Los ids vienen de cámaras ya filtradas por restaurante, así que no hace
+    falta volver a unir con `camaras`.
+    """
+    if not camara_ids:
+        return {}, {}
+    filas = db.execute(
+        select(
+            Lote.camara_id,
+            func.sum(case((Lote.estado == "en_riesgo", Lote.costo_total_mxn), else_=0)),
+            func.sum(case((Lote.estado != "merma", Lote.costo_total_mxn), else_=0)),
+        )
+        .where(Lote.camara_id.in_(camara_ids))
+        .group_by(Lote.camara_id)
+    ).all()
+    riesgo = {camara_id: float(total or 0) for camara_id, total, _ in filas}
+    inventario = {camara_id: float(total or 0) for camara_id, _, total in filas}
+    return riesgo, inventario
+
+
+def _salida_camara_con_valores(db: Session, camara: Camara) -> dict[str, Any]:
+    """Cámara con sus valores reales; lo usa la edición (el alta nace en cero)."""
+    riesgo, inventario = _valores_por_camara(db, [camara.id])
+    lectura = _ultimas_lecturas(db, [camara]).get(camara.id)
+    return _salida_camara(
+        camara,
+        lectura,
+        riesgo.get(camara.id, 0.0),
+        inventario.get(camara.id, 0.0),
+    )
+
+
+def _tiene_dependencias(db: Session, camara_id: int) -> bool:
+    """Cuenta filas asociadas sin cargarlas; cualquier dependencia bloquea el borrado."""
+    for modelo in (Sensor, Lote, Lectura, Alerta):
+        if db.scalar(
+            select(func.count()).select_from(modelo).where(modelo.camara_id == camara_id)
+        ):
+            return True
+    return False
+
+
 @router.get("/camaras")
 def listar_camaras(db: Db, restaurante_id: RestauranteId) -> list[dict[str, Any]]:
     """Lista las cámaras del restaurante con su última lectura y el valor de sus lotes.
@@ -114,35 +191,104 @@ def listar_camaras(db: Db, restaurante_id: RestauranteId) -> list[dict[str, Any]
         .scalars()
         .all()
     )
-    filas = db.execute(
-        select(
-            Lote.camara_id,
-            func.sum(case((Lote.estado == "en_riesgo", Lote.costo_total_mxn), else_=0)),
-            func.sum(case((Lote.estado != "merma", Lote.costo_total_mxn), else_=0)),
-        )
-        .join(Camara, Camara.id == Lote.camara_id)
-        .where(Camara.restaurante_id == restaurante_id)
-        .group_by(Lote.camara_id)
-    ).all()
-    riesgo = {camara_id: float(total or 0) for camara_id, total, _ in filas}
-    inventario = {camara_id: float(total or 0) for camara_id, _, total in filas}
+    riesgo, inventario = _valores_por_camara(db, [camara.id for camara in camaras])
     lecturas = _ultimas_lecturas(db, camaras)
 
     return [
-        {
-            "id": camara.id,
-            "nombre": camara.nombre,
-            "rango_min_c": _flotante(camara.rango_min_c),
-            "rango_max_c": _flotante(camara.rango_max_c),
-            "min_para_riesgo": camara.min_para_riesgo,
-            "min_para_merma": camara.min_para_merma,
-            "estado": camara.estado,
-            "ultima_lectura": _resumen_lectura(lecturas.get(camara.id)),
-            "valor_en_riesgo_mxn": riesgo.get(camara.id, 0.0),
-            "valor_inventario_mxn": inventario.get(camara.id, 0.0),
-        }
+        _salida_camara(
+            camara,
+            lecturas.get(camara.id),
+            riesgo.get(camara.id, 0.0),
+            inventario.get(camara.id, 0.0),
+        )
         for camara in camaras
     ]
+
+
+@router.post("/camaras", status_code=status.HTTP_201_CREATED)
+def crear_camara(
+    datos: CamaraCreacion,
+    db: Db,
+    restaurante_id: RestauranteId,
+    usuario: Dueno,
+) -> dict[str, Any]:
+    """Crea una cámara en el restaurante del JWT, sin sensores ni lecturas."""
+    camara = Camara(
+        restaurante_id=restaurante_id,
+        nombre=datos.nombre,
+        rango_min_c=Decimal(str(datos.rango_min_c)),
+        rango_max_c=Decimal(str(datos.rango_max_c)),
+        min_para_riesgo=datos.min_para_riesgo,
+        min_para_merma=datos.min_para_merma,
+        estado="en_rango",
+    )
+    db.add(camara)
+    db.commit()
+    return _salida_camara(camara)
+
+
+@router.patch("/camaras/{id}")
+def actualizar_camara(
+    id: int,
+    datos: CamaraActualizacion,
+    db: Db,
+    restaurante_id: RestauranteId,
+    usuario: Dueno,
+) -> dict[str, Any]:
+    """Actualiza la configuración de la cámara; ignora/niega campos de sistema.
+
+    Los campos de sistema (`estado`, `ultima_lectura_id`, `restaurante_id`) no
+    existen en el body y el esquema los rechaza con 422. Las reglas de rangos se
+    validan contra la configuración ya guardada al mezclar el PATCH.
+    """
+    camara = camara_del_restaurante(db, id, restaurante_id)
+    cambios = datos.model_dump(exclude_unset=True)
+    if cambios:
+        resultado: dict[str, Any] = {
+            "rango_min_c": float(camara.rango_min_c),
+            "rango_max_c": float(camara.rango_max_c),
+            "min_para_riesgo": camara.min_para_riesgo,
+            "min_para_merma": camara.min_para_merma,
+        }
+        resultado.update(cambios)
+        try:
+            validar_camara_actualizada(resultado)
+        except ValueError as error:
+            raise RequestValidationError(
+                [
+                    {
+                        "type": "value_error",
+                        "loc": ("body",),
+                        "msg": str(error),
+                        "input": cambios,
+                    }
+                ]
+            ) from error
+
+        for campo, valor in cambios.items():
+            setattr(camara, campo, valor)
+        db.commit()
+
+    return _salida_camara_con_valores(db, camara)
+
+
+@router.delete("/camaras/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_camara(
+    id: int,
+    db: Db,
+    restaurante_id: RestauranteId,
+    usuario: Dueno,
+) -> Response:
+    """Elimina una cámara solo si no tiene sensores, lotes, lecturas ni alertas."""
+    camara = camara_del_restaurante(db, id, restaurante_id)
+    if _tiene_dependencias(db, camara.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=MENSAJE_CAMARA_CON_DATOS,
+        )
+    db.delete(camara)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/camaras/{id}/lecturas")
