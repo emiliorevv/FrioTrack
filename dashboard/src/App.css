@@ -441,6 +441,30 @@
   line-height: 1.45;
 }
 
+.alertas-activas__error--accion {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.alertas-activas__error--accion p {
+  flex: 1;
+  min-width: 0;
+}
+
+.alertas-activas__cerrar {
+  flex: 0 0 auto;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: underline;
+}
+
 @media (min-width: 640px) {
   .alerta-activa {
     padding: 14px 16px;

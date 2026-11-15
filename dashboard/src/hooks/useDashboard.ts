@@ -51,9 +51,13 @@ export interface EstadoDashboard {
   cargandoAlertas: boolean
   /** Fallo del carril de alertas activas; no bloquea el resto. */
   errorAlertas: string | null
+  /** Fallo de la acción de atender; conserva el `detail` del backend. */
+  errorAtender: string | null
+  /** Limpia el error de la última acción de atender. */
+  limpiarErrorAtender: () => void
   /** Ids con una petición de atención en curso. */
   atendiendo: Record<number, boolean>
-  /** Marca una alerta como atendida y refresca KPIs/cámaras. */
+  /** Marca una alerta como atendida; el resumen se refresca por SSE/polling. */
   atenderAlerta: (id: number, nota?: string) => Promise<void>
   /** Temperaturas por cámara, de la más vieja a la más reciente. */
   series: Record<number, SerieCamara>
@@ -66,6 +70,57 @@ export interface EstadoDashboard {
   /** Último evento SSE recibido en este hook. */
   ultimaActividadSse: Date | null
   refrescar: () => Promise<void>
+}
+
+interface RefActual<T> {
+  current: T
+}
+
+/**
+ * Ejecutor común de un carril HTTP: aborta el anterior, incrementa el id,
+ * comprueba que el componente siga montado y que la respuesta siga vigente,
+ * y delega el éxito o el error al llamador.
+ */
+function useCarril(
+  activoRef: RefActual<boolean>,
+  controladorRef: RefActual<AbortController | null>,
+  solicitudRef: RefActual<number>,
+) {
+  return useCallback(
+    async <T>(
+      pedir: (senal: AbortSignal) => Promise<T>,
+      aplicar: (datos: T) => void,
+      alFallar: (mensaje: string) => void,
+    ) => {
+      if (!activoRef.current) {
+        return
+      }
+
+      controladorRef.current?.abort()
+      const controlador = new AbortController()
+      controladorRef.current = controlador
+      solicitudRef.current += 1
+      const idSolicitud = solicitudRef.current
+
+      try {
+        const datos = await pedir(controlador.signal)
+        if (!activoRef.current || solicitudRef.current !== idSolicitud) {
+          return
+        }
+        aplicar(datos)
+      } catch (fallo) {
+        if (
+          !activoRef.current ||
+          solicitudRef.current !== idSolicitud ||
+          esAbortado(fallo)
+        ) {
+          return
+        }
+        alFallar(mensajeDeError(fallo))
+      }
+    },
+    [activoRef, controladorRef, solicitudRef],
+  )
 }
 
 /**
@@ -90,6 +145,7 @@ export function useDashboard(): EstadoDashboard {
   const [alertasActivas, setAlertasActivas] = useState<AlertaOperativa[]>([])
   const [cargandoAlertas, setCargandoAlertas] = useState(true)
   const [errorAlertas, setErrorAlertas] = useState<string | null>(null)
+  const [errorAtender, setErrorAtender] = useState<string | null>(null)
   const [atendiendo, setAtendiendo] = useState<Record<number, boolean>>({})
   const [puntosSeries, setPuntosSeries] = useState<
     Record<number, PuntoSerie[]>
@@ -141,6 +197,27 @@ export function useDashboard(): EstadoDashboard {
 
   const timerResumenRef = useRef<number | null>(null)
 
+  const ejecutarSeries = useCarril(
+    activoRef,
+    seriesControladorRef,
+    seriesSolicitudRef,
+  )
+  const ejecutarHealth = useCarril(
+    activoRef,
+    healthControladorRef,
+    healthSolicitudRef,
+  )
+  const ejecutarAlertasSeguridad = useCarril(
+    activoRef,
+    alertasControladorRef,
+    alertasSolicitudRef,
+  )
+  const ejecutarAlertasActivas = useCarril(
+    activoRef,
+    alertasActivasControladorRef,
+    alertasActivasSolicitudRef,
+  )
+
   const actualizarPuntos = useCallback(
     (
       calculo: (
@@ -172,42 +249,34 @@ export function useDashboard(): EstadoDashboard {
           const lote = [...seriesPendientesRef.current]
           seriesPendientesRef.current.clear()
 
-          seriesControladorRef.current?.abort()
-          const controlador = new AbortController()
-          seriesControladorRef.current = controlador
-          seriesSolicitudRef.current += 1
-          const idSolicitud = seriesSolicitudRef.current
-
-          const resultados = await Promise.allSettled(
-            lote.map((id) => obtenerLecturas(id, controlador.signal)),
+          await ejecutarSeries(
+            (senal) =>
+              Promise.allSettled(lote.map((id) => obtenerLecturas(id, senal))),
+            (resultados) => {
+              const http: Record<number, PuntoSerie[]> = {}
+              resultados.forEach((resultado, indice) => {
+                if (resultado.status !== 'fulfilled') {
+                  return
+                }
+                http[lote[indice]] = resultado.value
+                  .slice(-PUNTOS_INICIALES)
+                  .map((lectura) => ({
+                    ts: lectura.ts,
+                    valor: lectura.temperatura_c,
+                  }))
+              })
+              actualizarPuntos((actual) => fusionarSeries(actual, http))
+            },
+            () => {
+              // Las series fallidas se reintentan en el próximo polling.
+            },
           )
-          if (
-            !activoRef.current ||
-            seriesSolicitudRef.current !== idSolicitud
-          ) {
-            return
-          }
-
-          const http: Record<number, PuntoSerie[]> = {}
-          resultados.forEach((resultado, indice) => {
-            if (resultado.status !== 'fulfilled') {
-              return
-            }
-            http[lote[indice]] = resultado.value
-              .slice(-PUNTOS_INICIALES)
-              .map((lectura) => ({
-                ts: lectura.ts,
-                valor: lectura.temperatura_c,
-              }))
-          })
-
-          actualizarPuntos((actual) => fusionarSeries(actual, http))
         }
       } finally {
         seriesEnVueloRef.current = false
       }
     },
-    [actualizarPuntos],
+    [actualizarPuntos, ejecutarSeries],
   )
 
   const cargarHealth = useCallback(async () => {
@@ -215,82 +284,65 @@ export function useDashboard(): EstadoDashboard {
       return
     }
 
-    healthControladorRef.current?.abort()
-    const controlador = new AbortController()
-    healthControladorRef.current = controlador
-    healthSolicitudRef.current += 1
-    const idSolicitud = healthSolicitudRef.current
+    await ejecutarHealth(
+      (senal) => obtenerHealth(senal),
+      (salud) => {
+        healthRef.current = salud
+        setHealth(salud)
+      },
+      () => {
+        // Es opcional: solo controla la etiqueta de demo.
+      },
+    )
+  }, [ejecutarHealth])
 
-    try {
-      const salud = await obtenerHealth(controlador.signal)
-      if (!activoRef.current || healthSolicitudRef.current !== idSolicitud) {
-        return
-      }
-      healthRef.current = salud
-      setHealth(salud)
-    } catch {
-      // Es opcional: solo controla la etiqueta de demo.
-    }
-  }, [])
+  const cargarAlertas = useCallback(
+    () =>
+      ejecutarAlertasSeguridad(
+        (senal) => obtenerAlertasSeguridad(senal),
+        (alertas) => {
+          setAlertasSeguridad(alertas)
+          setAlertasCargadas(true)
+          setErrorAlertasSeguridad(null)
+        },
+        (mensaje) => {
+          // Se conservan las alertas previas; el panel muestra el error.
+          setErrorAlertasSeguridad(mensaje)
+        },
+      ),
+    [ejecutarAlertasSeguridad],
+  )
 
-  const cargarAlertas = useCallback(async () => {
-    alertasControladorRef.current?.abort()
-    const controlador = new AbortController()
-    alertasControladorRef.current = controlador
-    alertasSolicitudRef.current += 1
-    const idSolicitud = alertasSolicitudRef.current
+  const cargarAlertasActivas = useCallback(
+    () =>
+      ejecutarAlertasActivas(
+        (senal) => obtenerAlertasActivas(senal),
+        (alertas) => {
+          setAlertasActivas(alertas)
+          setErrorAlertas(null)
+          setCargandoAlertas(false)
+        },
+        (mensaje) => {
+          // Se conserva la lista previa; la sección muestra el error de lista.
+          setErrorAlertas(mensaje)
+          setCargandoAlertas(false)
+        },
+      ),
+    [ejecutarAlertasActivas],
+  )
 
-    try {
-      const alertas = await obtenerAlertasSeguridad(controlador.signal)
-      if (!activoRef.current || alertasSolicitudRef.current !== idSolicitud) {
-        return
-      }
-      setAlertasSeguridad(alertas)
-      setAlertasCargadas(true)
-      setErrorAlertasSeguridad(null)
-    } catch (fallo) {
-      if (
-        !activoRef.current ||
-        alertasSolicitudRef.current !== idSolicitud ||
-        esAbortado(fallo)
-      ) {
-        return
-      }
-      // Se conservan las alertas previas; el panel muestra el estado de error.
-      setErrorAlertasSeguridad(mensajeDeError(fallo))
-    }
-  }, [])
-
-  const cargarAlertasActivas = useCallback(async () => {
+  const invalidarCarrilAlertasActivas = useCallback(() => {
     alertasActivasControladorRef.current?.abort()
-    const controlador = new AbortController()
-    alertasActivasControladorRef.current = controlador
     alertasActivasSolicitudRef.current += 1
-    const idSolicitud = alertasActivasSolicitudRef.current
+  }, [])
 
-    try {
-      const alertas = await obtenerAlertasActivas(controlador.signal)
-      if (
-        !activoRef.current ||
-        alertasActivasSolicitudRef.current !== idSolicitud
-      ) {
-        return
-      }
-      setAlertasActivas(alertas)
-      setErrorAlertas(null)
-      setCargandoAlertas(false)
-    } catch (fallo) {
-      if (
-        !activoRef.current ||
-        alertasActivasSolicitudRef.current !== idSolicitud ||
-        esAbortado(fallo)
-      ) {
-        return
-      }
-      // Se conserva la lista previa; la sección muestra un aviso no bloqueante.
-      setErrorAlertas(mensajeDeError(fallo))
-      setCargandoAlertas(false)
-    }
+  const abortarCarriles = useCallback(() => {
+    resumenControladorRef.current?.abort()
+    resumenEventoControladorRef.current?.abort()
+    seriesControladorRef.current?.abort()
+    healthControladorRef.current?.abort()
+    alertasControladorRef.current?.abort()
+    alertasActivasControladorRef.current?.abort()
   }, [])
 
   const aplicarResumen = useCallback(
@@ -431,6 +483,10 @@ export function useDashboard(): EstadoDashboard {
     }, RETRASO_ALERTAS_ACTIVAS_MS)
   }, [cargarAlertasActivas])
 
+  const limpiarErrorAtender = useCallback(() => {
+    setErrorAtender(null)
+  }, [])
+
   const atenderAlerta = useCallback(
     async (id: number, nota?: string) => {
       if (atendiendoRef.current.has(id)) {
@@ -438,6 +494,9 @@ export function useDashboard(): EstadoDashboard {
       }
       atendiendoRef.current.add(id)
       setAtendiendo((actual) => ({ ...actual, [id]: true }))
+      setErrorAtender(null)
+      // Cualquier GET de la lista anterior queda invalidado antes del POST.
+      invalidarCarrilAlertasActivas()
 
       try {
         const actualizada = await atenderAlertaApi(id, nota)
@@ -445,6 +504,9 @@ export function useDashboard(): EstadoDashboard {
           return
         }
 
+        // Un GET que haya arrancado durante el POST tampoco puede pisar el
+        // estado atendido que vamos a aplicar.
+        invalidarCarrilAlertasActivas()
         setAlertasActivas((actual) => {
           if (actualizada.cerrada_en !== null) {
             return actual.filter((alerta) => alerta.id !== id)
@@ -453,21 +515,20 @@ export function useDashboard(): EstadoDashboard {
             alerta.id === id ? actualizada : alerta,
           )
         })
-        setErrorAlertas(null)
-        // El KPI de tiempo de respuesta y el estado de la cámara cambian.
-        void cargarResumen()
+        // El resumen/KPIs se refrescan con el SSE `alerta_cerrada` (el backend
+        // lo publica al atender) o con el polling si el stream está caído.
       } catch (fallo) {
         if (!activoRef.current) {
           return
         }
 
         if (fallo instanceof ErrorApi && fallo.status === 409) {
-          // La alerta ya se cerró entre el render y el clic: refresca sin error.
-          await Promise.all([cargarAlertasActivas(), cargarResumen()])
+          // La alerta ya se cerró entre el render y el clic: refresca la lista.
+          await cargarAlertasActivas()
           return
         }
 
-        setErrorAlertas(mensajeDeError(fallo))
+        setErrorAtender(mensajeDeError(fallo))
       } finally {
         atendiendoRef.current.delete(id)
         if (activoRef.current) {
@@ -479,7 +540,7 @@ export function useDashboard(): EstadoDashboard {
         }
       }
     },
-    [cargarAlertasActivas, cargarResumen],
+    [cargarAlertasActivas, invalidarCarrilAlertasActivas],
   )
 
   useEffect(() => {
@@ -487,32 +548,21 @@ export function useDashboard(): EstadoDashboard {
     // La carga arranca al montar; los setState ocurren después del primer
     // await, cuando ya hay respuesta de la API.
     void cargarResumen()
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void cargarHealth()
     void cargarAlertas()
     void cargarAlertasActivas()
 
-    const intervaloResumen = window.setInterval(() => {
+    const intervalo = window.setInterval(() => {
+      // Un solo tick de 60 s; cada carril conserva su propio abort/id.
       void cargarResumen()
-    }, INTERVALO_REFRESCO_MS)
-    const intervaloAlertas = window.setInterval(() => {
       void cargarAlertas()
-    }, INTERVALO_REFRESCO_MS)
-    const intervaloAlertasActivas = window.setInterval(() => {
       void cargarAlertasActivas()
     }, INTERVALO_REFRESCO_MS)
 
     return () => {
       activoRef.current = false
-      resumenControladorRef.current?.abort()
-      resumenEventoControladorRef.current?.abort()
-      seriesControladorRef.current?.abort()
-      healthControladorRef.current?.abort()
-      alertasControladorRef.current?.abort()
-      alertasActivasControladorRef.current?.abort()
-      window.clearInterval(intervaloResumen)
-      window.clearInterval(intervaloAlertas)
-      window.clearInterval(intervaloAlertasActivas)
+      abortarCarriles()
+      window.clearInterval(intervalo)
       if (timerResumenRef.current !== null) {
         window.clearTimeout(timerResumenRef.current)
         timerResumenRef.current = null
@@ -522,7 +572,13 @@ export function useDashboard(): EstadoDashboard {
         timerAlertasActivasRef.current = null
       }
     }
-  }, [cargarResumen, cargarHealth, cargarAlertas, cargarAlertasActivas])
+  }, [
+    cargarResumen,
+    cargarHealth,
+    cargarAlertas,
+    cargarAlertasActivas,
+    abortarCarriles,
+  ])
 
   const reconexiones = useStreamReconexion()
   const reconexionesPreviasRef = useRef(reconexiones)
@@ -536,7 +592,19 @@ export function useDashboard(): EstadoDashboard {
       // Rellena el hueco que dejó la caída del SSE con el historial HTTP.
       void cargarSeries(camaras.map((camara) => camara.id))
     }
-  }, [reconexiones, camaras, cargarSeries])
+    // Los eventos alerta_abierta/alerta_cerrada pudieron perderse durante la
+    // caída; no esperamos al polling de 60 s para recuperar la lista.
+    void cargarResumen()
+    void cargarAlertas()
+    void cargarAlertasActivas()
+  }, [
+    reconexiones,
+    camaras,
+    cargarSeries,
+    cargarResumen,
+    cargarAlertas,
+    cargarAlertasActivas,
+  ])
 
   const alRecibirLectura = useCallback(
     (evento: MessageEvent<string>) => {
@@ -634,6 +702,8 @@ export function useDashboard(): EstadoDashboard {
     alertasActivas,
     cargandoAlertas,
     errorAlertas,
+    errorAtender,
+    limpiarErrorAtender,
     atendiendo,
     atenderAlerta,
     series,

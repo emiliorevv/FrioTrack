@@ -16,9 +16,13 @@ interface AlertasActivasProps {
   alertas: AlertaOperativa[]
   camaras: Camara[]
   cargando: boolean
+  /** Fallo del listado de alertas. */
   error: string | null
+  /** Fallo de la última acción de atender, con el `detail` del backend. */
+  errorAtender: string | null
   atendiendo: Record<number, boolean>
   onAtender: (id: number) => void
+  onLimpiarErrorAtender: () => void
 }
 
 export function AlertasActivas({
@@ -26,13 +30,28 @@ export function AlertasActivas({
   camaras,
   cargando,
   error,
+  errorAtender,
   atendiendo,
   onAtender,
+  onLimpiarErrorAtender,
 }: AlertasActivasProps) {
   const nombres = useMemo(
     () => new Map(camaras.map((camara) => [camara.id, camara.nombre])),
     [camaras],
   )
+  const pendientes = alertas.filter(
+    (alerta) => alerta.atendida_por === null,
+  ).length
+  const textoPendientes =
+    pendientes === 1
+      ? '1 pendiente de atención'
+      : `${pendientes} pendientes de atención`
+  const textoEstado =
+    cargando && alertas.length === 0
+      ? 'Cargando alertas…'
+      : `${alertas.length} ${
+          alertas.length === 1 ? 'activa' : 'activas'
+        }; ${textoPendientes}`
 
   return (
     <section
@@ -45,26 +64,38 @@ export function AlertasActivas({
             Alertas activas
             <span className="alertas-activas__count">{alertas.length}</span>
           </h2>
-          <p>Requieren atención del turno.</p>
+          <p>{textoPendientes}</p>
         </div>
       </div>
 
-      <div
-        className="alertas-activas__contenido"
-        aria-live="polite"
-        aria-busy={cargando}
-      >
-        {error && alertas.length === 0 && (
+      {/* Solo cambia con los conteos, nunca con el reloj de cada tarjeta. */}
+      <p className="visually-hidden" role="status">
+        {textoEstado}
+      </p>
+
+      <div className="alertas-activas__contenido" aria-busy={cargando}>
+        {error && (
           <p className="alertas-activas__error" role="status">
-            No se pudieron cargar las alertas activas.
+            {alertas.length === 0
+              ? 'No se pudieron cargar las alertas activas.'
+              : 'No se pudieron actualizar las alertas activas; mostrando las últimas conocidas.'}
           </p>
         )}
 
-        {error && alertas.length > 0 && (
-          <p className="alertas-activas__error" role="status">
-            No se pudieron actualizar las alertas activas; mostrando las últimas
-            conocidas.
-          </p>
+        {errorAtender && (
+          <div
+            className="alertas-activas__error alertas-activas__error--accion"
+            role="alert"
+          >
+            <p>{errorAtender}</p>
+            <button
+              type="button"
+              className="alertas-activas__cerrar"
+              onClick={onLimpiarErrorAtender}
+            >
+              Cerrar
+            </button>
+          </div>
         )}
 
         {cargando && alertas.length === 0 ? (

@@ -178,7 +178,7 @@ describe('obtenerAlertasActivas', () => {
 
     await expect(obtenerAlertasActivas()).resolves.toEqual([alerta])
     expect(fetchFalso).toHaveBeenCalledWith(
-      `${BASE}/alertas?activas=true`,
+      `${BASE}/alertas?activas=true&limite=200`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
   })

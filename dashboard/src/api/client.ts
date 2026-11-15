@@ -130,7 +130,9 @@ export function obtenerLecturas(
 export async function obtenerAlertasActivas(
   senal?: AbortSignal,
 ): Promise<AlertaOperativa[]> {
-  const datos = await pedir<unknown>('/alertas?activas=true', { signal: senal })
+  const datos = await pedir<unknown>('/alertas?activas=true&limite=200', {
+    signal: senal,
+  })
 
   if (!Array.isArray(datos)) {
     throw new Error(

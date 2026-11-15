@@ -23,6 +23,7 @@ import type {
 import {
   fusionarCamaras,
   fusionarSeries,
+  INTERVALO_REFRESCO_MS,
   MAX_PUNTOS_SERIE,
   RETRASO_ALERTAS_ACTIVAS_MS,
   useDashboard,
@@ -210,6 +211,7 @@ describe('useDashboard', () => {
     expect(result.current.alertasActivas).toEqual([alertaOperativa])
     expect(result.current.cargandoAlertas).toBe(false)
     expect(result.current.errorAlertas).toBeNull()
+    expect(result.current.errorAtender).toBeNull()
     expect(result.current.atendiendo).toEqual({})
     expect(result.current.cargando).toBe(false)
     expect(result.current.errorResumen).toBeNull()
@@ -395,6 +397,43 @@ describe('useDashboard', () => {
     expect(result.current.errorAlertas).toBeNull()
   })
 
+  it('usa un solo temporizador de polling de 60 s', () => {
+    const intervalo = vi.spyOn(window, 'setInterval').mockReturnValue(1)
+
+    const { unmount } = renderHook(() => useDashboard())
+
+    const deSesenta = intervalo.mock.calls.filter(
+      ([, ms]) => ms === INTERVALO_REFRESCO_MS,
+    )
+    expect(deSesenta).toHaveLength(1)
+
+    unmount()
+    intervalo.mockRestore()
+  })
+
+  it('el tick de 60 s refresca resumen, seguridad y alertas activas', async () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useDashboard())
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(result.current.camaras).toHaveLength(2)
+    const camaras = vi.mocked(obtenerCamaras).mock.calls.length
+    const kpis = vi.mocked(obtenerKpis).mock.calls.length
+    const seguridad = vi.mocked(obtenerAlertasSeguridad).mock.calls.length
+    const activas = vi.mocked(obtenerAlertasActivas).mock.calls.length
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(INTERVALO_REFRESCO_MS)
+    })
+
+    expect(obtenerCamaras).toHaveBeenCalledTimes(camaras + 1)
+    expect(obtenerKpis).toHaveBeenCalledTimes(kpis + 1)
+    expect(obtenerAlertasSeguridad).toHaveBeenCalledTimes(seguridad + 1)
+    expect(obtenerAlertasActivas).toHaveBeenCalledTimes(activas + 1)
+  })
+
   it('conserva las alertas activas si falla el refresco', async () => {
     const { result } = renderHook(() => useDashboard())
     await waitFor(() =>
@@ -458,7 +497,7 @@ describe('useDashboard', () => {
     expect(result.current.alertasActivas).toEqual([alertaOperativa])
   })
 
-  it('atiende una alerta, marca el estado por id y refresca KPIs', async () => {
+  it('atiende una alerta, marca el estado por id y no refresca el resumen por sí solo', async () => {
     const { result } = renderHook(() => useDashboard())
     await waitFor(() =>
       expect(result.current.alertasActivas).toEqual([alertaOperativa]),
@@ -488,9 +527,8 @@ describe('useDashboard', () => {
       id: 31,
       atendida_por: 3,
     })
-    expect(vi.mocked(obtenerKpis).mock.calls.length).toBeGreaterThan(
-      llamadasKpis,
-    )
+    expect(result.current.errorAtender).toBeNull()
+    expect(vi.mocked(obtenerKpis).mock.calls.length).toBe(llamadasKpis)
   })
 
   it('refetchea la lista si atender devuelve 409', async () => {
@@ -510,24 +548,90 @@ describe('useDashboard', () => {
 
     expect(result.current.alertasActivas).toEqual([])
     expect(result.current.errorAlertas).toBeNull()
+    expect(result.current.errorAtender).toBeNull()
     expect(result.current.atendiendo[31]).toBeUndefined()
   })
 
-  it('conserva la alerta y expone el error si atender falla', async () => {
+  it('conserva la alerta y expone el detalle de atender sin mezclarlo con la lista', async () => {
     const { result } = renderHook(() => useDashboard())
     await waitFor(() =>
       expect(result.current.alertasActivas).toEqual([alertaOperativa]),
     )
 
-    vi.mocked(atenderAlertaApi).mockRejectedValueOnce(new Error('sin red'))
+    vi.mocked(atenderAlertaApi).mockRejectedValueOnce(
+      new ErrorApi('No hay un usuario con rol jefe_cocina', 500),
+    )
 
     await act(async () => {
       await result.current.atenderAlerta(31)
     })
 
     expect(result.current.alertasActivas).toEqual([alertaOperativa])
-    expect(result.current.errorAlertas).toBe('sin red')
+    expect(result.current.errorAtender).toBe(
+      'No hay un usuario con rol jefe_cocina',
+    )
+    expect(result.current.errorAlertas).toBeNull()
     expect(result.current.atendiendo[31]).toBeUndefined()
+
+    // El polling no debe borrar el error de la acción.
+    await act(async () => {
+      await result.current.refrescar()
+    })
+    expect(result.current.errorAtender).toBe(
+      'No hay un usuario con rol jefe_cocina',
+    )
+
+    // El SSE tampoco debe borrar el error de la acción.
+    vi.useFakeTimers()
+    act(() => {
+      emitir('alerta_cerrada', { id: 31 })
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RETRASO_ALERTAS_ACTIVAS_MS)
+    })
+    expect(result.current.errorAtender).toBe(
+      'No hay un usuario con rol jefe_cocina',
+    )
+
+    act(() => {
+      result.current.limpiarErrorAtender()
+    })
+    expect(result.current.errorAtender).toBeNull()
+  })
+
+  it('no deja que un GET viejo pise el estado atendido', async () => {
+    const { result } = renderHook(() => useDashboard())
+    await waitFor(() =>
+      expect(result.current.alertasActivas).toEqual([alertaOperativa]),
+    )
+
+    let resolverGet!: (alertas: AlertaOperativa[]) => void
+    const getPendiente = new Promise<AlertaOperativa[]>((resolve) => {
+      resolverGet = resolve
+    })
+    vi.mocked(obtenerAlertasActivas).mockReturnValueOnce(getPendiente)
+
+    let refresco!: Promise<void>
+    act(() => {
+      refresco = result.current.refrescar()
+    })
+    await waitFor(() => expect(obtenerAlertasActivas).toHaveBeenCalledTimes(2))
+
+    vi.mocked(atenderAlertaApi).mockResolvedValueOnce({
+      ...alertaOperativa,
+      atendida_por: 3,
+    })
+    await act(async () => {
+      await result.current.atenderAlerta(31)
+    })
+    expect(result.current.alertasActivas[0].atendida_por).toBe(3)
+
+    await act(async () => {
+      resolverGet([alertaOperativa])
+      await refresco
+    })
+
+    expect(result.current.alertasActivas[0].atendida_por).toBe(3)
   })
 
   it('solo reintenta /health si sigue en null', async () => {
@@ -648,15 +752,26 @@ describe('useDashboard', () => {
     expect(obtenerLecturas).toHaveBeenCalledTimes(3)
   })
 
-  it('vuelve a pedir las series al reconectar el SSE', async () => {
+  it('vuelve a pedir series, resumen y alertas al reconectar el SSE', async () => {
     const { result, rerender } = renderHook(() => useDashboard())
     await waitFor(() => expect(result.current.series[1]).toEqual([2]))
     expect(obtenerLecturas).toHaveBeenCalledTimes(2)
 
+    const camaras = vi.mocked(obtenerCamaras).mock.calls.length
+    const kpis = vi.mocked(obtenerKpis).mock.calls.length
+    const seguridad = vi.mocked(obtenerAlertasSeguridad).mock.calls.length
+    const activas = vi.mocked(obtenerAlertasActivas).mock.calls.length
+
     vi.mocked(useStreamReconexion).mockReturnValue(1)
     rerender()
 
-    await waitFor(() => expect(obtenerLecturas).toHaveBeenCalledTimes(4))
+    await waitFor(() => {
+      expect(obtenerLecturas).toHaveBeenCalledTimes(4)
+      expect(obtenerCamaras).toHaveBeenCalledTimes(camaras + 1)
+      expect(obtenerKpis).toHaveBeenCalledTimes(kpis + 1)
+      expect(obtenerAlertasSeguridad).toHaveBeenCalledTimes(seguridad + 1)
+      expect(obtenerAlertasActivas).toHaveBeenCalledTimes(activas + 1)
+    })
   })
 
   it('no cancela un refresco completo con un evento de alerta', async () => {

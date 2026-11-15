@@ -55,6 +55,8 @@ function App() {
     alertasActivas,
     cargandoAlertas,
     errorAlertas,
+    errorAtender,
+    limpiarErrorAtender,
     atendiendo,
     atenderAlerta,
     series,
@@ -139,8 +141,10 @@ function App() {
               camaras={camaras}
               cargando={cargandoAlertas}
               error={errorAlertas}
+              errorAtender={errorAtender}
               atendiendo={atendiendo}
               onAtender={(id) => void atenderAlerta(id)}
+              onLimpiarErrorAtender={limpiarErrorAtender}
             />
 
             <section className="section" aria-labelledby="camaras-title">
