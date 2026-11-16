@@ -197,13 +197,11 @@ describe('Configuracion', () => {
         min_para_merma: 60,
       }),
     )
-    await waitFor(() =>
-      expect(
-        screen.queryByRole('dialog', { name: 'Nueva cámara' }),
-      ).not.toBeInTheDocument(),
-    )
+    await waitFor(() => expect(obtenerCamaras).toHaveBeenCalledTimes(2))
+    expect(
+      screen.queryByRole('dialog', { name: 'Nueva cámara' }),
+    ).not.toBeInTheDocument()
     expect(onCambio).toHaveBeenCalledTimes(1)
-    expect(obtenerCamaras).toHaveBeenCalledTimes(2)
   })
 
   it('valida nombre, rango y minutos antes de llamar a la API', async () => {
@@ -521,13 +519,11 @@ describe('Configuracion', () => {
       within(dialogo).getByRole('button', { name: 'Guardar cámara' }),
     )
 
-    await waitFor(() =>
-      expect(
-        screen.queryByRole('dialog', { name: 'Nueva cámara' }),
-      ).not.toBeInTheDocument(),
-    )
+    await waitFor(() => expect(obtenerCamaras).toHaveBeenCalledTimes(2))
+    expect(
+      screen.queryByRole('dialog', { name: 'Nueva cámara' }),
+    ).not.toBeInTheDocument()
     expect(onCambio).toHaveBeenCalledTimes(1)
-    expect(obtenerCamaras).toHaveBeenCalledTimes(2)
     expect(screen.queryByText(/cámara inválida/i)).not.toBeInTheDocument()
   })
 
