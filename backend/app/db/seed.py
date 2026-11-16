@@ -1,6 +1,5 @@
 """Datos semilla idempotentes de FríoTrack."""
 
-import hashlib
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings, leer_sensor_tokens
 from app.core.security import hash_password
+from app.core.sensor_token import hash_token
 from app.db.models import (
     NOMBRE_RESTAURANTE_DEMO,
     RESTAURANTE_DEMO_ID,
@@ -22,15 +22,15 @@ from app.db.models import (
 
 # Rangos y tiempos del README (NOM-251-SSA1-2009 para refrigerados y congelados).
 CAMARAS: list[dict[str, Any]] = [
-    {"id": 1, "nombre": "Pescados y mariscos", "rango_min_c": Decimal("0.0"),
+    {"nombre": "Pescados y mariscos", "rango_min_c": Decimal("0.0"),
      "rango_max_c": Decimal("2.0"), "min_para_riesgo": 10, "min_para_merma": 60},
-    {"id": 2, "nombre": "Carnes y aves", "rango_min_c": Decimal("0.0"),
+    {"nombre": "Carnes y aves", "rango_min_c": Decimal("0.0"),
      "rango_max_c": Decimal("4.0"), "min_para_riesgo": 15, "min_para_merma": 120},
-    {"id": 3, "nombre": "Lácteos", "rango_min_c": Decimal("1.0"),
+    {"nombre": "Lácteos", "rango_min_c": Decimal("1.0"),
      "rango_max_c": Decimal("4.0"), "min_para_riesgo": 20, "min_para_merma": 180},
-    {"id": 4, "nombre": "Verduras y frutas", "rango_min_c": Decimal("4.0"),
+    {"nombre": "Verduras y frutas", "rango_min_c": Decimal("4.0"),
      "rango_max_c": Decimal("8.0"), "min_para_riesgo": 30, "min_para_merma": 240},
-    {"id": 5, "nombre": "Congelador", "rango_min_c": Decimal("-22.0"),
+    {"nombre": "Congelador", "rango_min_c": Decimal("-22.0"),
      "rango_max_c": Decimal("-18.0"), "min_para_riesgo": 20, "min_para_merma": 120},
 ]
 
@@ -61,12 +61,22 @@ LOTES: list[tuple[str, int, Decimal, str, Decimal, int]] = [
     ("Carne de res congelada", 5, Decimal("12.00"), "kg", Decimal("2880.00"), 60),
 ]
 
-# El demo se inserta con id explícito; la secuencia debe quedar en MAX(id) para
-# que el primer restaurante creado sin id (el futuro sign-up) reciba el 2.
-SQL_SECUENCIA_RESTAURANTES = (
-    "SELECT setval(pg_get_serial_sequence('restaurantes', 'id'), "
-    "(SELECT MAX(id) FROM restaurantes))"
+# El restaurante demo se inserta con id explícito; su secuencia debe quedar en
+# MAX(id) para que el primer alta sin id reciba el siguiente número. Las cámaras
+# ya no llevan id fijo: la secuencia las asigna y el seed remapea sus hijos.
+SQL_SECUENCIA = (
+    "SELECT setval(pg_get_serial_sequence('{tabla}', 'id'), "
+    "(SELECT MAX(id) FROM {tabla}))"
 )
+
+
+def _alinear_secuencia(session: Session, tabla: str) -> None:
+    """Deja la secuencia SERIAL de `tabla` en MAX(id) tras un insert con id explícito.
+
+    `tabla` solo se interpola con nombres fijos definidos aquí (Postgres no
+    acepta identificadores como parámetro ligado).
+    """
+    session.execute(text(SQL_SECUENCIA.format(tabla=tabla)))
 
 
 def _tokens_de_entorno() -> dict[str, str]:
@@ -104,8 +114,14 @@ def construir_seed(
         )
 
     # `estado` explícito: al no tocar la base, los defaults del modelo no se aplican.
+    # Sin id: la secuencia los asigna y `cargar_seed` remapea sensores y lotes.
     camaras = [
-        Camara(restaurante_id=RESTAURANTE_DEMO_ID, estado="en_rango", **datos)
+        Camara(
+            restaurante_id=RESTAURANTE_DEMO_ID,
+            es_demo=True,
+            estado="en_rango",
+            **datos,
+        )
         for datos in CAMARAS
     ]
 
@@ -117,7 +133,7 @@ def construir_seed(
             Sensor(
                 id=sensor_id,
                 camara_id=camara_id,
-                token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                token_hash=hash_token(token),
                 activo=True,
             )
         )
@@ -181,9 +197,16 @@ def cargar_seed(
         )
         session.flush()  # las filas hijas necesitan el restaurante antes del commit
         # El id del demo fue explícito: alinea la secuencia para el próximo alta.
-        session.execute(text(SQL_SECUENCIA_RESTAURANTES))
+        _alinear_secuencia(session, "restaurantes")
     session.add_all(camaras)
     session.flush()
+    # Los sensores y lotes usan 1–5 como placeholders de orden; ahora que la
+    # secuencia asignó los ids reales, se remapean a las cámaras recién creadas.
+    por_orden = {indice: camara.id for indice, camara in enumerate(camaras, start=1)}
+    for sensor in sensores:
+        sensor.camara_id = por_orden[sensor.camara_id]
+    for lote in lotes:
+        lote.camara_id = por_orden[lote.camara_id]
     session.add_all(sensores)
     session.add_all(lotes)
     session.add_all(usuarios)

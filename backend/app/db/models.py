@@ -47,6 +47,8 @@ class Camara(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     restaurante_id: Mapped[int] = mapped_column(ForeignKey("restaurantes.id"), index=True)
+    # Solo las cámaras sembradas participan en el tick simulado de la demo.
+    es_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     nombre: Mapped[str] = mapped_column(Text)
     rango_min_c: Mapped[Decimal] = mapped_column(Numeric(4, 1))
     rango_max_c: Mapped[Decimal] = mapped_column(Numeric(4, 1))
@@ -74,6 +76,8 @@ class Sensor(Base):
     camara_id: Mapped[int] = mapped_column(ForeignKey("camaras.id"))
     token_hash: Mapped[str] = mapped_column(Text)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Última lectura real recibida; la mantiene la ingesta para listar sin GROUP BY.
+    ultima_lectura_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     camara: Mapped[Camara] = relationship(back_populates="sensores")
 
@@ -84,6 +88,8 @@ class Lectura(Base):
     __tablename__ = "lecturas"
     __table_args__ = (
         Index("ix_lecturas_camara_id_recibida_en", "camara_id", desc("recibida_en")),
+        # Borrado/baja de sensores y filtros por sensor sin escanear la tabla.
+        Index("ix_lecturas_sensor_id", "sensor_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

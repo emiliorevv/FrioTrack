@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import logging
 from decimal import Decimal
@@ -12,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.sensor_token import hash_token
 from app.db.base import utcnow
 from app.db.models import Alerta, Camara, Lectura, Lote, Sensor
 from app.erp import reglas
@@ -79,14 +79,9 @@ def _cargar_alertas_abiertas(session: Session, camara_id: int) -> list[Alerta]:
     )
 
 
-def _hash_token(token: str) -> str:
-    """SHA-256 en hex del token: lo único que se guarda en `sensores.token_hash`."""
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
 def _validar_sensor(
     session: Session, sensor_id: str, camara_id: int, token: str
-) -> None:
+) -> Sensor:
     """Autentica el token del sensor y comprueba que escriba en su propia cámara.
 
     Códigos del contrato: sensor inexistente o token incorrecto -> 401; sensor
@@ -106,7 +101,7 @@ def _validar_sensor(
             detail="El sensor está inactivo.",
         )
 
-    if not hmac.compare_digest(sensor.token_hash, _hash_token(token)):
+    if not hmac.compare_digest(sensor.token_hash, hash_token(token)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token de sensor inválido.",
@@ -118,6 +113,7 @@ def _validar_sensor(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="El sensor no está autorizado para escribir en esa cámara.",
         )
+    return sensor
 
 
 def procesar_telemetria(
@@ -133,7 +129,10 @@ def procesar_telemetria(
             detail=f"No existe la cámara {datos.camara_id}.",
         )
 
-    _validar_sensor(session, datos.sensor_id, camara.id, token)
+    sensor = _validar_sensor(session, datos.sensor_id, camara.id, token)
+    # Se persiste en el mismo commit que la lectura; el tick no tiene sensor y
+    # no toca esta caché.
+    sensor.ultima_lectura_en = utcnow()
     return procesar_lectura(session, datos, camara)
 
 

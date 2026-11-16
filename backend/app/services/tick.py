@@ -31,15 +31,18 @@ VENTANA_TICK = timedelta(seconds=30)
 
 
 def _ids_de_camaras(session: Session) -> list[int]:
-    """IDs de las cámaras del restaurante demo, ordenados.
+    """IDs de las cámaras demo del seed, ordenados.
 
-    El tick es parte de la demo: los tenants nuevos no reciben lecturas
-    simuladas, solo telemetría de sus sensores.
+    Solo las cámaras con `es_demo=true` reciben lecturas simuladas: las que se
+    dan de alta por API no se ensucian ni quedan imposibles de borrar.
     """
     return list(
         session.scalars(
             select(Camara.id)
-            .where(Camara.restaurante_id == RESTAURANTE_DEMO_ID)
+            .where(
+                Camara.restaurante_id == RESTAURANTE_DEMO_ID,
+                Camara.es_demo.is_(True),
+            )
             .order_by(Camara.id)
         )
     )

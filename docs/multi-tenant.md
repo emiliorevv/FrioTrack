@@ -69,6 +69,18 @@ lista vacía hasta que se den de alta cámaras.
   todos los endpoints. `POST /alertas/{id}/atender` acepta los roles
   `jefe_cocina` y `dueno` del JWT; sin JWT elige al primer `jefe_cocina` **del
   tenant de la petición**.
+- **CRUD de cámaras y sensores**: la escritura exige rol `dueno` y opera solo
+  sobre el restaurante del JWT. `POST /camaras` asigna el tenant de la petición
+  (el body no lo puede cambiar) y nace con `es_demo=false`; `PATCH`/`DELETE` y
+  los endpoints de sensores usan `camara_del_restaurante()` y un helper
+  equivalente `sensor_del_restaurante()` que responde 404 si el recurso es de
+  otro tenant. El id del sensor **siempre lo genera el servidor** (`S-` + 8
+  hex): el cliente no elige un id global ni puede sondear los de otro tenant.
+  Las cámaras con sensores, lotes, lecturas o alertas no se borran (409), y un
+  sensor con lecturas tampoco: se desactiva. El token del sensor se muestra una
+  sola vez y **nunca** se expone `token_hash`; `SENSOR_TOKENS` solo siembra la
+  demo. Un `PATCH` de configuración reconcilia el estado con la última lectura y
+  cierra la alerta de temperatura si la cámara vuelve a rango.
 - **KPIs**: `calcular_kpis(db, restaurante_id)` filtra las cinco consultas con
   join a la cámara: lecturas, alertas activas, atendidas, lotes en riesgo y
   mermas.
@@ -83,8 +95,9 @@ lista vacía hasta que se den de alta cámaras.
   tenant y publica el payload a sus conexiones. El costo por ciclo crece con los
   restaurantes, no con las conexiones SSE.
 - **Tick**: `POST /simulador/tick` solo genera lecturas simuladas para las
-  cámaras del restaurante demo. Los tenants nuevos no reciben tráfico
-  inventado; esperan la telemetría de sus sensores.
+  cámaras del seed (`es_demo=true`) del restaurante demo. Las cámaras creadas
+  por API y los tenants nuevos no reciben tráfico inventado; esperan la
+  telemetría de sus sensores.
 - **SIEM**: `GET /seguridad/alertas` es global y todavía no guarda el
   restaurante de cada hallazgo. Mientras solo exista el restaurante demo, el
   demo ve el feed; en cuanto hay un segundo restaurante, **nadie** lo ve (lista
@@ -93,9 +106,10 @@ lista vacía hasta que se den de alta cámaras.
 
 ## Pendientes
 
-- Verificación de correo en el sign-up y onboarding visual (cámaras, usuarios y
-  roles) por tenant.
-- CRUD de cámaras y usuarios, e invitación de `jefe_cocina`/`gerente`.
+- Verificación de correo en el sign-up y onboarding visual (cámaras, sensores,
+  usuarios y roles) por tenant.
+- Alta de usuarios e invitación de `jefe_cocina`/`gerente`; CRUD de lotes.
+- Desactivar cámaras (hoy solo se pueden borrar si no tienen datos).
 - RLS (Row Level Security) en Postgres como segunda barrera, además del filtro
   en la API. Para `lotes` y `alertas`, la política tendrá que hacer el join con
   `camaras` porque no guardan el tenant.

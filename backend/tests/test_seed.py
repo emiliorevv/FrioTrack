@@ -40,7 +40,7 @@ def _settings_sin_cache():
 def test_construir_seed_arma_las_cinco_camaras():
     camaras, _, _, _ = construir_seed(sensor_tokens=TOKENS, password="demo")
 
-    assert [c.id for c in camaras] == [1, 2, 3, 4, 5]
+    assert [c.id for c in camaras] == [None, None, None, None, None]
     assert [c.nombre for c in camaras] == [
         "Pescados y mariscos",
         "Carnes y aves",
@@ -60,6 +60,7 @@ def test_construir_seed_arma_las_cinco_camaras():
     assert all(c.estado == "en_rango" for c in camaras)
     assert all(c.fuera_de_rango_desde is None and c.ultima_lectura_id is None for c in camaras)
     assert all(c.restaurante_id == RESTAURANTE_DEMO_ID for c in camaras)
+    assert all(c.es_demo is True for c in camaras)
 
 
 def test_construir_seed_arma_un_sensor_por_camara_con_token_hasheado():
@@ -156,9 +157,22 @@ def test_construir_seed_arma_los_dos_usuarios_con_password_verificable():
     assert not verify_password("incorrecta", por_nombre["jefe"].password_hash)
 
 
+def _camara(id: int, restaurante_id: int, nombre: str = "Cámara") -> Camara:
+    return Camara(
+        id=id,
+        restaurante_id=restaurante_id,
+        es_demo=False,
+        nombre=nombre,
+        rango_min_c=Decimal("0.0"),
+        rango_max_c=Decimal("2.0"),
+        min_para_riesgo=10,
+        min_para_merma=60,
+        estado="en_rango",
+    )
+
+
 class FakeSession:
     """Sesión falsa: registra llamadas sin abrir conexión ni tocar una base."""
-
     def __init__(
         self,
         hay_camaras_demo: bool = False,
@@ -168,6 +182,8 @@ class FakeSession:
         self.restaurante = restaurante
         self.agregados: list[object] = []
         self.sentencias: list[object] = []
+        self.camaras: list[Camara] = []
+        self.siguiente_camara = 1
         self.flushes = 0
         self.commits = 0
 
@@ -183,12 +199,21 @@ class FakeSession:
 
     def add(self, fila: object) -> None:
         self.agregados.append(fila)
+        if isinstance(fila, Camara):
+            if fila.id is not None:
+                self.siguiente_camara = max(self.siguiente_camara, fila.id + 1)
+            self.camaras.append(fila)
 
     def add_all(self, filas: list[object]) -> None:
-        self.agregados.extend(filas)
+        for fila in filas:
+            self.add(fila)
 
     def flush(self) -> None:
         self.flushes += 1
+        for fila in self.agregados:
+            if isinstance(fila, Camara) and fila.id is None:
+                fila.id = self.siguiente_camara
+                self.siguiente_camara += 1
 
     def commit(self) -> None:
         self.commits += 1
@@ -239,7 +264,7 @@ def test_cargar_seed_solo_mira_las_camaras_del_restaurante_demo():
 
 
 def test_cargar_seed_ajusta_la_secuencia_del_restaurante_demo():
-    """El id 1 fue explícito: la secuencia debe quedar después de MAX(id)."""
+    """El id 1 del restaurante fue explícito: la secuencia debe quedar en MAX(id)."""
     sesion = FakeSession()
 
     cargar_seed(sesion, sensor_tokens=TOKENS, password="demo")
@@ -247,3 +272,21 @@ def test_cargar_seed_ajusta_la_secuencia_del_restaurante_demo():
     setval = [str(sentencia) for sentencia in sesion.sentencias if "setval" in str(sentencia)]
     assert len(setval) == 1
     assert "pg_get_serial_sequence('restaurantes', 'id')" in setval[0]
+
+
+def test_cargar_seed_usa_ids_libres_y_remepea_sensores_y_lotes():
+    """Una cámara de otro tenant con id 1 no debe chocar con las cámaras demo."""
+    sesion = FakeSession()
+    sesion.add(_camara(id=1, restaurante_id=2, nombre="Ajena"))
+
+    assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is True
+
+    demo = [camara for camara in sesion.camaras if camara.restaurante_id == RESTAURANTE_DEMO_ID]
+    assert [camara.id for camara in demo] == [2, 3, 4, 5, 6]
+    assert all(camara.es_demo is True for camara in demo)
+    assert sesion.camaras[0].restaurante_id == 2
+
+    sensores = [fila for fila in sesion.agregados if isinstance(fila, Sensor)]
+    lotes = [fila for fila in sesion.agregados if isinstance(fila, Lote)]
+    assert {sensor.camara_id for sensor in sensores} == {2, 3, 4, 5, 6}
+    assert {lote.camara_id for lote in lotes} == {2, 3, 4, 5, 6}

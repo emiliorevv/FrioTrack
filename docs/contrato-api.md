@@ -156,6 +156,84 @@ Solo roles `jefe_cocina` o `dueno`. Body `{ "nota": "Se cerró la puerta" }`. Ma
 }
 ```
 
+### Gestión de cámaras y sensores
+
+Las operaciones de escritura exigen rol `dueno`. Todo se limita al restaurante del JWT: un recurso de otro restaurante responde `404`, igual que uno inexistente. Con `AUTH_REQUERIDA=0` (local y pruebas) se aceptan sin JWT sobre el restaurante demo. Errores comunes: `401` sin JWT válido, `403` rol distinto de `dueno`, `404` recurso inexistente o ajeno, `409` conflicto y `422` datos inválidos.
+
+#### `POST /camaras`
+```json
+{
+  "nombre": "Barra fría",
+  "rango_min_c": -5,
+  "rango_max_c": 5,
+  "min_para_riesgo": 10,
+  "min_para_merma": 60
+}
+```
+
+Respuesta `201` con la misma forma que un elemento de `GET /camaras`:
+
+```json
+{
+  "id": 6,
+  "nombre": "Barra fría",
+  "rango_min_c": -5.0,
+  "rango_max_c": 5.0,
+  "min_para_riesgo": 10,
+  "min_para_merma": 60,
+  "estado": "en_rango",
+  "ultima_lectura": null,
+  "valor_en_riesgo_mxn": 0.0,
+  "valor_inventario_mxn": 0.0
+}
+```
+
+Reglas de validación (`422` si no se cumplen): `nombre` de 2 a 120 caracteres después de recortar espacios; `-50 <= rango_min_c < rango_max_c <= 50`; `min_para_riesgo >= 1`; `min_para_merma > min_para_riesgo` (la merma es la etapa siguiente al riesgo). Los nombres duplicados están permitidos: no hay restricción de unicidad.
+
+#### `PATCH /camaras/{id}`
+Body parcial con cualquiera de los campos de configuración (`nombre`, `rango_min_c`, `rango_max_c`, `min_para_riesgo`, `min_para_merma`). No acepta `estado`, `ultima_lectura_id` ni `restaurante_id`: enviarlos responde `422`. Las reglas se validan contra la configuración ya guardada. Después de aplicar el cambio se reconcilia el estado con la última lectura: si queda en rango, limpia `fuera_de_rango_desde` y cierra la alerta de temperatura abierta; si queda fuera, arranca una ventana nueva sin abrir alerta (la decide la siguiente lectura o el tick). Respuesta `200` con el mismo objeto que `GET /camaras`.
+
+#### `DELETE /camaras/{id}`
+`204` si la cámara no tiene sensores, lotes, lecturas ni alertas. Si tiene dependencias responde `409` con el mensaje `La cámara tiene datos asociados; desactívala o elimina primero sus sensores.` No hay endpoint para desactivar cámaras en esta fase.
+
+#### `GET /sensores`
+Cualquier rol autenticado del tenant. Lista los sensores del restaurante:
+
+```json
+[
+  {
+    "id": "S-BARRA-01",
+    "camara_id": 6,
+    "activo": true,
+    "camara_nombre": "Barra fría",
+    "ultima_lectura": "2026-11-18T19:05:00+00:00"
+  }
+]
+```
+
+`ultima_lectura` es `null` si el sensor nunca mandó una lectura. **Nunca** se expone `token_hash`: el token en claro solo aparece en el alta y en la rotación.
+
+#### `POST /camaras/{id}/sensores`
+Sin body. El servidor genera siempre el id (`S-` + 8 hex); el cliente no puede elegirlo para no sondear ids de otros restaurantes ni reutilizar ids de la demo. Respuesta `201`:
+
+```json
+{
+  "sensor": { "id": "S-3f9a2c1d", "camara_id": 6, "activo": true },
+  "token": "<token en claro>"
+}
+```
+
+El token es fuerte y **se muestra una sola vez**: la base solo guarda su SHA-256 en `sensores.token_hash`. `404` si la cámara es de otro restaurante. Si el id aleatorio choca (caso excepcional), la API reintenta y, si no logra uno libre, responde `500` con un mensaje claro.
+
+#### `POST /sensores/{id}/rotar-token`
+Genera un token nuevo, reemplaza el hash y responde `200` con la misma forma que el alta (`sensor` + `token`). El token anterior deja de autenticar inmediatamente.
+
+#### `PATCH /sensores/{id}`
+Body `{ "activo": true|false }`. Respuesta `200` con `{ id, camara_id, activo }`. Con `activo: false`, `POST /telemetria` con ese token responde `403`.
+
+#### `DELETE /sensores/{id}`
+`204` si el sensor no tiene lecturas. Si tiene historial responde `409` y sugiere desactivarlo: `El sensor tiene lecturas asociadas; desactívalo en lugar de eliminarlo.`
+
 ### Tiempo real
 
 #### `GET /stream?token=<jwt>`

@@ -43,9 +43,28 @@ def test_todas_las_tablas_compilan_para_postgres(nombre: str):
 def test_columnas_clave_de_camaras():
     camaras = Base.metadata.tables["camaras"]
 
-    assert {"id", "nombre", "rango_min_c", "rango_max_c", "estado"} <= set(camaras.c.keys())
+    assert {"id", "nombre", "es_demo", "rango_min_c", "rango_max_c", "estado"} <= set(
+        camaras.c.keys()
+    )
+    assert camaras.c.es_demo.default.arg is False
     assert camaras.c.rango_min_c.type.precision == 4
     assert camaras.c.rango_min_c.type.scale == 1
+
+
+def test_sensores_cachean_la_ultima_lectura():
+    sensores = Base.metadata.tables["sensores"]
+
+    assert "ultima_lectura_en" in sensores.c
+    assert "ultima_lectura_en TIMESTAMP WITH TIME ZONE" in _ddl(sensores)
+
+
+def test_lecturas_tiene_indice_por_sensor():
+    indices = {
+        indice.name: [columna.name for columna in indice.columns]
+        for indice in Base.metadata.tables["lecturas"].indexes
+    }
+
+    assert indices["ix_lecturas_sensor_id"] == ["sensor_id"]
 
 
 def test_columnas_clave_de_lecturas():
