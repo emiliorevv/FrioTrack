@@ -44,7 +44,7 @@ def alerta_salida(alerta: Alerta) -> AlertaSalida:
 
 
 class LoteSalida(BaseModel):
-    """Lote de inventario tal como lo consume el dashboard."""
+    """Lote de inventario tal como lo consume el dashboard (REST y SSE)."""
 
     id: int
     producto: str
@@ -54,6 +54,7 @@ class LoteSalida(BaseModel):
     costo_total_mxn: float
     caducidad: str | None
     estado: str
+    merma_en: str | None
 
 
 def lote_salida(lote: Lote) -> LoteSalida:
@@ -67,6 +68,7 @@ def lote_salida(lote: Lote) -> LoteSalida:
         costo_total_mxn=float(lote.costo_total_mxn),
         caducidad=iso(lote.caducidad),
         estado=lote.estado,
+        merma_en=iso(lote.merma_en),
     )
 
 

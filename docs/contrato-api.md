@@ -253,15 +253,15 @@ La escritura exige rol `dueno` o `jefe_cocina`. Todo se limita al restaurante de
 }
 ```
 
-Respuesta `201` con el mismo objeto que un elemento de `GET /lotes`: `id`, `producto`, `camara_id`, `cantidad`, `unidad`, `costo_total_mxn`, `caducidad`, `estado: "ok"` y `merma_en: null`.
+Respuesta `201` con el mismo objeto que un elemento de `GET /lotes`: `id`, `producto`, `camara_id`, `cantidad`, `unidad`, `costo_total_mxn`, `caducidad`, `estado` y `merma_en`. El estado inicial se calcula con la ventana actual de la cámara: `ok` si está en rango; `en_riesgo` si ya se cumplió `min_para_riesgo`; `merma` (con `merma_en`) si ya se cumplió `min_para_merma`.
 
 Validación (`422` si no se cumple): `producto` de 2 a 120 caracteres después de recortar espacios; `camara_id` entero positivo y cámara del restaurante (`404` si no); `cantidad` decimal mayor que 0 con hasta 2 decimales; `unidad` exactamente `kg`, `l` o `pz`; `costo_total_mxn` decimal mayor o igual a 0 con hasta 2 decimales; `caducidad` una fecha válida (puede ser pasada, para registrar producto ya vencido).
 
 #### `PATCH /lotes/{id}`
-Body parcial con cualquiera de `producto`, `camara_id`, `cantidad`, `unidad`, `costo_total_mxn` o `caducidad`. No acepta `estado`, `merma_en` ni `restaurante_id`: enviarlos responde `422`; un `null` explícito también. La configuración mezclada se valida con el mismo esquema del alta. Mover el lote a otra cámara es válido solo si la cámara es del mismo restaurante; si no, `404`. Respuesta `200` con el objeto del lote.
+Body parcial con cualquiera de `producto`, `camara_id`, `cantidad`, `unidad`, `costo_total_mxn` o `caducidad`. No acepta `estado`, `merma_en` ni `restaurante_id`: enviarlos responde `422`; un `null` explícito también. La configuración mezclada se valida con el mismo esquema del alta. Mover el lote a otra cámara es válido solo si la cámara es del mismo restaurante; si no, `404`. Al mover, el estado del lote se recalcula con la ventana de la cámara destino (un lote en riesgo que llega a una cámara sana vuelve a `ok`, y uno sano que llega a una cámara fuera de rango pasa a riesgo/merma) y se recalcula el estado de ambas cámaras. Un lote en `merma` **no se puede modificar**: responde `409` con `El lote ya está en merma; no se puede modificar del historial.` Respuesta `200` con el objeto del lote.
 
 #### `DELETE /lotes/{id}`
-`204` si el lote está `ok` o `en_riesgo`. Si ya está en `merma` responde `409` con `El lote ya está en merma; no se puede eliminar del historial.` La merma se conserva para los KPIs y el historial del inventario.
+`204` si el lote está `ok` o `en_riesgo`; antes de borrar se recalcula el estado de la cámara. Si ya está en `merma` responde `409` con `El lote ya está en merma; no se puede eliminar del historial.` La merma se conserva para los KPIs y el historial del inventario.
 
 #### `POST /lotes/{id}/merma`
 Sin body. Marca `estado: "merma"` y `merma_en` con la hora del servidor. Es la vía para registrar una pérdida manual sin borrar el lote. Es idempotente: si ya estaba en merma conserva la fecha original y devuelve el mismo objeto. Respuesta `200` con el lote.

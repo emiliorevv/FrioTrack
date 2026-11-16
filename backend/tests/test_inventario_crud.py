@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -44,6 +44,9 @@ class Resultado:
     def first(self) -> Any | None:
         return self._filas[0] if self._filas else None
 
+    def __iter__(self):
+        return iter(self._filas)
+
 
 class SesionFalsa:
     """Sesión en memoria para lotes, cámaras y usuarios."""
@@ -59,6 +62,7 @@ class SesionFalsa:
         self.flushes = 0
         self.rollbacks = 0
         self.refreshes: list[object] = []
+        self.obtenidos: list[tuple[object, object, dict[str, object]]] = []
         self.siguiente_lote = 1
 
     # --- escritura ---------------------------------------------------------
@@ -101,7 +105,8 @@ class SesionFalsa:
 
     # --- lectura -----------------------------------------------------------
 
-    def get(self, modelo: object, ident: object, **_kwargs: object) -> object | None:
+    def get(self, modelo: object, ident: object, **kwargs: object) -> object | None:
+        self.obtenidos.append((modelo, ident, kwargs))
         if modelo is Camara:
             return self.camaras.get(ident)  # type: ignore[arg-type]
         if modelo is Lote:
@@ -116,6 +121,27 @@ class SesionFalsa:
 
     def scalars(self, sentencia: object) -> Resultado:
         self.consultas.append(sentencia)
+        sql = str(sentencia).lower()
+        params = sentencia.compile().params  # type: ignore[attr-defined]
+
+        if "from lotes" in sql and "join camaras" in sql:
+            lote = self.lotes.get(params.get("id_1"))  # type: ignore[arg-type]
+            camara = self.camaras.get(lote.camara_id) if lote is not None else None
+            if (
+                lote is not None
+                and camara is not None
+                and camara.restaurante_id == params.get("restaurante_id_1")
+            ):
+                return Resultado([lote])
+            return Resultado([])
+        if "from lotes" in sql:
+            return Resultado(
+                [
+                    lote
+                    for lote in self.lotes.values()
+                    if lote.camara_id == params.get("camara_id_1")
+                ]
+            )
         return Resultado([])
 
     def execute(self, sentencia: object) -> Resultado:
@@ -177,18 +203,21 @@ def _camara(
     camara_id: int = 1,
     restaurante_id: int = 1,
     nombre: str = "Cámara",
+    **cambios: object,
 ) -> Camara:
-    return Camara(
-        id=camara_id,
-        restaurante_id=restaurante_id,
-        es_demo=False,
-        nombre=nombre,
-        rango_min_c=Decimal("0.0"),
-        rango_max_c=Decimal("4.0"),
-        min_para_riesgo=10,
-        min_para_merma=60,
-        estado="en_rango",
-    )
+    base: dict[str, object] = {
+        "id": camara_id,
+        "restaurante_id": restaurante_id,
+        "es_demo": False,
+        "nombre": nombre,
+        "rango_min_c": Decimal("0.0"),
+        "rango_max_c": Decimal("4.0"),
+        "min_para_riesgo": 10,
+        "min_para_merma": 60,
+        "estado": "en_rango",
+    }
+    base.update(cambios)
+    return Camara(**base)
 
 
 def _lote(
@@ -409,6 +438,33 @@ def test_actualizar_lote_rechaza_nulos(cambios):
     assert respuesta.status_code == 422
 
 
+def test_patch_de_lote_en_merma_regresa_409_sin_cambios():
+    sesion = SesionFalsa()
+    sesion.add(_camara(1))
+    sesion.add(_lote(1, estado="merma", merma_en=datetime.now(UTC)))
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.patch("/api/lotes/1", json={"costo_total_mxn": "0.00"})
+
+    assert respuesta.status_code == 409
+    assert respuesta.json()["detail"] == (
+        "El lote ya está en merma; no se puede modificar del historial."
+    )
+    assert sesion.lotes[1].costo_total_mxn == Decimal("3240.50")
+
+
+def test_patch_invalido_incluye_loc_de_body():
+    sesion = SesionFalsa()
+    sesion.add(_camara(1))
+    sesion.add(_lote(1))
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.patch("/api/lotes/1", json={"cantidad": 0})
+
+    assert respuesta.status_code == 422
+    assert respuesta.json()["detail"][0]["loc"] == ["body", "cantidad"]
+
+
 def test_actualizar_lote_de_otro_tenant_regresa_404():
     sesion = SesionFalsa()
     sesion.add(_camara(6, restaurante_id=2))
@@ -446,6 +502,147 @@ def test_mover_lote_a_camara_de_otro_tenant_regresa_404():
 
     assert respuesta.status_code == 404
     assert sesion.lotes[1].camara_id == 1
+
+
+def test_crear_lote_bloquea_la_camara_destino():
+    sesion = SesionFalsa()
+    sesion.add(_camara(1))
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.post("/api/lotes", json=DATOS_LOTE)
+
+    assert respuesta.status_code == 201
+    assert (Camara, 1, {"with_for_update": True}) in sesion.obtenidos
+
+
+@pytest.mark.parametrize("operacion", ["patch", "delete", "merma"])
+def test_mutaciones_bloquean_lote_y_camara(operacion):
+    sesion = SesionFalsa()
+    sesion.add(_camara(1))
+    sesion.add(_lote(1))
+
+    with _cliente(sesion) as cliente:
+        if operacion == "patch":
+            respuesta = cliente.patch("/api/lotes/1", json={"cantidad": "5.00"})
+        elif operacion == "delete":
+            respuesta = cliente.delete("/api/lotes/1")
+        else:
+            respuesta = cliente.post("/api/lotes/1/merma")
+
+    assert respuesta.status_code in (200, 204)
+    assert any("FOR UPDATE" in str(consulta).upper() for consulta in sesion.consultas)
+
+
+def test_mover_lote_bloquea_tambien_la_camara_destino():
+    sesion = SesionFalsa()
+    sesion.add(_camara(1))
+    sesion.add(_camara(2, nombre="Carnes"))
+    sesion.add(_lote(1))
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.patch("/api/lotes/1", json={"camara_id": 2})
+
+    assert respuesta.status_code == 200
+    assert (Camara, 2, {"with_for_update": True}) in sesion.obtenidos
+
+
+def test_mover_lote_recalcula_la_camara_origen():
+    sesion = SesionFalsa()
+    sesion.add(_camara(1, estado="critica"))
+    sesion.add(_camara(2, nombre="Carnes", estado="en_rango"))
+    sesion.add(_lote(1, estado="en_riesgo"))
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.patch("/api/lotes/1", json={"camara_id": 2})
+
+    assert respuesta.status_code == 200
+    assert respuesta.json()["estado"] == "ok"  # destino sano
+    assert sesion.camaras[1].estado == "en_rango"
+    assert sesion.camaras[2].estado == "en_rango"
+
+
+def test_mover_lote_en_riesgo_a_camara_fuera_de_rango_mantiene_critica():
+    sesion = SesionFalsa()
+    sesion.add(_camara(1, estado="critica"))
+    sesion.add(
+        _camara(
+            2,
+            nombre="Carnes",
+            estado="en_rango",
+            fuera_de_rango_desde=datetime.now(UTC) - timedelta(minutes=20),
+        )
+    )
+    sesion.add(_lote(1, estado="en_riesgo"))
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.patch("/api/lotes/1", json={"camara_id": 2})
+
+    assert respuesta.status_code == 200
+    assert respuesta.json()["estado"] == "en_riesgo"
+    assert sesion.camaras[1].estado == "en_rango"
+    assert sesion.camaras[2].estado == "critica"
+
+
+def test_borrar_lote_recalcula_la_camara():
+    sesion = SesionFalsa()
+    sesion.add(_camara(1, estado="critica"))
+    sesion.add(_lote(1, estado="en_riesgo"))
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.delete("/api/lotes/1")
+
+    assert respuesta.status_code == 204
+    assert sesion.camaras[1].estado == "en_rango"
+
+
+def test_merma_recalcula_la_camara():
+    sesion = SesionFalsa()
+    sesion.add(_camara(1, estado="critica"))
+    sesion.add(_lote(1, estado="en_riesgo"))
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.post("/api/lotes/1/merma")
+
+    assert respuesta.status_code == 200
+    assert sesion.camaras[1].estado == "en_rango"
+
+
+# --- Estado inicial según la cámara ----------------------------------------
+
+
+def test_crear_lote_en_camara_fuera_de_rango_nace_en_riesgo():
+    sesion = SesionFalsa()
+    sesion.add(
+        _camara(
+            1,
+            fuera_de_rango_desde=datetime.now(UTC) - timedelta(minutes=20),
+        )
+    )
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.post("/api/lotes", json=DATOS_LOTE)
+
+    assert respuesta.status_code == 201
+    assert respuesta.json()["estado"] == "en_riesgo"
+    assert sesion.camaras[1].estado == "critica"
+
+
+def test_crear_lote_en_camara_en_merma_nace_en_merma():
+    sesion = SesionFalsa()
+    sesion.add(
+        _camara(
+            1,
+            fuera_de_rango_desde=datetime.now(UTC) - timedelta(hours=2),
+        )
+    )
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.post("/api/lotes", json=DATOS_LOTE)
+
+    assert respuesta.status_code == 201
+    cuerpo = respuesta.json()
+    assert cuerpo["estado"] == "merma"
+    assert cuerpo["merma_en"] is not None
 
 
 # --- Baja y merma -----------------------------------------------------------

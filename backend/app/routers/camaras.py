@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -27,6 +26,7 @@ from app.erp.procesador import TIPO_ALERTA_TEMPERATURA
 from app.realtime.bus import bus
 from app.schemas.camaras import CamaraActualizacion, CamaraCreacion
 from app.schemas.operacion import alerta_salida
+from app.schemas.utils import errores_de_validacion, flotante
 
 router = APIRouter(prefix="/api", tags=["consulta"], dependencies=[Depends(get_current_user)])
 
@@ -46,21 +46,22 @@ def camara_del_restaurante(
     restaurante_id: int,
     *,
     detalle: str = "Cámara no encontrada",
+    for_update: bool = False,
 ) -> Camara:
     """Carga la cámara o responde 404 si no existe o es de otro restaurante.
 
-    El 404 (no 403) evita filtrar si una cámara de otro tenant existe. Vive aquí
-    para que cada endpoint nuevo reutilice la misma verificación.
+    El 404 (no 403) evita filtrar si una cámara de otro tenant existe. Con
+    `for_update` se bloquea la fila: las mutaciones de inventario se serializan
+    con la ingesta de telemetría, que bloquea la cámara antes de tocar lotes.
     """
-    camara = db.get(Camara, camara_id)
+    camara = (
+        db.get(Camara, camara_id, with_for_update=True)
+        if for_update
+        else db.get(Camara, camara_id)
+    )
     if camara is None or camara.restaurante_id != restaurante_id:
         raise HTTPException(status_code=404, detail=detalle)
     return camara
-
-
-def _flotante(valor: Decimal | None) -> float | None:
-    """Convierte numeric de Postgres a float para que el JSON sea numérico."""
-    return None if valor is None else float(valor)
 
 
 def _ultimas_lecturas(db: Session, camaras: Sequence[Camara]) -> dict[int, Lectura]:
@@ -104,8 +105,8 @@ def _resumen_lectura(lectura: Lectura | None) -> dict[str, Any] | None:
         return None
     return {
         "ts": lectura.ts.isoformat(),
-        "temperatura_c": _flotante(lectura.temperatura_c),
-        "humedad_pct": _flotante(lectura.humedad_pct),
+        "temperatura_c": flotante(lectura.temperatura_c),
+        "humedad_pct": flotante(lectura.humedad_pct),
         "puerta_abierta": lectura.puerta_abierta,
     }
 
@@ -120,8 +121,8 @@ def _salida_camara(
     return {
         "id": camara.id,
         "nombre": camara.nombre,
-        "rango_min_c": _flotante(camara.rango_min_c),
-        "rango_max_c": _flotante(camara.rango_max_c),
+        "rango_min_c": flotante(camara.rango_min_c),
+        "rango_max_c": flotante(camara.rango_max_c),
         "min_para_riesgo": camara.min_para_riesgo,
         "min_para_merma": camara.min_para_merma,
         "estado": camara.estado,
@@ -326,7 +327,7 @@ def actualizar_camara(
         try:
             validada = CamaraCreacion.model_validate({**guardada, **cambios})
         except ValidationError as error:
-            raise RequestValidationError(error.errors()) from error
+            raise RequestValidationError(errores_de_validacion(error)) from error
 
         for campo in cambios:
             setattr(camara, campo, getattr(validada, campo))
@@ -403,8 +404,8 @@ def listar_lecturas(
             "id": lectura.id,
             "ts": lectura.ts.isoformat(),
             "recibida_en": lectura.recibida_en.isoformat(),
-            "temperatura_c": _flotante(lectura.temperatura_c),
-            "humedad_pct": _flotante(lectura.humedad_pct),
+            "temperatura_c": flotante(lectura.temperatura_c),
+            "humedad_pct": flotante(lectura.humedad_pct),
             "puerta_abierta": lectura.puerta_abierta,
             "sospechosa": lectura.sospechosa,
         }

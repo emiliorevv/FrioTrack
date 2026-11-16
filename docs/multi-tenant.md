@@ -85,8 +85,10 @@ lista vacía hasta que se den de alta cámaras.
   borran lotes. El lote no guarda tenant: lo hereda de su cámara, y
   `lote_del_restaurante()` responde 404 si el lote o su cámara son de otro
   restaurante. Mover un lote a otra cámara solo se permite dentro del mismo
-  tenant. La merma manual (`POST /lotes/{id}/merma`) conserva el historial; un
-  lote en merma no se elimina (409).
+  tenant. Las mutaciones bloquean el lote y su cámara (`FOR UPDATE`), igual que
+  la ingesta de telemetría, para que una merma manual no se pierda si coincide
+  con una lectura. La merma manual (`POST /lotes/{id}/merma`) conserva el
+  historial; un lote en merma no se edita ni se elimina (409).
 - **KPIs**: `calcular_kpis(db, restaurante_id)` filtra las cinco consultas con
   join a la cámara: lecturas, alertas activas, atendidas, lotes en riesgo y
   mermas.
