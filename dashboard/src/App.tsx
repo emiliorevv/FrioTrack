@@ -6,6 +6,7 @@ import { CameraCard } from './components/CameraCard'
 import { Configuracion } from './components/Configuracion'
 import { FilterBar } from './components/FilterBar'
 import { Header } from './components/Header'
+import { Inventario } from './components/Inventario'
 import { KpiStrip } from './components/KpiStrip'
 import { NotificationToast } from './components/NotificationToast'
 import { OnboardingBanner } from './components/OnboardingBanner'
@@ -229,6 +230,12 @@ function App({ usuario, rol, onLogout }: AppProps) {
                 <p className="empty-state">Aquí aparecerán tus cámaras.</p>
               )}
             </section>
+
+            <Inventario
+              rol={rol}
+              camaras={camaras}
+              onCambio={() => void refrescar()}
+            />
 
             <SecurityPanel
               alertas={alertasSeguridad}

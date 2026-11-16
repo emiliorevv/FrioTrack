@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { etiquetaRol, puedeAtenderAlertas } from './roles'
+import {
+  etiquetaRol,
+  puedeAtenderAlertas,
+  puedeEditarInventario,
+} from './roles'
 
 describe('puedeAtenderAlertas', () => {
   it('habilita al dueño y al jefe de cocina', () => {
@@ -17,5 +21,18 @@ describe('etiquetaRol', () => {
     expect(etiquetaRol('gerente')).toBe('Gerente')
     expect(etiquetaRol('admin')).toBe('admin')
     expect(etiquetaRol('')).toBe('Usuario')
+  })
+})
+
+describe('puedeEditarInventario', () => {
+  it('permite al dueño y al jefe de cocina', () => {
+    expect(puedeEditarInventario('dueno')).toBe(true)
+    expect(puedeEditarInventario('jefe_cocina')).toBe(true)
+  })
+
+  it('deja en solo lectura al gerente y roles desconocidos', () => {
+    expect(puedeEditarInventario('gerente')).toBe(false)
+    expect(puedeEditarInventario('admin')).toBe(false)
+    expect(puedeEditarInventario('')).toBe(false)
   })
 })

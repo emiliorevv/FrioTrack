@@ -16,3 +16,8 @@ export function etiquetaRol(rol: string): string {
 export function puedeAtenderAlertas(rol: string): boolean {
   return rol === 'dueno' || rol === 'jefe_cocina'
 }
+
+/** Permiso de negocio: dueño y jefe de cocina administran el inventario. */
+export function puedeEditarInventario(rol: string): boolean {
+  return rol === 'dueno' || rol === 'jefe_cocina'
+}

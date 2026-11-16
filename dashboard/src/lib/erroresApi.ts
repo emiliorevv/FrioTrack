@@ -1,10 +1,17 @@
 import { ErrorApi } from '../api/client'
 
-export type ContextoError = 'camara' | 'sensor'
+export type ContextoError = 'camara' | 'sensor' | 'lote'
 
 const MENSAJE_422: Record<ContextoError, string> = {
   camara: 'Revisa el nombre, el rango y los minutos.',
   sensor: 'Revisa los datos del sensor.',
+  lote: 'Revisa el producto, la cantidad, el costo y la caducidad.',
+}
+
+const MENSAJE_403: Record<ContextoError, string> = {
+  camara: 'Solo el dueño del restaurante puede administrar cámaras y sensores.',
+  sensor: 'Solo el dueño del restaurante puede administrar cámaras y sensores.',
+  lote: 'Tu rol no permite modificar el inventario.',
 }
 
 /**
@@ -22,7 +29,7 @@ export function mensajeDeError(
       return 'Tu sesión expiró. Vuelve a iniciar sesión.'
     }
     if (error.status === 403) {
-      return 'Solo el dueño del restaurante puede administrar cámaras y sensores.'
+      return MENSAJE_403[contexto]
     }
     if (error.status === 404) {
       return error.detalle ?? 'El elemento ya no existe. Actualiza la lista.'

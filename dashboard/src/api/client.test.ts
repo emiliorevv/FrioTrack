@@ -1,15 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   actualizarCamara,
+  actualizarLote,
   actualizarSensor,
   atenderAlerta,
   crearCamara,
+  crearLote,
   crearSensor,
   eliminarCamara,
+  eliminarLote,
   eliminarSensor,
   ErrorApi,
   iniciarSesion,
   listarSensores,
+  marcarLoteMerma,
   rotarTokenSensor,
   obtenerAlertasActivas,
   obtenerAlertasSeguridad,
@@ -17,6 +21,7 @@ import {
   obtenerHealth,
   obtenerKpis,
   obtenerLecturas,
+  obtenerLotes,
   pedir,
   registrar,
 } from './client'
@@ -822,5 +827,142 @@ describe('sensores', () => {
       name: 'ErrorApi',
       status: 409,
     })
+  })
+})
+
+describe('inventario', () => {
+  const lote = {
+    id: 4,
+    producto: 'Salmón fresco',
+    camara_id: 1,
+    cantidad: 2.5,
+    unidad: 'kg',
+    costo_total_mxn: 450.5,
+    caducidad: '2026-12-31',
+    estado: 'ok',
+    merma_en: null,
+  }
+
+  const datos = {
+    producto: 'Salmón fresco',
+    camara_id: 1,
+    cantidad: 2.5,
+    unidad: 'kg' as const,
+    costo_total_mxn: 450.5,
+    caducidad: '2026-12-31',
+  }
+
+  it('lista lotes sin filtros y valida el shape', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta([
+        { ...lote, token_hash: 'no-debe-salir' },
+        { ...lote, id: 5, unidad: 'caja' },
+        { ...lote, id: 6, cantidad: 0 },
+        { ...lote, id: 7, camara_id: '1' },
+        null,
+      ]),
+    )
+
+    await expect(obtenerLotes()).resolves.toEqual([lote])
+    expect(fetchFalso).toHaveBeenCalledWith(
+      `${BASE}/lotes`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('arma los filtros de cámara y estado', async () => {
+    fetchFalso.mockResolvedValue(respuesta([]))
+
+    await obtenerLotes({ camara_id: 3, estado: 'en_riesgo' })
+
+    expect(fetchFalso).toHaveBeenCalledWith(
+      `${BASE}/lotes?camara_id=3&estado=en_riesgo`,
+      expect.any(Object),
+    )
+  })
+
+  it('lanza si el listado no es un arreglo', async () => {
+    fetchFalso.mockResolvedValue(respuesta({ detail: 'contrato roto' }))
+
+    await expect(obtenerLotes()).rejects.toThrow(/formato inesperado/)
+  })
+
+  it('crea un lote con POST y normaliza la respuesta', async () => {
+    fetchFalso.mockResolvedValue(respuesta(lote, 201, 'Created'))
+
+    await expect(crearLote(datos)).resolves.toEqual(lote)
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/lotes`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual(datos)
+  })
+
+  it('devuelve null si el 201 no normaliza', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ ...lote, estado: 'desconocido' }, 201, 'Created'),
+    )
+
+    await expect(crearLote(datos)).resolves.toBeNull()
+  })
+
+  it('actualiza y mueve el lote con PATCH', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ ...lote, camara_id: 2, cantidad: 3 }),
+    )
+
+    await expect(
+      actualizarLote(4, { camara_id: 2, cantidad: 3 }),
+    ).resolves.toMatchObject({ id: 4, camara_id: 2, cantidad: 3 })
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/lotes/4`)
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(String(init.body))).toEqual({ camara_id: 2, cantidad: 3 })
+  })
+
+  it('elimina con DELETE y acepta 204', async () => {
+    fetchFalso.mockResolvedValue(respuesta(undefined, 204, 'No Content'))
+
+    await expect(eliminarLote(4)).resolves.toBeUndefined()
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/lotes/4`)
+    expect(init.method).toBe('DELETE')
+  })
+
+  it('propaga el 409 al borrar una merma', async () => {
+    const detalle =
+      'El lote ya está en merma; no se puede eliminar del historial.'
+    fetchFalso.mockResolvedValue(
+      respuesta({ detail: detalle }, 409, 'Conflict'),
+    )
+
+    await expect(eliminarLote(4)).rejects.toMatchObject({
+      name: 'ErrorApi',
+      status: 409,
+      detalle,
+    })
+  })
+
+  it('marca merma con POST y devuelve el lote actualizado', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({
+        ...lote,
+        estado: 'merma',
+        merma_en: '2026-11-16T18:00:00+00:00',
+      }),
+    )
+
+    await expect(marcarLoteMerma(4)).resolves.toMatchObject({
+      id: 4,
+      estado: 'merma',
+      merma_en: '2026-11-16T18:00:00+00:00',
+    })
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/lotes/4/merma`)
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeUndefined()
   })
 })

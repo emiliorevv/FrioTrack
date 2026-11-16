@@ -55,6 +55,21 @@ describe('mensajeDeError', () => {
     ).toBe('Revisa los datos del sensor.')
   })
 
+  it('usa el resumen de lote en un 422 sin detalle', () => {
+    expect(
+      mensajeDeError(
+        new ErrorApi('La API respondió 422 Unprocessable Entity', 422),
+        'lote',
+      ),
+    ).toBe('Revisa el producto, la cantidad, el costo y la caducidad.')
+  })
+
+  it('explica el 403 de inventario como solo lectura', () => {
+    expect(mensajeDeError(new ErrorApi('Prohibido', 403), 'lote')).toBe(
+      'Tu rol no permite modificar el inventario.',
+    )
+  })
+
   it('prioriza el detalle real de FastAPI en un 422', () => {
     expect(
       mensajeDeError(
