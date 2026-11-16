@@ -544,6 +544,7 @@ def test_lotes_sin_filtros_devuelve_todos_en_orden(mundo):
         "costo_total_mxn": 3240.0,
         "caducidad": "2026-11-20",
         "estado": "en_riesgo",
+        "merma_en": None,
     }
     assert all(isinstance(lote["cantidad"], float) for lote in lotes)
     assert all(isinstance(lote["costo_total_mxn"], float) for lote in lotes)

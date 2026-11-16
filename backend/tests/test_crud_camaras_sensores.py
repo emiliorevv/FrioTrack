@@ -566,6 +566,7 @@ def test_actualizar_camara_valida_contra_lo_guardado():
         respuesta = cliente.patch("/api/camaras/1", json={"rango_max_c": -6.0})
 
     assert respuesta.status_code == 422
+    assert respuesta.json()["detail"][0]["loc"] == ["body"]
     assert "rango_min_c" in respuesta.json()["detail"][0]["msg"]
 
 

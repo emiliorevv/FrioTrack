@@ -632,6 +632,7 @@ def test_servicio_publica_alerta_abierta_y_lote_actualizado(monkeypatch):
         "costo_total_mxn": 3240.0,
         "caducidad": "2026-11-20",
         "estado": "en_riesgo",
+        "merma_en": None,
     }
 
 

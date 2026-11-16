@@ -81,6 +81,14 @@ lista vacía hasta que se den de alta cámaras.
   sola vez y **nunca** se expone `token_hash`; `SENSOR_TOKENS` solo siembra la
   demo. Un `PATCH` de configuración reconcilia el estado con la última lectura y
   cierra la alerta de temperatura si la cámara vuelve a rango.
+- **CRUD de inventario**: los roles `dueno` y `jefe_cocina` crean, editan y
+  borran lotes. El lote no guarda tenant: lo hereda de su cámara, y
+  `lote_del_restaurante()` responde 404 si el lote o su cámara son de otro
+  restaurante. Mover un lote a otra cámara solo se permite dentro del mismo
+  tenant. Las mutaciones bloquean el lote y su cámara (`FOR UPDATE`), igual que
+  la ingesta de telemetría, para que una merma manual no se pierda si coincide
+  con una lectura. La merma manual (`POST /lotes/{id}/merma`) conserva el
+  historial; un lote en merma no se edita ni se elimina (409).
 - **KPIs**: `calcular_kpis(db, restaurante_id)` filtra las cinco consultas con
   join a la cámara: lecturas, alertas activas, atendidas, lotes en riesgo y
   mermas.

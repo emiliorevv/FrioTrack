@@ -110,6 +110,13 @@ la baja de sensores y los filtros por sensor.
 | `estado` | `text` | `ok`, `en_riesgo`, `merma` |
 | `merma_en` | `timestamptz` null | Cuándo pasó a merma; con esto salen los KPIs de merma del día y del mes |
 
+El estado normal lo maneja el ERP con las reglas de temperatura; al crear o
+mover un lote, la API lo inicializa con la ventana actual de su cámara (`ok`,
+`en_riesgo` o `merma`). Para una pérdida manual se usa `POST /lotes/{id}/merma`,
+que marca `merma` y `merma_en` sin borrar la fila. Un lote en `merma` **no se
+elimina ni se modifica** (`409`): es historial y alimenta los KPIs de merma. Los
+lotes `ok`/`en_riesgo` sí se pueden editar y borrar.
+
 ### `alertas`
 | Columna | Tipo | Notas |
 |---|---|---|
