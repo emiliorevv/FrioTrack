@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -72,15 +73,14 @@ beforeEach(() => {
 })
 
 function renderizar(onCerrar = vi.fn(), onCambio = vi.fn()) {
-  render(
+  const utilidades = render(
     <Configuracion
-      abierto
       onCerrar={onCerrar}
       onCambio={onCambio}
       formularioCamaraInicial={false}
     />,
   )
-  return { onCerrar, onCambio }
+  return { onCerrar, onCambio, ...utilidades }
 }
 
 async function esperarCamaras() {
@@ -250,9 +250,7 @@ describe('Configuracion', () => {
     )
 
     expect(
-      await screen.findByText(
-        'Los datos no son válidos. Revisa el nombre, el rango y los minutos.',
-      ),
+      await screen.findByText('Revisa el nombre, el rango y los minutos.'),
     ).toBeInTheDocument()
     expect(
       screen.getByRole('dialog', { name: 'Nueva cámara' }),
@@ -471,5 +469,284 @@ describe('Configuracion', () => {
     expect(await screen.findByText(detalle)).toBeInTheDocument()
     expect(screen.getByText('S-1234abcd')).toBeInTheDocument()
     expect(eliminarSensor).toHaveBeenCalledWith('S-1234abcd')
+  })
+
+  it('no cierra el formulario con Escape ni con el fondo mientras guarda', async () => {
+    const { onCerrar } = renderizar()
+    await esperarCamaras()
+    let resolver!: (valor: Camara | null) => void
+    vi.mocked(crearCamara).mockReturnValue(
+      new Promise<Camara | null>((resolve) => {
+        resolver = resolve
+      }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar cámara' }))
+    const dialogo = screen.getByRole('dialog', { name: 'Nueva cámara' })
+    llenarFormulario(dialogo)
+    fireEvent.click(
+      within(dialogo).getByRole('button', { name: 'Guardar cámara' }),
+    )
+
+    await waitFor(() => expect(crearCamara).toHaveBeenCalled())
+    expect(
+      within(dialogo).getByRole('button', { name: 'Cerrar formulario' }),
+    ).toBeDisabled()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.mouseDown(dialogo.parentElement as HTMLElement)
+
+    expect(dialogo).toBeInTheDocument()
+    expect(onCerrar).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolver({ ...camara, id: 9, nombre: 'Congelador' })
+    })
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Nueva cámara' }),
+      ).not.toBeInTheDocument(),
+    )
+  })
+
+  it('trata un 201 sin shape como éxito y recarga la lista', async () => {
+    const { onCambio } = renderizar()
+    await esperarCamaras()
+    vi.mocked(crearCamara).mockResolvedValue(null)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar cámara' }))
+    const dialogo = screen.getByRole('dialog', { name: 'Nueva cámara' })
+    llenarFormulario(dialogo)
+    fireEvent.click(
+      within(dialogo).getByRole('button', { name: 'Guardar cámara' }),
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Nueva cámara' }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(onCambio).toHaveBeenCalledTimes(1)
+    expect(obtenerCamaras).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText(/cámara inválida/i)).not.toBeInTheDocument()
+  })
+
+  it('acepta .5, -.5 y exponentes que produce un input number', async () => {
+    renderizar()
+    await esperarCamaras()
+    vi.mocked(crearCamara).mockResolvedValue({
+      ...camara,
+      id: 10,
+      nombre: 'Rango decimal',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar cámara' }))
+    const dialogo = screen.getByRole('dialog', { name: 'Nueva cámara' })
+    llenarFormulario(dialogo, {
+      nombre: 'Rango decimal',
+      minimo: '-.5',
+      maximo: '.5',
+      riesgo: '1e1',
+      merma: '2e1',
+    })
+    fireEvent.click(
+      within(dialogo).getByRole('button', { name: 'Guardar cámara' }),
+    )
+
+    await waitFor(() =>
+      expect(crearCamara).toHaveBeenCalledWith({
+        nombre: 'Rango decimal',
+        rango_min_c: -0.5,
+        rango_max_c: 0.5,
+        min_para_riesgo: 10,
+        min_para_merma: 20,
+      }),
+    )
+  })
+
+  it('usa el mensaje de sensor ante un 422 al crear un sensor', async () => {
+    renderizar()
+    await esperarCamaras()
+    vi.mocked(crearSensor).mockRejectedValue(
+      new ErrorApi('La API respondió 422 Unprocessable Entity', 422),
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Sensores' }))
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Agregar sensor a Pescados y mariscos',
+      }),
+    )
+
+    expect(
+      await screen.findByText('Revisa los datos del sensor.'),
+    ).toBeInTheDocument()
+  })
+
+  it('no muestra el vacío de cámaras ni oculta sensores si falla la carga', async () => {
+    vi.mocked(obtenerCamaras).mockRejectedValue(
+      new ErrorApi('No se pudieron cargar las cámaras', 500),
+    )
+    vi.mocked(listarSensores).mockResolvedValue([sensor])
+    renderizar()
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByText('No se pudieron cargar las cámaras').length,
+      ).toBeGreaterThan(0),
+    )
+    fireEvent.click(screen.getByRole('tab', { name: 'Sensores' }))
+
+    const panel = screen.getByRole('tabpanel', { name: 'Sensores' })
+    expect(
+      within(panel).getByText('No se pudieron cargar las cámaras'),
+    ).toBeInTheDocument()
+    expect(
+      within(panel).queryByText(
+        'Primero agrega una cámara para conectar un sensor.',
+      ),
+    ).not.toBeInTheDocument()
+    expect(within(panel).getByText('S-1234abcd')).toBeInTheDocument()
+    expect(
+      within(panel).getByRole('button', { name: 'Reintentar' }),
+    ).toBeInTheDocument()
+  })
+
+  it('no cierra la confirmación en vuelo y deja visible el 409', async () => {
+    renderizar()
+    await esperarCamaras()
+    const detalle =
+      'La cámara tiene datos asociados; desactívala o elimina primero sus sensores.'
+    let rechazar!: (error: unknown) => void
+    vi.mocked(eliminarCamara).mockReturnValue(
+      new Promise<void>((_resolve, reject) => {
+        rechazar = reject
+      }),
+    )
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Eliminar cámara Pescados y mariscos',
+      }),
+    )
+    fireEvent.click(
+      within(
+        screen.getByRole('dialog', { name: 'Eliminar Pescados y mariscos' }),
+      ).getByRole('button', { name: 'Eliminar cámara' }),
+    )
+
+    await waitFor(() => expect(eliminarCamara).toHaveBeenCalled())
+    const dialogo = screen.getByRole('dialog', {
+      name: 'Eliminar Pescados y mariscos',
+    })
+    for (const boton of within(dialogo).getAllByRole('button', {
+      name: 'Cancelar',
+    })) {
+      expect(boton).toBeDisabled()
+    }
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.mouseDown(dialogo.parentElement as HTMLElement)
+
+    expect(dialogo).toBeInTheDocument()
+
+    await act(async () => {
+      rechazar(new ErrorApi(detalle, 409, null, detalle))
+    })
+
+    expect(await screen.findByText(detalle)).toBeInTheDocument()
+    expect(dialogo).toBeInTheDocument()
+    expect(
+      within(dialogo)
+        .getAllByRole('button', { name: 'Cancelar' })
+        .every((boton) => !(boton as HTMLButtonElement).disabled),
+    ).toBe(true)
+  })
+
+  it('mantiene Tab y Shift+Tab dentro del diálogo superior', async () => {
+    renderizar()
+    await esperarCamaras()
+    const dialogo = screen.getByRole('dialog', { name: 'Configuración' })
+    const cerrar = within(dialogo).getByRole('button', {
+      name: 'Cerrar configuración',
+    })
+    const eliminar = within(dialogo).getByRole('button', {
+      name: 'Eliminar cámara Pescados y mariscos',
+    })
+
+    eliminar.focus()
+    fireEvent.keyDown(eliminar, { key: 'Tab' })
+    expect(cerrar).toHaveFocus()
+
+    fireEvent.keyDown(cerrar, { key: 'Tab', shiftKey: true })
+    expect(eliminar).toHaveFocus()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar cámara' }))
+    const formulario = screen.getByRole('dialog', { name: 'Nueva cámara' })
+    const cerrarFormulario = within(formulario).getByRole('button', {
+      name: 'Cerrar formulario',
+    })
+    const guardar = within(formulario).getByRole('button', {
+      name: 'Guardar cámara',
+    })
+
+    guardar.focus()
+    fireEvent.keyDown(guardar, { key: 'Tab' })
+    expect(cerrarFormulario).toHaveFocus()
+  })
+
+  it('aborta las cargas al desmontar', async () => {
+    const senales: AbortSignal[] = []
+    vi.mocked(obtenerCamaras).mockImplementation((senal) => {
+      if (senal) {
+        senales.push(senal)
+      }
+      return new Promise(() => {})
+    })
+    vi.mocked(listarSensores).mockImplementation((senal) => {
+      if (senal) {
+        senales.push(senal)
+      }
+      return new Promise(() => {})
+    })
+
+    const { unmount } = renderizar()
+    await waitFor(() => expect(senales).toHaveLength(2))
+
+    unmount()
+
+    expect(senales.every((senal) => senal.aborted)).toBe(true)
+  })
+
+  it('una respuesta vieja no cierra un formulario abierto después', async () => {
+    renderizar()
+    await esperarCamaras()
+    let resolver!: (valor: Camara | null) => void
+    vi.mocked(crearCamara).mockReturnValue(
+      new Promise<Camara | null>((resolve) => {
+        resolver = resolve
+      }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar cámara' }))
+    const primero = screen.getByRole('dialog', { name: 'Nueva cámara' })
+    llenarFormulario(primero)
+    fireEvent.click(
+      within(primero).getByRole('button', { name: 'Guardar cámara' }),
+    )
+    await waitFor(() => expect(crearCamara).toHaveBeenCalled())
+
+    // Se abre otro formulario mientras la primera petición sigue en vuelo.
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar cámara' }))
+    const segundo = screen.getByRole('dialog', { name: 'Nueva cámara' })
+
+    await act(async () => {
+      resolver({ ...camara, id: 11, nombre: 'Otro formulario' })
+    })
+
+    expect(segundo).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Guardar cámara' }),
+    ).toBeInTheDocument()
   })
 })

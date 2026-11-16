@@ -1,12 +1,22 @@
 import { ErrorApi } from '../api/client'
 
+export type ContextoError = 'camara' | 'sensor'
+
+const MENSAJE_422: Record<ContextoError, string> = {
+  camara: 'Revisa el nombre, el rango y los minutos.',
+  sensor: 'Revisa los datos del sensor.',
+}
+
 /**
  * Mensaje accionable para un fallo de la API de administración.
  *
- * El `detail` de FastAPI solo se usa cuando es un texto claro (409/404); los
- * 422 traen un arreglo de validación y aquí se resumen en una frase útil.
+ * El `detail` de FastAPI se usa cuando es texto claro o cuando el 422 trae
+ * `detail[]` con `msg`; solo se cae al resumen por contexto si no hay detalle.
  */
-export function mensajeDeError(error: unknown): string {
+export function mensajeDeError(
+  error: unknown,
+  contexto: ContextoError = 'camara',
+): string {
   if (error instanceof ErrorApi) {
     if (error.status === 401) {
       return 'Tu sesión expiró. Vuelve a iniciar sesión.'
@@ -23,7 +33,7 @@ export function mensajeDeError(error: unknown): string {
       )
     }
     if (error.status === 422) {
-      return 'Los datos no son válidos. Revisa el nombre, el rango y los minutos.'
+      return error.detalle ?? MENSAJE_422[contexto]
     }
     return error.message
   }

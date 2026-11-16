@@ -18,6 +18,7 @@ import {
   rotarTokenSensor,
 } from '../api/client'
 import { mensajeDeError } from '../lib/erroresApi'
+import { ETIQUETA_ESTADO } from '../lib/format'
 import type { Camara, CamaraCreacion, Sensor } from '../types'
 import { Dialogo } from './Dialogo'
 import { FormularioCamara } from './FormularioCamara'
@@ -35,7 +36,6 @@ interface TokenVisible {
 }
 
 interface ConfiguracionProps {
-  abierto: boolean
   onCerrar: () => void
   /** Se llama después de crear, editar o borrar una cámara. */
   onCambio?: () => void
@@ -44,7 +44,6 @@ interface ConfiguracionProps {
 }
 
 export function Configuracion({
-  abierto,
   onCerrar,
   onCambio,
   formularioCamaraInicial = false,
@@ -62,6 +61,8 @@ export function Configuracion({
   const [formulario, setFormulario] = useState<FormularioAbierto>(() =>
     formularioCamaraInicial ? { modo: 'crear' } : null,
   )
+  const [formularioVersion, setFormularioVersion] = useState(0)
+  const [guardandoCamara, setGuardandoCamara] = useState(false)
   const [confirmarCamara, setConfirmarCamara] = useState<Camara | null>(null)
   const [confirmarSensor, setConfirmarSensor] = useState<Sensor | null>(null)
   const [errorConfirmacion, setErrorConfirmacion] = useState<string | null>(
@@ -80,65 +81,89 @@ export function Configuracion({
   })
 
   useEffect(() => {
-    if (!abierto) {
-      return
-    }
-    let activo = true
-    void obtenerCamaras()
+    const controlador = new AbortController()
+    void obtenerCamaras(controlador.signal)
       .then((datos) => {
-        if (activo) {
+        if (!controlador.signal.aborted) {
           setCamaras(datos)
         }
       })
       .catch((error: unknown) => {
-        if (activo) {
-          setErrorCamaras(mensajeDeError(error))
+        if (!controlador.signal.aborted) {
+          setErrorCamaras(mensajeDeError(error, 'camara'))
         }
       })
       .finally(() => {
-        if (activo) {
+        if (!controlador.signal.aborted) {
           setCargandoCamaras(false)
         }
       })
     return () => {
-      activo = false
+      controlador.abort()
     }
-  }, [abierto, versionCamaras])
+  }, [versionCamaras])
 
   useEffect(() => {
-    if (!abierto) {
-      return
-    }
-    let activo = true
-    void listarSensores()
+    const controlador = new AbortController()
+    void listarSensores(controlador.signal)
       .then((datos) => {
-        if (activo) {
+        if (!controlador.signal.aborted) {
           setSensores(datos)
         }
       })
       .catch((error: unknown) => {
-        if (activo) {
-          setErrorSensores(mensajeDeError(error))
+        if (!controlador.signal.aborted) {
+          setErrorSensores(mensajeDeError(error, 'sensor'))
         }
       })
       .finally(() => {
-        if (activo) {
+        if (!controlador.signal.aborted) {
           setCargandoSensores(false)
         }
       })
     return () => {
-      activo = false
+      controlador.abort()
     }
-  }, [abierto, versionSensores])
+  }, [versionSensores])
 
-  const grupos = useMemo(
-    () =>
-      camaras.map((camara) => ({
+  const grupos = useMemo(() => {
+    const porCamara = new Map<
+      number,
+      {
+        camaraId: number
+        camara: Camara | null
+        nombre: string
+        sensores: Sensor[]
+      }
+    >()
+
+    for (const camara of camaras) {
+      porCamara.set(camara.id, {
+        camaraId: camara.id,
         camara,
-        sensores: sensores.filter((sensor) => sensor.camara_id === camara.id),
-      })),
-    [camaras, sensores],
-  )
+        nombre: camara.nombre,
+        sensores: [],
+      })
+    }
+
+    // Si falló el listado de cámaras, los sensores ya cargados se agrupan por
+    // el nombre que trae `GET /sensores` en vez de desaparecer.
+    for (const sensor of sensores) {
+      const grupo = porCamara.get(sensor.camara_id)
+      if (grupo) {
+        grupo.sensores.push(sensor)
+      } else {
+        porCamara.set(sensor.camara_id, {
+          camaraId: sensor.camara_id,
+          camara: null,
+          nombre: sensor.camara_nombre || `Cámara ${sensor.camara_id}`,
+          sensores: [sensor],
+        })
+      }
+    }
+
+    return [...porCamara.values()]
+  }, [camaras, sensores])
 
   function recargarCamaras() {
     setErrorCamaras(null)
@@ -175,16 +200,40 @@ export function Configuracion({
     tabsRef.current[siguiente]?.focus()
   }
 
-  async function guardarCamara(datos: CamaraCreacion) {
-    if (formulario?.modo === 'editar') {
-      await actualizarCamara(formulario.camara.id, datos)
-    } else {
-      await crearCamara(datos)
+  function abrirFormulario(siguiente: FormularioAbierto) {
+    setGuardandoCamara(false)
+    setFormularioVersion((version) => version + 1)
+    setFormulario(siguiente)
+  }
+
+  function cerrarFormulario() {
+    if (!guardandoCamara) {
+      setFormulario(null)
     }
-    setFormulario(null)
-    recargarCamaras()
-    recargarSensores()
-    onCambio?.()
+  }
+
+  async function guardarCamara(datos: CamaraCreacion) {
+    const formularioActual = formulario
+    if (!formularioActual) {
+      return
+    }
+
+    setGuardandoCamara(true)
+    try {
+      if (formularioActual.modo === 'editar') {
+        await actualizarCamara(formularioActual.camara.id, datos)
+      } else {
+        await crearCamara(datos)
+      }
+
+      // Solo cierra el formulario que inició esta petición.
+      setFormulario((actual) => (actual === formularioActual ? null : actual))
+      recargarCamaras()
+      recargarSensores()
+      onCambio?.()
+    } finally {
+      setGuardandoCamara(false)
+    }
   }
 
   function pedirEliminarCamara(camara: Camara) {
@@ -205,7 +254,7 @@ export function Configuracion({
       recargarSensores()
       onCambio?.()
     } catch (error) {
-      setErrorConfirmacion(mensajeDeError(error))
+      setErrorConfirmacion(mensajeDeError(error, 'camara'))
     } finally {
       setEliminando(false)
     }
@@ -229,7 +278,7 @@ export function Configuracion({
       setErrorCopia(null)
       recargarSensores()
     } catch (error) {
-      setErrorAccion(mensajeDeError(error))
+      setErrorAccion(mensajeDeError(error, 'sensor'))
     } finally {
       setOcupado(null)
     }
@@ -254,7 +303,7 @@ export function Configuracion({
       setCopiado(false)
       setErrorCopia(null)
     } catch (error) {
-      setErrorAccion(mensajeDeError(error))
+      setErrorAccion(mensajeDeError(error, 'sensor'))
     } finally {
       setOcupado(null)
     }
@@ -279,7 +328,7 @@ export function Configuracion({
         ),
       )
     } catch (error) {
-      setErrorAccion(mensajeDeError(error))
+      setErrorAccion(mensajeDeError(error, 'sensor'))
     } finally {
       setOcupado(null)
     }
@@ -301,7 +350,7 @@ export function Configuracion({
       setConfirmarSensor(null)
       recargarSensores()
     } catch (error) {
-      setErrorConfirmacion(mensajeDeError(error))
+      setErrorConfirmacion(mensajeDeError(error, 'sensor'))
     } finally {
       setEliminando(false)
     }
@@ -392,7 +441,7 @@ export function Configuracion({
             <button
               type="button"
               className="boton boton--primario"
-              onClick={() => setFormulario({ modo: 'crear' })}
+              onClick={() => abrirFormulario({ modo: 'crear' })}
             >
               Agregar cámara
             </button>
@@ -416,16 +465,18 @@ export function Configuracion({
               Cargando cámaras…
             </p>
           ) : camaras.length === 0 ? (
-            <div className="config__vacio">
-              <p>Todavía no hay cámaras registradas.</p>
-              <button
-                type="button"
-                className="boton boton--primario"
-                onClick={() => setFormulario({ modo: 'crear' })}
-              >
-                Agregar cámara
-              </button>
-            </div>
+            errorCamaras ? null : (
+              <div className="config__vacio">
+                <p>Todavía no hay cámaras registradas.</p>
+                <button
+                  type="button"
+                  className="boton boton--primario"
+                  onClick={() => abrirFormulario({ modo: 'crear' })}
+                >
+                  Agregar cámara
+                </button>
+              </div>
+            )
           ) : (
             <ul className="config-lista">
               {camaras.map((camara) => (
@@ -443,13 +494,15 @@ export function Configuracion({
                     title={`Estado: ${camara.estado}`}
                   >
                     <span className="status__dot" aria-hidden="true" />
-                    {etiquetaEstado(camara.estado)}
+                    {ETIQUETA_ESTADO[camara.estado]}
                   </span>
                   <div className="config-camara__acciones">
                     <button
                       type="button"
                       className="boton boton--secundario boton--sm"
-                      onClick={() => setFormulario({ modo: 'editar', camara })}
+                      onClick={() =>
+                        abrirFormulario({ modo: 'editar', camara })
+                      }
                       aria-label={`Editar cámara ${camara.nombre}`}
                     >
                       Editar
@@ -499,7 +552,20 @@ export function Configuracion({
             </div>
           )}
 
-          {camaras.length === 0 && !cargandoCamaras ? (
+          {errorCamaras && (
+            <div className="config-alerta" role="alert">
+              <p>{errorCamaras}</p>
+              <button
+                type="button"
+                className="boton boton--secundario boton--sm"
+                onClick={reintentarCamaras}
+              >
+                Reintentar
+              </button>
+            </div>
+          )}
+
+          {camaras.length === 0 && !cargandoCamaras && !errorCamaras ? (
             <div className="config__vacio">
               <p>Primero agrega una cámara para conectar un sensor.</p>
               <button
@@ -507,7 +573,7 @@ export function Configuracion({
                 className="boton boton--primario"
                 onClick={() => {
                   cambiarPestana('camaras')
-                  setFormulario({ modo: 'crear' })
+                  abrirFormulario({ modo: 'crear' })
                 }}
               >
                 Agregar cámara
@@ -517,108 +583,115 @@ export function Configuracion({
             <p className="config__vacio" role="status">
               Cargando sensores…
             </p>
-          ) : (
+          ) : errorSensores && sensores.length === 0 ? null : (
             <div className="sensor-grupos">
-              {grupos.map(({ camara, sensores: sensoresCamara }) => (
-                <section
-                  className="sensor-grupo"
-                  key={camara.id}
-                  aria-labelledby={`${baseId}-grupo-${camara.id}`}
-                >
-                  <div className="sensor-grupo__cabecera">
-                    <h4
-                      className="sensor-grupo__titulo"
-                      id={`${baseId}-grupo-${camara.id}`}
-                    >
-                      {camara.nombre}
-                    </h4>
-                    <button
-                      type="button"
-                      className="boton boton--secundario boton--sm"
-                      onClick={() => void pedirCrearSensor(camara)}
-                      aria-busy={ocupado === `crear-sensor-${camara.id}`}
-                      aria-label={`Agregar sensor a ${camara.nombre}`}
-                      disabled={ocupado !== null}
-                    >
-                      {ocupado === `crear-sensor-${camara.id}`
-                        ? 'Creando…'
-                        : 'Agregar sensor'}
-                    </button>
-                  </div>
+              {grupos.map(
+                ({ camaraId, camara, nombre, sensores: sensoresCamara }) => (
+                  <section
+                    className="sensor-grupo"
+                    key={camaraId}
+                    aria-labelledby={`${baseId}-grupo-${camaraId}`}
+                  >
+                    <div className="sensor-grupo__cabecera">
+                      <h4
+                        className="sensor-grupo__titulo"
+                        id={`${baseId}-grupo-${camaraId}`}
+                      >
+                        {nombre}
+                      </h4>
+                      {camara && (
+                        <button
+                          type="button"
+                          className="boton boton--secundario boton--sm"
+                          onClick={() => void pedirCrearSensor(camara)}
+                          aria-busy={ocupado === `crear-sensor-${camara.id}`}
+                          aria-label={`Agregar sensor a ${camara.nombre}`}
+                          disabled={ocupado !== null}
+                        >
+                          {ocupado === `crear-sensor-${camara.id}`
+                            ? 'Creando…'
+                            : 'Agregar sensor'}
+                        </button>
+                      )}
+                    </div>
 
-                  {sensoresCamara.length === 0 ? (
-                    <p className="sensor-grupo__vacio">
-                      Sin sensores conectados.
-                    </p>
-                  ) : (
-                    <ul className="sensor-lista">
-                      {sensoresCamara.map((sensor) => (
-                        <li className="sensor-fila" key={sensor.id}>
-                          <div className="sensor-fila__info">
-                            <p className="sensor-fila__id">{sensor.id}</p>
-                            <p className="sensor-fila__meta">
-                              Última lectura:{' '}
-                              {sensor.ultima_lectura ? (
-                                <TiempoRelativo ts={sensor.ultima_lectura} />
-                              ) : (
-                                'sin lecturas'
-                              )}
-                            </p>
-                          </div>
-                          <span
-                            className={`sensor-estado ${
-                              sensor.activo
-                                ? 'sensor-estado--activo'
-                                : 'sensor-estado--inactivo'
-                            }`}
-                          >
-                            {sensor.activo ? 'Activo' : 'Inactivo'}
-                          </span>
-                          <div className="sensor-fila__acciones">
-                            <button
-                              type="button"
-                              className="boton boton--secundario boton--sm"
-                              onClick={() => void rotarToken(sensor)}
-                              aria-busy={ocupado === `rotar-${sensor.id}`}
-                              aria-label={`Rotar token del sensor ${sensor.id}`}
-                              disabled={ocupado !== null}
+                    {sensoresCamara.length === 0 ? (
+                      <p className="sensor-grupo__vacio">
+                        Sin sensores conectados.
+                      </p>
+                    ) : (
+                      <ul className="sensor-lista">
+                        {sensoresCamara.map((sensor) => (
+                          <li className="sensor-fila" key={sensor.id}>
+                            <div className="sensor-fila__info">
+                              <p className="sensor-fila__id">{sensor.id}</p>
+                              <p className="sensor-fila__meta">
+                                Última lectura:{' '}
+                                {sensor.ultima_lectura ? (
+                                  <TiempoRelativo ts={sensor.ultima_lectura} />
+                                ) : (
+                                  'sin lecturas'
+                                )}
+                              </p>
+                            </div>
+                            <span
+                              className={`sensor-estado ${
+                                sensor.activo
+                                  ? 'sensor-estado--activo'
+                                  : 'sensor-estado--inactivo'
+                              }`}
                             >
-                              {ocupado === `rotar-${sensor.id}`
-                                ? 'Rotando…'
-                                : 'Rotar token'}
-                            </button>
-                            <button
-                              type="button"
-                              className="boton boton--secundario boton--sm"
-                              onClick={() => void alternarSensor(sensor)}
-                              aria-busy={ocupado === `activar-${sensor.id}`}
-                              aria-label={`${
-                                sensor.activo ? 'Desactivar' : 'Activar'
-                              } sensor ${sensor.id}`}
-                              disabled={ocupado !== null}
-                            >
-                              {ocupado === `activar-${sensor.id}`
-                                ? 'Guardando…'
-                                : sensor.activo
-                                  ? 'Desactivar'
-                                  : 'Activar'}
-                            </button>
-                            <button
-                              type="button"
-                              className="boton boton--peligro boton--sm"
-                              onClick={() => pedirEliminarSensor(sensor)}
-                              aria-label={`Eliminar sensor ${sensor.id}`}
-                              disabled={ocupado !== null}
-                            >
-                              Eliminar
-                            </button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              ))}
+                              {sensor.activo ? 'Activo' : 'Inactivo'}
+                            </span>
+                            <div className="sensor-fila__acciones">
+                              <button
+                                type="button"
+                                className="boton boton--secundario boton--sm"
+                                onClick={() => void rotarToken(sensor)}
+                                aria-busy={ocupado === `rotar-${sensor.id}`}
+                                aria-label={`Rotar token del sensor ${sensor.id}`}
+                                disabled={ocupado !== null}
+                              >
+                                {ocupado === `rotar-${sensor.id}`
+                                  ? 'Rotando…'
+                                  : 'Rotar token'}
+                              </button>
+                              <button
+                                type="button"
+                                className="boton boton--secundario boton--sm"
+                                onClick={() => void alternarSensor(sensor)}
+                                aria-busy={ocupado === `activar-${sensor.id}`}
+                                aria-label={`${
+                                  sensor.activo ? 'Desactivar' : 'Activar'
+                                } sensor ${sensor.id}`}
+                                disabled={ocupado !== null}
+                              >
+                                {ocupado === `activar-${sensor.id}`
+                                  ? 'Guardando…'
+                                  : sensor.activo
+                                    ? 'Desactivar'
+                                    : 'Activar'}
+                              </button>
+                              <button
+                                type="button"
+                                className="boton boton--peligro boton--sm"
+                                onClick={() => pedirEliminarSensor(sensor)}
+                                aria-label={`Eliminar sensor ${sensor.id}`}
+                                disabled={ocupado !== null}
+                              >
+                                Eliminar
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                ),
+              )}
+              {grupos.length === 0 && !errorCamaras && (
+                <p className="sensor-grupo__vacio">Sin sensores conectados.</p>
+              )}
             </div>
           )}
         </div>
@@ -631,15 +704,17 @@ export function Configuracion({
               ? 'Nueva cámara'
               : `Editar ${formulario.camara.nombre}`
           }
-          onCerrar={() => setFormulario(null)}
+          onCerrar={cerrarFormulario}
           etiquetaCerrar="Cerrar formulario"
+          cerrable={!guardandoCamara}
         >
           <FormularioCamara
+            key={formularioVersion}
             camara={
               formulario.modo === 'editar' ? formulario.camara : undefined
             }
             onGuardar={guardarCamara}
-            onCancelar={() => setFormulario(null)}
+            onCancelar={cerrarFormulario}
           />
         </Dialogo>
       )}
@@ -651,6 +726,7 @@ export function Configuracion({
           etiquetaConfirmar="Eliminar cámara"
           error={errorConfirmacion}
           ocupado={eliminando}
+          cerrable={!eliminando}
           onCancelar={() => setConfirmarCamara(null)}
           onConfirmar={() => void borrarCamara()}
         />
@@ -663,6 +739,7 @@ export function Configuracion({
           etiquetaConfirmar="Eliminar sensor"
           error={errorConfirmacion}
           ocupado={eliminando}
+          cerrable={!eliminando}
           onCancelar={() => setConfirmarSensor(null)}
           onConfirmar={() => void borrarSensor()}
         />
@@ -734,6 +811,7 @@ interface DialogoConfirmacionProps {
   etiquetaConfirmar: string
   error: string | null
   ocupado: boolean
+  cerrable: boolean
   onCancelar: () => void
   onConfirmar: () => void
 }
@@ -744,6 +822,7 @@ function DialogoConfirmacion({
   etiquetaConfirmar,
   error,
   ocupado,
+  cerrable,
   onCancelar,
   onConfirmar,
 }: DialogoConfirmacionProps) {
@@ -752,6 +831,7 @@ function DialogoConfirmacion({
       titulo={titulo}
       onCerrar={onCancelar}
       etiquetaCerrar="Cancelar"
+      cerrable={cerrable}
       acciones={
         <>
           <button
@@ -782,14 +862,4 @@ function DialogoConfirmacion({
       )}
     </Dialogo>
   )
-}
-
-function etiquetaEstado(estado: Camara['estado']): string {
-  if (estado === 'en_rango') {
-    return 'En rango'
-  }
-  if (estado === 'alerta') {
-    return 'Alerta'
-  }
-  return 'Crítica'
 }

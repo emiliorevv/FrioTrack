@@ -7,6 +7,21 @@ import { useEffect, useId, useRef, type ReactNode } from 'react'
 const pila: number[] = []
 let siguienteId = 0
 
+const SELECTOR_FOCUSABLE = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+function focusablesVisibles(panel: HTMLElement): HTMLElement[] {
+  return Array.from(
+    panel.querySelectorAll<HTMLElement>(SELECTOR_FOCUSABLE),
+  ).filter((elemento) => elemento.closest('[hidden]') === null)
+}
+
 interface DialogoProps {
   titulo: string
   onCerrar: () => void
@@ -16,6 +31,11 @@ interface DialogoProps {
   /** Nombre accesible del botón de cerrar. */
   etiquetaCerrar?: string
   className?: string
+  /**
+   * Falso mientras una petición está en vuelo: X, Escape y el fondo dejan de
+   * cerrar el diálogo superior.
+   */
+  cerrable?: boolean
 }
 
 export function Dialogo({
@@ -25,14 +45,20 @@ export function Dialogo({
   acciones,
   etiquetaCerrar = 'Cerrar',
   className,
+  cerrable = true,
 }: DialogoProps) {
   const tituloId = useId()
   const panelRef = useRef<HTMLElement>(null)
   const cerrarRef = useRef(onCerrar)
+  const cerrableRef = useRef(cerrable)
 
   useEffect(() => {
     cerrarRef.current = onCerrar
   }, [onCerrar])
+
+  useEffect(() => {
+    cerrableRef.current = cerrable
+  }, [cerrable])
 
   useEffect(() => {
     const id = (siguienteId += 1)
@@ -47,18 +73,56 @@ export function Dialogo({
     const panel = panelRef.current
     panel?.focus()
     const primerCampo = panel?.querySelector<HTMLElement>(
-      'input:not([type="hidden"]), select, textarea',
+      'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])',
     )
     const primeraPestana = panel?.querySelector<HTMLElement>('[role="tab"]')
-    const primerBoton = panel?.querySelector<HTMLElement>('button')
+    const primerBoton = panel?.querySelector<HTMLElement>(
+      'button:not([disabled])',
+    )
     ;(primerCampo ?? primeraPestana ?? primerBoton ?? panel)?.focus()
 
     function alTeclear(evento: KeyboardEvent) {
-      if (evento.key !== 'Escape' || pila[pila.length - 1] !== id) {
+      if (pila[pila.length - 1] !== id) {
         return
       }
-      evento.stopPropagation()
-      cerrarRef.current()
+
+      if (evento.key === 'Escape') {
+        if (!cerrableRef.current) {
+          return
+        }
+        evento.stopPropagation()
+        cerrarRef.current()
+        return
+      }
+
+      if (evento.key !== 'Tab' || !panel) {
+        return
+      }
+
+      // Trap de foco: Tab y Shift+Tab se quedan en el diálogo superior.
+      const focusables = focusablesVisibles(panel)
+      if (focusables.length === 0) {
+        evento.preventDefault()
+        panel.focus()
+        return
+      }
+
+      const primero = focusables[0]
+      const ultimo = focusables[focusables.length - 1]
+      const activo = document.activeElement
+
+      if (evento.shiftKey) {
+        if (activo === primero || activo === panel || !panel.contains(activo)) {
+          evento.preventDefault()
+          ultimo.focus()
+        }
+        return
+      }
+
+      if (activo === ultimo || activo === panel || !panel.contains(activo)) {
+        evento.preventDefault()
+        primero.focus()
+      }
     }
 
     document.addEventListener('keydown', alTeclear)
@@ -78,7 +142,7 @@ export function Dialogo({
     <div
       className="dialogo-fondo"
       onMouseDown={(evento) => {
-        if (evento.target === evento.currentTarget) {
+        if (evento.target === evento.currentTarget && cerrableRef.current) {
           onCerrar()
         }
       }}
@@ -100,6 +164,7 @@ export function Dialogo({
             className="icon-button"
             onClick={onCerrar}
             aria-label={etiquetaCerrar}
+            disabled={!cerrable}
           >
             <svg
               width="15"

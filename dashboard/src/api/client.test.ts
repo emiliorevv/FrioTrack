@@ -89,6 +89,38 @@ describe('pedir', () => {
     expect(new Headers(init.headers).get('Accept')).toBe('application/json')
   })
 
+  it('valida el listado de cámaras y filtra filas inválidas', async () => {
+    const valida = {
+      id: 1,
+      nombre: 'Pescados y mariscos',
+      rango_min_c: 0,
+      rango_max_c: 2,
+      min_para_riesgo: 10,
+      min_para_merma: 60,
+      estado: 'en_rango',
+      ultima_lectura: null,
+      valor_en_riesgo_mxn: 0,
+    }
+    fetchFalso.mockResolvedValue(
+      respuesta([
+        valida,
+        { ...valida, id: 2, estado: 'raro' },
+        { ...valida, id: 3, rango_min_c: 'frío' },
+        null,
+      ]),
+    )
+
+    await expect(obtenerCamaras()).resolves.toEqual([valida])
+  })
+
+  it('lanza si el listado de cámaras no es un arreglo', async () => {
+    fetchFalso.mockResolvedValue(respuesta({ detail: 'contrato roto' }))
+
+    await expect(obtenerCamaras()).rejects.toThrow(
+      /formato inesperado para las cámaras/,
+    )
+  })
+
   it('fusiona los headers del llamador sin perder los suyos', async () => {
     fetchFalso.mockResolvedValue(respuesta({}))
 
@@ -144,6 +176,39 @@ describe('pedir', () => {
       status: 404,
       detalle: 'Cámara no encontrada',
     })
+  })
+
+  it('extrae el msg real de un detail[] de FastAPI', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta(
+        {
+          detail: [
+            {
+              type: 'value_error',
+              loc: ['body', 'min_para_merma'],
+              msg: 'min_para_merma debe ser mayor que min_para_riesgo',
+            },
+          ],
+        },
+        422,
+        'Unprocessable Entity',
+      ),
+    )
+
+    const fallo = await crearCamara({
+      nombre: 'Congelador',
+      rango_min_c: -18,
+      rango_max_c: -15,
+      min_para_riesgo: 60,
+      min_para_merma: 10,
+    }).catch((error: unknown) => error)
+
+    expect(fallo).toMatchObject({
+      name: 'ErrorApi',
+      status: 422,
+      detalle: 'min_para_merma debe ser mayor que min_para_riesgo',
+    })
+    expect((fallo as Error).message).toContain('min_para_merma')
   })
 
   it('usa el status cuando el cuerpo del error no trae detail', async () => {
@@ -560,14 +625,20 @@ describe('administración de cámaras', () => {
     )
   })
 
-  it('rechaza una cámara con contrato inválido', async () => {
+  it('devuelve null si el 201 no normaliza, sin reportar un fallo de alta', async () => {
     fetchFalso.mockResolvedValue(
       respuesta({ ...camara, rango_min_c: 'frío' }, 201, 'Created'),
     )
 
-    await expect(crearCamara(datos)).rejects.toThrow(
-      'La API devolvió una cámara inválida.',
+    await expect(crearCamara(datos)).resolves.toBeNull()
+  })
+
+  it('devuelve null si el PATCH responde un shape inválido', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ ...camara, estado: 'desconocido' }),
     )
+
+    await expect(actualizarCamara(7, { nombre: 'X' })).resolves.toBeNull()
   })
 
   it('actualiza con PATCH y devuelve la cámara final', async () => {

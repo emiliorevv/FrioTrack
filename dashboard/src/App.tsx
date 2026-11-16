@@ -255,7 +255,6 @@ function App({ usuario, rol, onLogout }: AppProps) {
 
       {configuracionAbierta && (
         <Configuracion
-          abierto
           formularioCamaraInicial={formularioCamaraInicial}
           onCerrar={cerrarConfiguracion}
           onCambio={() => void refrescar()}

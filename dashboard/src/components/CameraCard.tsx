@@ -1,17 +1,12 @@
-import type { Camara, EstadoCamara } from '../types'
+import type { Camara } from '../types'
 import {
+  ETIQUETA_ESTADO,
   formatearMxn,
   formatearRango,
   formatearTemperatura,
 } from '../lib/format'
 import { Sparkline } from './Sparkline'
 import { TiempoRelativo } from './TiempoRelativo'
-
-const ETIQUETA_ESTADO: Record<EstadoCamara, string> = {
-  en_rango: 'En rango',
-  alerta: 'Alerta',
-  critica: 'Crítica',
-}
 
 interface CameraCardProps {
   camara: Camara

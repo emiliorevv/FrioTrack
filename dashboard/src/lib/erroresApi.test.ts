@@ -37,12 +37,36 @@ describe('mensajeDeError', () => {
     )
   })
 
-  it('resume un 422 de validación de FastAPI', () => {
+  it('usa el resumen de cámara en un 422 sin detalle', () => {
     expect(
       mensajeDeError(
         new ErrorApi('La API respondió 422 Unprocessable Entity', 422),
+        'camara',
       ),
-    ).toMatch(/no son válidos/i)
+    ).toBe('Revisa el nombre, el rango y los minutos.')
+  })
+
+  it('usa el resumen de sensor en un 422 sin detalle', () => {
+    expect(
+      mensajeDeError(
+        new ErrorApi('La API respondió 422 Unprocessable Entity', 422),
+        'sensor',
+      ),
+    ).toBe('Revisa los datos del sensor.')
+  })
+
+  it('prioriza el detalle real de FastAPI en un 422', () => {
+    expect(
+      mensajeDeError(
+        new ErrorApi(
+          'activo debe ser booleano',
+          422,
+          null,
+          'activo debe ser booleano',
+        ),
+        'sensor',
+      ),
+    ).toBe('activo debe ser booleano')
   })
 
   it('usa el mensaje de errores desconocidos', () => {

@@ -47,14 +47,30 @@ interface DetalleError {
 async function leerDetalle(respuesta: Response): Promise<DetalleError> {
   try {
     const datos: unknown = await respuesta.json()
-    if (
-      typeof datos === 'object' &&
-      datos !== null &&
-      'detail' in datos &&
-      typeof datos.detail === 'string' &&
-      datos.detail.trim()
-    ) {
-      return { mensaje: datos.detail, detalle: datos.detail }
+    if (esObjeto(datos)) {
+      if (typeof datos.detail === 'string' && datos.detail.trim()) {
+        return { mensaje: datos.detail, detalle: datos.detail }
+      }
+
+      // FastAPI manda `detail: [{ msg, loc, type }]` en los 422. Se conserva
+      // el motivo real en vez de reducirlo al status HTTP.
+      if (Array.isArray(datos.detail)) {
+        const mensajes = Array.from(
+          new Set(
+            datos.detail
+              .map((item) =>
+                esObjeto(item) && typeof item.msg === 'string'
+                  ? item.msg.trim()
+                  : '',
+              )
+              .filter(Boolean),
+          ),
+        )
+        if (mensajes.length > 0) {
+          const texto = mensajes.join('; ')
+          return { mensaje: texto, detalle: texto }
+        }
+      }
     }
   } catch {
     // El cuerpo no era JSON; se usa el status como mensaje.
@@ -254,8 +270,16 @@ export function obtenerHealth(senal?: AbortSignal): Promise<Health> {
   return pedir<Health>('/health', { signal: senal })
 }
 
-export function obtenerCamaras(senal?: AbortSignal): Promise<Camara[]> {
-  return pedir<Camara[]>('/camaras', { signal: senal })
+export async function obtenerCamaras(senal?: AbortSignal): Promise<Camara[]> {
+  const datos = await pedir<unknown>('/camaras', { signal: senal })
+
+  if (!Array.isArray(datos)) {
+    throw new Error('La API devolvió un formato inesperado para las cámaras.')
+  }
+
+  return datos
+    .map(normalizarCamara)
+    .filter((camara): camara is Camara => camara !== null)
 }
 
 export function obtenerKpis(senal?: AbortSignal): Promise<Kpis> {
@@ -561,37 +585,39 @@ function normalizarSensorConToken(valor: unknown): SensorConToken {
   return { sensor, token: valor.token }
 }
 
-/** `POST /camaras`: crea una cámara en el restaurante del JWT. */
-export async function crearCamara(datos: CamaraCreacion): Promise<Camara> {
+/**
+ * `POST /camaras`: crea una cámara en el restaurante del JWT.
+ *
+ * Devuelve `null` si el 201 trae un shape que no se puede normalizar: el alta
+ * ya ocurrió y el llamador debe recargar la lista, no reintentar el POST.
+ */
+export async function crearCamara(
+  datos: CamaraCreacion,
+): Promise<Camara | null> {
   const respuesta = await pedir<unknown>('/camaras', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(datos),
   })
 
-  const camara = normalizarCamara(respuesta)
-  if (!camara) {
-    throw new Error('La API devolvió una cámara inválida.')
-  }
-  return camara
+  return normalizarCamara(respuesta)
 }
 
-/** `PATCH /camaras/{id}`: solo configuración; la respuesta es la cámara final. */
+/**
+ * `PATCH /camaras/{id}`: solo configuración. Igual que el alta, un 200 con
+ * shape inválido devuelve `null` en vez de reportar un fallo que no existió.
+ */
 export async function actualizarCamara(
   id: number,
   datos: Partial<CamaraCreacion>,
-): Promise<Camara> {
+): Promise<Camara | null> {
   const respuesta = await pedir<unknown>(`/camaras/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(datos),
   })
 
-  const camara = normalizarCamara(respuesta)
-  if (!camara) {
-    throw new Error('La API devolvió una cámara inválida.')
-  }
-  return camara
+  return normalizarCamara(respuesta)
 }
 
 /** `DELETE /camaras/{id}`: 204, o 409 si tiene sensores, lotes o lecturas. */
@@ -600,8 +626,8 @@ export async function eliminarCamara(id: number): Promise<void> {
 }
 
 /** `GET /sensores`: sensores del restaurante sin `token_hash`. */
-export async function listarSensores(): Promise<Sensor[]> {
-  const datos = await pedir<unknown>('/sensores')
+export async function listarSensores(senal?: AbortSignal): Promise<Sensor[]> {
+  const datos = await pedir<unknown>('/sensores', { signal: senal })
 
   if (!Array.isArray(datos)) {
     throw new Error('La API devolvió un formato inesperado para los sensores.')

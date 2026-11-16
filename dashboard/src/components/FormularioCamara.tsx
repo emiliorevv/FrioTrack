@@ -19,7 +19,7 @@ interface ErroresCampos {
 
 function aNumero(valor: string): number | null {
   const limpio = valor.trim()
-  if (!/^-?\d+(\.\d+)?$/.test(limpio)) {
+  if (!limpio) {
     return null
   }
   const numero = Number(limpio)
