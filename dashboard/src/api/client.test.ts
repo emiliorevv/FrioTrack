@@ -1,8 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  actualizarCamara,
+  actualizarSensor,
   atenderAlerta,
+  crearCamara,
+  crearSensor,
+  eliminarCamara,
+  eliminarSensor,
   ErrorApi,
   iniciarSesion,
+  listarSensores,
+  rotarTokenSensor,
   obtenerAlertasActivas,
   obtenerAlertasSeguridad,
   obtenerCamaras,
@@ -513,5 +521,235 @@ describe('auth del cliente', () => {
     const fallo = await pedir('/prueba').catch((error: unknown) => error)
 
     expect(fallo).toMatchObject({ retryAfterSegundos: null })
+  })
+})
+
+describe('administración de cámaras', () => {
+  const camara = {
+    id: 7,
+    nombre: 'Congelador nuevo',
+    rango_min_c: -22,
+    rango_max_c: -18,
+    min_para_riesgo: 10,
+    min_para_merma: 60,
+    estado: 'en_rango',
+    ultima_lectura: null,
+    valor_en_riesgo_mxn: 0,
+    valor_inventario_mxn: 0,
+  }
+
+  const datos = {
+    nombre: 'Congelador nuevo',
+    rango_min_c: -22,
+    rango_max_c: -18,
+    min_para_riesgo: 10,
+    min_para_merma: 60,
+  }
+
+  it('crea una cámara con POST y valida la respuesta', async () => {
+    fetchFalso.mockResolvedValue(respuesta(camara, 201, 'Created'))
+
+    await expect(crearCamara(datos)).resolves.toEqual(camara)
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/camaras`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual(datos)
+    expect(new Headers(init.headers).get('Content-Type')).toBe(
+      'application/json',
+    )
+  })
+
+  it('rechaza una cámara con contrato inválido', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ ...camara, rango_min_c: 'frío' }, 201, 'Created'),
+    )
+
+    await expect(crearCamara(datos)).rejects.toThrow(
+      'La API devolvió una cámara inválida.',
+    )
+  })
+
+  it('actualiza con PATCH y devuelve la cámara final', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ ...camara, nombre: 'Congelador 2' }),
+    )
+
+    await expect(
+      actualizarCamara(7, { nombre: 'Congelador 2' }),
+    ).resolves.toMatchObject({ id: 7, nombre: 'Congelador 2' })
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/camaras/7`)
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(String(init.body))).toEqual({ nombre: 'Congelador 2' })
+  })
+
+  it('elimina con DELETE y acepta el 204 sin cuerpo', async () => {
+    fetchFalso.mockResolvedValue(respuesta(undefined, 204, 'No Content'))
+
+    await expect(eliminarCamara(7)).resolves.toBeUndefined()
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/camaras/7`)
+    expect(init.method).toBe('DELETE')
+  })
+
+  it('propaga el 409 cuando la cámara tiene datos asociados', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta(
+        {
+          detail:
+            'La cámara tiene datos asociados; desactívala o elimina primero sus sensores.',
+        },
+        409,
+        'Conflict',
+      ),
+    )
+
+    await expect(eliminarCamara(7)).rejects.toMatchObject({
+      name: 'ErrorApi',
+      status: 409,
+      detalle:
+        'La cámara tiene datos asociados; desactívala o elimina primero sus sensores.',
+    })
+  })
+})
+
+describe('sensores', () => {
+  const sensor = {
+    id: 'S-1234abcd',
+    camara_id: 1,
+    camara_nombre: 'Pescados y mariscos',
+    activo: true,
+    ultima_lectura: null,
+  }
+
+  it('lista sensores y descarta filas inválidas sin exponer token_hash', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta([
+        { ...sensor, token_hash: 'no-debe-salir' },
+        { ...sensor, id: 'S-válido', camara_nombre: undefined },
+        { id: 4, camara_id: 1, activo: true },
+        { id: 'S-sin-camara', activo: true },
+        null,
+      ]),
+    )
+
+    const sensores = await listarSensores()
+
+    expect(sensores).toEqual([
+      sensor,
+      { ...sensor, id: 'S-válido', camara_nombre: '' },
+    ])
+    expect(sensores[0]).not.toHaveProperty('token_hash')
+    expect(fetchFalso).toHaveBeenCalledWith(
+      `${BASE}/sensores`,
+      expect.any(Object),
+    )
+  })
+
+  it('lanza si el listado no es un arreglo', async () => {
+    fetchFalso.mockResolvedValue(respuesta({ detail: 'contrato roto' }))
+
+    await expect(listarSensores()).rejects.toThrow(/formato inesperado/)
+  })
+
+  it('crea un sensor sin body y devuelve su token una sola vez', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta(
+        {
+          sensor: {
+            id: 'S-1234abcd',
+            camara_id: 1,
+            activo: true,
+          },
+          token: 'tok-en-claro',
+        },
+        201,
+        'Created',
+      ),
+    )
+
+    await expect(crearSensor(1)).resolves.toEqual({
+      sensor: { ...sensor, camara_nombre: '' },
+      token: 'tok-en-claro',
+    })
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/camaras/1/sensores`)
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeUndefined()
+  })
+
+  it('rota el token con POST y valida la respuesta', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({
+        sensor: { id: 'S-1234abcd', camara_id: 1, activo: false },
+        token: 'tok-rotado',
+      }),
+    )
+
+    await expect(rotarTokenSensor('S-1234abcd')).resolves.toMatchObject({
+      token: 'tok-rotado',
+      sensor: { activo: false },
+    })
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/sensores/S-1234abcd/rotar-token`)
+    expect(init.method).toBe('POST')
+  })
+
+  it('rechaza una respuesta de token sin token', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ sensor: { id: 'S-1', camara_id: 1, activo: true } }),
+    )
+
+    await expect(crearSensor(1)).rejects.toThrow(
+      'La API devolvió un sensor inválido.',
+    )
+  })
+
+  it('activa o desactiva con PATCH', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta({ id: 'S-1234abcd', camara_id: 1, activo: false }),
+    )
+
+    await expect(
+      actualizarSensor('S-1234abcd', { activo: false }),
+    ).resolves.toMatchObject({ id: 'S-1234abcd', activo: false })
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/sensores/S-1234abcd`)
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(String(init.body))).toEqual({ activo: false })
+  })
+
+  it('elimina con DELETE y acepta el 204', async () => {
+    fetchFalso.mockResolvedValue(respuesta(undefined, 204, 'No Content'))
+
+    await expect(eliminarSensor('S-1234abcd')).resolves.toBeUndefined()
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/sensores/S-1234abcd`)
+    expect(init.method).toBe('DELETE')
+  })
+
+  it('propaga el 409 cuando el sensor ya tiene lecturas', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta(
+        {
+          detail:
+            'El sensor tiene lecturas asociadas; desactívalo en lugar de eliminarlo.',
+        },
+        409,
+        'Conflict',
+      ),
+    )
+
+    await expect(eliminarSensor('S-1234abcd')).rejects.toMatchObject({
+      name: 'ErrorApi',
+      status: 409,
+    })
   })
 })

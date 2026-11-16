@@ -2,9 +2,14 @@ import type {
   AlertaOperativa,
   AlertaSeguridad,
   Camara,
+  CamaraCreacion,
+  EstadoCamara,
   Health,
   Kpis,
   Lectura,
+  Sensor,
+  SensorConToken,
+  UltimaLectura,
 } from '../types'
 import { esObjeto } from '../lib/validacion'
 import { getToken, notificarNoAutorizado } from '../auth/token'
@@ -148,6 +153,11 @@ export async function pedir<T>(
       leerRetryAfter(respuesta.headers.get('Retry-After')),
       detalle,
     )
+  }
+
+  // Los DELETE responden 204 sin cuerpo; intentar parsear JSON rompería.
+  if (respuesta.status === 204) {
+    return undefined as T
   }
 
   return (await respuesta.json()) as T
@@ -403,4 +413,240 @@ function normalizarAlertaSeguridad(valor: unknown): AlertaSeguridad | null {
       ? { descripcion }
       : {}),
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Administración de cámaras y sensores                                */
+/* ------------------------------------------------------------------ */
+
+const ESTADOS_CAMARA: readonly EstadoCamara[] = [
+  'en_rango',
+  'alerta',
+  'critica',
+]
+
+function esEstadoCamara(valor: unknown): valor is EstadoCamara {
+  return (
+    typeof valor === 'string' &&
+    (ESTADOS_CAMARA as readonly string[]).includes(valor)
+  )
+}
+
+function normalizarUltimaLectura(valor: unknown): UltimaLectura | null {
+  if (!esObjeto(valor)) {
+    return null
+  }
+
+  const { ts, temperatura_c, humedad_pct, puerta_abierta } = valor
+  if (
+    typeof ts !== 'string' ||
+    typeof temperatura_c !== 'number' ||
+    typeof humedad_pct !== 'number' ||
+    typeof puerta_abierta !== 'boolean'
+  ) {
+    return null
+  }
+
+  return {
+    ts,
+    temperatura_c,
+    humedad_pct,
+    puerta_abierta,
+  }
+}
+
+function normalizarCamara(valor: unknown): Camara | null {
+  if (!esObjeto(valor)) {
+    return null
+  }
+
+  const {
+    id,
+    nombre,
+    rango_min_c: rangoMin,
+    rango_max_c: rangoMax,
+    min_para_riesgo: minRiesgo,
+    min_para_merma: minMerma,
+    estado,
+    ultima_lectura: ultimaLectura,
+    valor_en_riesgo_mxn: valorRiesgo,
+    valor_inventario_mxn: valorInventario,
+  } = valor
+
+  if (
+    typeof id !== 'number' ||
+    !Number.isFinite(id) ||
+    typeof nombre !== 'string' ||
+    !nombre.trim() ||
+    typeof rangoMin !== 'number' ||
+    !Number.isFinite(rangoMin) ||
+    typeof rangoMax !== 'number' ||
+    !Number.isFinite(rangoMax) ||
+    typeof minRiesgo !== 'number' ||
+    !Number.isFinite(minRiesgo) ||
+    typeof minMerma !== 'number' ||
+    !Number.isFinite(minMerma) ||
+    !esEstadoCamara(estado)
+  ) {
+    return null
+  }
+
+  const lectura =
+    ultimaLectura === null ? null : normalizarUltimaLectura(ultimaLectura)
+  if (ultimaLectura !== null && lectura === null) {
+    return null
+  }
+
+  return {
+    id,
+    nombre,
+    rango_min_c: rangoMin,
+    rango_max_c: rangoMax,
+    min_para_riesgo: minRiesgo,
+    min_para_merma: minMerma,
+    estado,
+    ultima_lectura: lectura,
+    valor_en_riesgo_mxn:
+      typeof valorRiesgo === 'number' && Number.isFinite(valorRiesgo)
+        ? valorRiesgo
+        : 0,
+    ...(typeof valorInventario === 'number' && Number.isFinite(valorInventario)
+      ? { valor_inventario_mxn: valorInventario }
+      : {}),
+  }
+}
+
+function normalizarSensor(valor: unknown): Sensor | null {
+  if (!esObjeto(valor)) {
+    return null
+  }
+
+  const {
+    id,
+    camara_id: camaraId,
+    camara_nombre: camaraNombre,
+    activo,
+    ultima_lectura: ultimaLectura,
+  } = valor
+
+  if (
+    typeof id !== 'string' ||
+    !id ||
+    typeof camaraId !== 'number' ||
+    !Number.isFinite(camaraId) ||
+    typeof activo !== 'boolean'
+  ) {
+    return null
+  }
+
+  return {
+    id,
+    camara_id: camaraId,
+    camara_nombre: typeof camaraNombre === 'string' ? camaraNombre : '',
+    activo,
+    ultima_lectura: typeof ultimaLectura === 'string' ? ultimaLectura : null,
+  }
+}
+
+function normalizarSensorConToken(valor: unknown): SensorConToken {
+  if (!esObjeto(valor)) {
+    throw new Error('La API devolvió un sensor inválido.')
+  }
+
+  const sensor = normalizarSensor(valor.sensor)
+  if (!sensor || typeof valor.token !== 'string' || !valor.token) {
+    throw new Error('La API devolvió un sensor inválido.')
+  }
+
+  return { sensor, token: valor.token }
+}
+
+/** `POST /camaras`: crea una cámara en el restaurante del JWT. */
+export async function crearCamara(datos: CamaraCreacion): Promise<Camara> {
+  const respuesta = await pedir<unknown>('/camaras', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(datos),
+  })
+
+  const camara = normalizarCamara(respuesta)
+  if (!camara) {
+    throw new Error('La API devolvió una cámara inválida.')
+  }
+  return camara
+}
+
+/** `PATCH /camaras/{id}`: solo configuración; la respuesta es la cámara final. */
+export async function actualizarCamara(
+  id: number,
+  datos: Partial<CamaraCreacion>,
+): Promise<Camara> {
+  const respuesta = await pedir<unknown>(`/camaras/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(datos),
+  })
+
+  const camara = normalizarCamara(respuesta)
+  if (!camara) {
+    throw new Error('La API devolvió una cámara inválida.')
+  }
+  return camara
+}
+
+/** `DELETE /camaras/{id}`: 204, o 409 si tiene sensores, lotes o lecturas. */
+export async function eliminarCamara(id: number): Promise<void> {
+  await pedir<void>(`/camaras/${id}`, { method: 'DELETE' })
+}
+
+/** `GET /sensores`: sensores del restaurante sin `token_hash`. */
+export async function listarSensores(): Promise<Sensor[]> {
+  const datos = await pedir<unknown>('/sensores')
+
+  if (!Array.isArray(datos)) {
+    throw new Error('La API devolvió un formato inesperado para los sensores.')
+  }
+
+  return datos
+    .map(normalizarSensor)
+    .filter((sensor): sensor is Sensor => sensor !== null)
+}
+
+/** `POST /camaras/{id}/sensores` sin body: el token se ve una sola vez. */
+export async function crearSensor(camaraId: number): Promise<SensorConToken> {
+  const datos = await pedir<unknown>(`/camaras/${camaraId}/sensores`, {
+    method: 'POST',
+  })
+  return normalizarSensorConToken(datos)
+}
+
+/** `POST /sensores/{id}/rotar-token`: invalida el token anterior. */
+export async function rotarTokenSensor(id: string): Promise<SensorConToken> {
+  const datos = await pedir<unknown>(`/sensores/${id}/rotar-token`, {
+    method: 'POST',
+  })
+  return normalizarSensorConToken(datos)
+}
+
+/** `PATCH /sensores/{id}`: enciende o apaga el sensor. */
+export async function actualizarSensor(
+  id: string,
+  datos: { activo: boolean },
+): Promise<Sensor> {
+  const respuesta = await pedir<unknown>(`/sensores/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(datos),
+  })
+
+  const sensor = normalizarSensor(respuesta)
+  if (!sensor) {
+    throw new Error('La API devolvió un sensor inválido.')
+  }
+  return sensor
+}
+
+/** `DELETE /sensores/{id}`: 204, o 409 si el sensor ya tiene lecturas. */
+export async function eliminarSensor(id: string): Promise<void> {
+  await pedir<void>(`/sensores/${id}`, { method: 'DELETE' })
 }

@@ -3,6 +3,7 @@ import './App.css'
 import { puedeAtenderAlertas } from './auth/roles'
 import { AlertasActivas } from './components/AlertasActivas'
 import { CameraCard } from './components/CameraCard'
+import { Configuracion } from './components/Configuracion'
 import { FilterBar } from './components/FilterBar'
 import { Header } from './components/Header'
 import { KpiStrip } from './components/KpiStrip'
@@ -51,6 +52,8 @@ interface AppProps {
 function App({ usuario, rol, onLogout }: AppProps) {
   const [filtro, setFiltro] = useState<FiltroCamaras>('todas')
   const [busqueda, setBusqueda] = useState('')
+  const [configuracionAbierta, setConfiguracionAbierta] = useState(false)
+  const [formularioCamaraInicial, setFormularioCamaraInicial] = useState(false)
   const { notificacion, cerrar } = useNotificaciones()
   const {
     health,
@@ -93,6 +96,16 @@ function App({ usuario, rol, onLogout }: AppProps) {
   const mostrarBienvenida = camaras.length === 0 && !cargando && rol === 'dueno'
   const actualizadoEn = fechaMasReciente(ultimoExitoHttp, ultimaActividadSse)
 
+  function abrirConfiguracion(conFormularioDeCamara = false) {
+    setFormularioCamaraInicial(conFormularioDeCamara)
+    setConfiguracionAbierta(true)
+  }
+
+  function cerrarConfiguracion() {
+    setConfiguracionAbierta(false)
+    setFormularioCamaraInicial(false)
+  }
+
   return (
     <div className="app">
       <a className="skip-link" href="#contenido">
@@ -105,6 +118,7 @@ function App({ usuario, rol, onLogout }: AppProps) {
         usuario={usuario}
         rol={rol}
         onLogout={onLogout}
+        onAbrirConfiguracion={() => abrirConfiguracion()}
       />
 
       <main id="contenido" className="app-main" tabIndex={-1}>
@@ -137,7 +151,11 @@ function App({ usuario, rol, onLogout }: AppProps) {
 
             {camaras.length > 0 && <OnboardingBanner />}
 
-            {mostrarBienvenida && <BienvenidaRestaurante />}
+            {mostrarBienvenida && (
+              <BienvenidaRestaurante
+                onAgregarCamara={() => abrirConfiguracion(true)}
+              />
+            )}
 
             <section className="section" aria-labelledby="resumen-title">
               <div className="section-heading">
@@ -234,12 +252,25 @@ function App({ usuario, rol, onLogout }: AppProps) {
           onCerrar={cerrar}
         />
       )}
+
+      {configuracionAbierta && (
+        <Configuracion
+          abierto
+          formularioCamaraInicial={formularioCamaraInicial}
+          onCerrar={cerrarConfiguracion}
+          onCambio={() => void refrescar()}
+        />
+      )}
     </div>
   )
 }
 
 /** Estado vacío de un restaurante recién creado: guía los primeros pasos. */
-function BienvenidaRestaurante() {
+function BienvenidaRestaurante({
+  onAgregarCamara,
+}: {
+  onAgregarCamara: () => void
+}) {
   return (
     <section className="bienvenida" aria-labelledby="bienvenida-title">
       <p className="bienvenida__eyebrow">Primeros pasos</p>
@@ -301,13 +332,13 @@ function BienvenidaRestaurante() {
         <button
           type="button"
           className="bienvenida__boton"
-          disabled
+          onClick={onAgregarCamara}
           aria-describedby="bienvenida-nota"
         >
           Agregar cámara
         </button>
         <p className="bienvenida__nota" id="bienvenida-nota">
-          Disponible en la siguiente actualización
+          Se abrirá el formulario para crear la primera cámara.
         </p>
       </div>
     </section>
