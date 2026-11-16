@@ -128,9 +128,12 @@ Lista de lecturas de una cámara para la gráfica. Si no se manda rango, regresa
 ```json
 [
   { "id": 7, "producto": "Robalo fresco", "camara_id": 1, "cantidad": 12, "unidad": "kg",
-    "costo_total_mxn": 3240.00, "caducidad": "2026-11-20", "estado": "en_riesgo" }
+    "costo_total_mxn": 3240.00, "caducidad": "2026-11-20", "estado": "en_riesgo",
+    "merma_en": null }
 ]
 ```
+
+`merma_en` es la fecha en que el lote pasó a `merma` (o `null`); se agregó para que el CRUD de inventario y la marca manual de merma compartan el mismo objeto.
 
 #### `GET /alertas?activas=true`
 ```json
@@ -233,6 +236,35 @@ Body `{ "activo": true|false }`. Respuesta `200` con `{ id, camara_id, activo }`
 
 #### `DELETE /sensores/{id}`
 `204` si el sensor no tiene lecturas. Si tiene historial responde `409` y sugiere desactivarlo: `El sensor tiene lecturas asociadas; desactívalo en lugar de eliminarlo.`
+
+### Gestión de inventario
+
+La escritura exige rol `dueno` o `jefe_cocina`. Todo se limita al restaurante del JWT a través de la cámara del lote: un lote o una cámara de otro restaurante responde `404`, igual que uno inexistente. Con `AUTH_REQUERIDA=0` (local y pruebas) se aceptan sin JWT sobre el restaurante demo.
+
+#### `POST /lotes`
+```json
+{
+  "producto": "Robalo fresco",
+  "camara_id": 1,
+  "cantidad": 12.5,
+  "unidad": "kg",
+  "costo_total_mxn": 3240.50,
+  "caducidad": "2026-11-20"
+}
+```
+
+Respuesta `201` con el mismo objeto que un elemento de `GET /lotes`: `id`, `producto`, `camara_id`, `cantidad`, `unidad`, `costo_total_mxn`, `caducidad`, `estado: "ok"` y `merma_en: null`.
+
+Validación (`422` si no se cumple): `producto` de 2 a 120 caracteres después de recortar espacios; `camara_id` entero positivo y cámara del restaurante (`404` si no); `cantidad` decimal mayor que 0 con hasta 2 decimales; `unidad` exactamente `kg`, `l` o `pz`; `costo_total_mxn` decimal mayor o igual a 0 con hasta 2 decimales; `caducidad` una fecha válida (puede ser pasada, para registrar producto ya vencido).
+
+#### `PATCH /lotes/{id}`
+Body parcial con cualquiera de `producto`, `camara_id`, `cantidad`, `unidad`, `costo_total_mxn` o `caducidad`. No acepta `estado`, `merma_en` ni `restaurante_id`: enviarlos responde `422`; un `null` explícito también. La configuración mezclada se valida con el mismo esquema del alta. Mover el lote a otra cámara es válido solo si la cámara es del mismo restaurante; si no, `404`. Respuesta `200` con el objeto del lote.
+
+#### `DELETE /lotes/{id}`
+`204` si el lote está `ok` o `en_riesgo`. Si ya está en `merma` responde `409` con `El lote ya está en merma; no se puede eliminar del historial.` La merma se conserva para los KPIs y el historial del inventario.
+
+#### `POST /lotes/{id}/merma`
+Sin body. Marca `estado: "merma"` y `merma_en` con la hora del servidor. Es la vía para registrar una pérdida manual sin borrar el lote. Es idempotente: si ya estaba en merma conserva la fecha original y devuelve el mismo objeto. Respuesta `200` con el lote.
 
 ### Tiempo real
 
