@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   atenderAlerta,
+  listarSensores,
   obtenerAlertasActivas,
   obtenerAlertasSeguridad,
   obtenerCamaras,
@@ -26,15 +27,27 @@ import type {
   Lectura,
 } from './types'
 
-vi.mock('./api/client', () => ({
-  atenderAlerta: vi.fn(),
-  obtenerAlertasActivas: vi.fn(),
-  obtenerAlertasSeguridad: vi.fn(),
-  obtenerHealth: vi.fn(),
-  obtenerCamaras: vi.fn(),
-  obtenerKpis: vi.fn(),
-  obtenerLecturas: vi.fn(),
-}))
+vi.mock('./api/client', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./api/client')>()
+  return {
+    ...original,
+    atenderAlerta: vi.fn(),
+    obtenerAlertasActivas: vi.fn(),
+    obtenerAlertasSeguridad: vi.fn(),
+    obtenerHealth: vi.fn(),
+    obtenerCamaras: vi.fn(),
+    obtenerKpis: vi.fn(),
+    obtenerLecturas: vi.fn(),
+    crearCamara: vi.fn(),
+    actualizarCamara: vi.fn(),
+    eliminarCamara: vi.fn(),
+    listarSensores: vi.fn(),
+    crearSensor: vi.fn(),
+    rotarTokenSensor: vi.fn(),
+    actualizarSensor: vi.fn(),
+    eliminarSensor: vi.fn(),
+  }
+})
 
 vi.mock('./realtime/StreamProvider', () => ({
   useStreamEvent: vi.fn(),
@@ -210,6 +223,7 @@ beforeEach(() => {
   })
   vi.mocked(obtenerHealth).mockResolvedValue({ ok: true, escala_tiempo: 30 })
   vi.mocked(obtenerCamaras).mockResolvedValue(crearCamaras())
+  vi.mocked(listarSensores).mockResolvedValue([])
   vi.mocked(obtenerKpis).mockResolvedValue(kpis)
   vi.mocked(obtenerAlertasSeguridad).mockResolvedValue([alertaSeguridad])
   vi.mocked(obtenerAlertasActivas).mockResolvedValue([alertaOperativa])
@@ -327,7 +341,7 @@ describe('vista general', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('muestra la bienvenida y el botón deshabilitado en un restaurante sin cámaras', async () => {
+  it('muestra la bienvenida y el botón abre el formulario de cámara para el dueño', async () => {
     vi.mocked(obtenerCamaras).mockResolvedValueOnce([])
 
     renderizarApp({ usuario: 'dueno-nuevo', rol: 'dueno' })
@@ -350,10 +364,17 @@ describe('vista general', () => {
     expect(screen.getByText('Después')).toBeInTheDocument()
 
     const boton = screen.getByRole('button', { name: 'Agregar cámara' })
-    expect(boton).toBeDisabled()
+    expect(boton).toBeEnabled()
     expect(
-      screen.getByText('Disponible en la siguiente actualización'),
+      screen.getByText('Se abrirá el formulario para crear la primera cámara.'),
     ).toBeInTheDocument()
+
+    fireEvent.click(boton)
+
+    expect(
+      await screen.findByRole('dialog', { name: 'Nueva cámara' }),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Nombre de la cámara')).toHaveFocus()
 
     expect(
       screen.queryByText(/FríoTrack vigila tus cámaras/),

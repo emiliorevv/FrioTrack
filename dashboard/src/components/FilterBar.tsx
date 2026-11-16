@@ -1,10 +1,11 @@
+import { ETIQUETA_ESTADO } from '../lib/format'
 import type { FiltroCamaras } from '../types'
 
 const FILTROS: { id: FiltroCamaras; label: string }[] = [
   { id: 'todas', label: 'Todas' },
-  { id: 'en_rango', label: 'En rango' },
-  { id: 'alerta', label: 'Alerta' },
-  { id: 'critica', label: 'Crítica' },
+  { id: 'en_rango', label: ETIQUETA_ESTADO.en_rango },
+  { id: 'alerta', label: ETIQUETA_ESTADO.alerta },
+  { id: 'critica', label: ETIQUETA_ESTADO.critica },
 ]
 
 interface FilterBarProps {

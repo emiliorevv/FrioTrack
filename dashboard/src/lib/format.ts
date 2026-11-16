@@ -1,3 +1,12 @@
+import type { EstadoCamara } from '../types'
+
+/** Etiquetas de estado compartidas por tarjetas, filtros y configuración. */
+export const ETIQUETA_ESTADO: Record<EstadoCamara, string> = {
+  en_rango: 'En rango',
+  alerta: 'Alerta',
+  critica: 'Crítica',
+}
+
 const formatoMxn = new Intl.NumberFormat('es-MX', {
   style: 'currency',
   currency: 'MXN',

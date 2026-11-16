@@ -89,4 +89,40 @@ describe('Header', () => {
 
     expect(onLogout).toHaveBeenCalledTimes(1)
   })
+
+  it('muestra Configuración al dueño y la abre al hacer clic', () => {
+    const onAbrirConfiguracion = vi.fn()
+    render(
+      <Header
+        actualizadoEn={null}
+        usuario="duena"
+        rol="dueno"
+        onLogout={() => {}}
+        onAbrirConfiguracion={onAbrirConfiguracion}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configuración' }))
+
+    expect(onAbrirConfiguracion).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['jefe_cocina', 'gerente'] as const)(
+    'no muestra Configuración a un %s',
+    (rol) => {
+      render(
+        <Header
+          actualizadoEn={null}
+          usuario="persona"
+          rol={rol}
+          onLogout={() => {}}
+          onAbrirConfiguracion={() => {}}
+        />,
+      )
+
+      expect(
+        screen.queryByRole('button', { name: 'Configuración' }),
+      ).not.toBeInTheDocument()
+    },
+  )
 })

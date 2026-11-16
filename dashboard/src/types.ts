@@ -68,6 +68,31 @@ export interface Camara {
   valor_inventario_mxn?: number
 }
 
+/** Configuración editable de una cámara (`POST` y `PATCH /camaras`). */
+export interface CamaraCreacion {
+  nombre: string
+  rango_min_c: number
+  rango_max_c: number
+  min_para_riesgo: number
+  min_para_merma: number
+}
+
+/** Sensor de `GET /sensores`; nunca incluye `token_hash`. */
+export interface Sensor {
+  id: string
+  camara_id: number
+  camara_nombre: string
+  activo: boolean
+  /** ISO 8601 de la última lectura, o null si nunca envió. */
+  ultima_lectura: string | null
+}
+
+/** Respuesta de alta/rotación: el token en claro solo se muestra una vez. */
+export interface SensorConToken {
+  sensor: Sensor
+  token: string
+}
+
 export interface Kpis {
   pct_tiempo_en_rango_24h: number
   alertas_activas: number
