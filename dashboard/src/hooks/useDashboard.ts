@@ -69,6 +69,8 @@ export interface EstadoDashboard {
   ultimoExitoHttp: Date | null
   /** Último evento SSE recibido en este hook. */
   ultimaActividadSse: Date | null
+  /** Se incrementa con `lote_actualizado` y en cada polling del resumen. */
+  versionLotes: number
   refrescar: () => Promise<void>
 }
 
@@ -156,6 +158,7 @@ export function useDashboard(): EstadoDashboard {
   const [ultimaActividadSse, setUltimaActividadSse] = useState<Date | null>(
     null,
   )
+  const [versionLotes, setVersionLotes] = useState(0)
 
   const activoRef = useRef(false)
   const hayDatosRef = useRef(false)
@@ -557,6 +560,8 @@ export function useDashboard(): EstadoDashboard {
       void cargarResumen()
       void cargarAlertas()
       void cargarAlertasActivas()
+      // El inventario también se refresca con el polling, no solo por SSE.
+      setVersionLotes((actual) => actual + 1)
     }, INTERVALO_REFRESCO_MS)
 
     return () => {
@@ -663,6 +668,7 @@ export function useDashboard(): EstadoDashboard {
 
   const alRecibirLoteActualizado = useCallback(() => {
     setUltimaActividadSse(new Date())
+    setVersionLotes((actual) => actual + 1)
     programarRefrescoResumen()
   }, [programarRefrescoResumen])
 
@@ -711,6 +717,7 @@ export function useDashboard(): EstadoDashboard {
     errorResumen,
     ultimoExitoHttp,
     ultimaActividadSse,
+    versionLotes,
     refrescar,
   }
 }

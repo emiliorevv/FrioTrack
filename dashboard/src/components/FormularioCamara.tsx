@@ -1,6 +1,8 @@
-import { useId, useState, type FormEvent, type ReactNode } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import { mensajeDeError } from '../lib/erroresApi'
+import { aNumero } from '../lib/validacion'
 import type { Camara, CamaraCreacion } from '../types'
+import { Campo } from './Campo'
 
 interface FormularioCamaraProps {
   /** Cámara a editar; ausente para un alta. */
@@ -15,15 +17,6 @@ interface ErroresCampos {
   rango_max_c?: string
   min_para_riesgo?: string
   min_para_merma?: string
-}
-
-function aNumero(valor: string): number | null {
-  const limpio = valor.trim()
-  if (!limpio) {
-    return null
-  }
-  const numero = Number(limpio)
-  return Number.isFinite(numero) ? numero : null
 }
 
 function tieneUnDecimal(valor: number): boolean {
@@ -305,33 +298,5 @@ export function FormularioCamara({
         </button>
       </div>
     </form>
-  )
-}
-
-interface CampoProps {
-  id: string
-  etiqueta: string
-  error?: string
-  ayuda: string
-  children: ReactNode
-}
-
-function Campo({ id, etiqueta, error, ayuda, children }: CampoProps) {
-  return (
-    <div className={`campo${error ? ' campo--error' : ''}`}>
-      <label className="campo__label" htmlFor={id}>
-        {etiqueta}
-      </label>
-      {children}
-      {error ? (
-        <p className="campo__error" id={`${id}-error`} role="alert">
-          {error}
-        </p>
-      ) : (
-        <p className="campo__ayuda" id={`${id}-ayuda`}>
-          {ayuda}
-        </p>
-      )}
-    </div>
   )
 }

@@ -2582,3 +2582,237 @@
     background: #0f4d49;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Inventario y merma                                                  */
+/* ------------------------------------------------------------------ */
+
+.inventario__cabecera {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.inventario-filtros {
+  display: grid;
+  gap: 8px;
+}
+
+.inventario-buscar {
+  width: 100%;
+}
+
+.inventario-select {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.inventario-select select {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+
+.inventario-select select:focus {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 0;
+}
+
+.inventario-conteo {
+  align-self: end;
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.inventario-grid {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lote-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.lote-card__cabecera {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lote-card__producto {
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.lote-card__camara {
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.lote-card__datos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin-top: 5px;
+}
+
+.lote-card__datos dt {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.lote-card__datos dd {
+  margin-top: 1px;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.lote-card__datos .is-warn dd {
+  color: var(--danger-ink);
+}
+
+.lote-vencido {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+  font-size: 0.6rem;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.lote-card__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.lote-card__solo-lectura {
+  margin-top: 6px;
+  font-size: 0.66rem;
+  color: var(--muted);
+}
+
+.lote-estado {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.lote-estado--ok {
+  background: var(--ok-soft);
+  color: var(--ok-ink);
+}
+
+.lote-estado--en_riesgo {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+
+.lote-estado--merma {
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+}
+
+.inventario-vacio {
+  width: 100%;
+}
+
+.boton--advertencia {
+  border-color: #d9b47a;
+  background: transparent;
+  color: var(--warn-ink);
+}
+
+.campo__aviso {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+@media (min-width: 480px) {
+  .inventario-filtros {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inventario-buscar,
+  .inventario-conteo {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 720px) {
+  .inventario-filtros {
+    grid-template-columns: minmax(0, 1.7fr) repeat(2, minmax(0, 1fr)) auto;
+    align-items: end;
+  }
+
+  .inventario-buscar,
+  .inventario-conteo {
+    grid-column: auto;
+  }
+
+  .inventario-conteo {
+    text-align: right;
+  }
+
+  .inventario-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lote-card__acciones {
+    margin-top: auto;
+    padding-top: 4px;
+  }
+}
+
+@media (hover: hover) {
+  .boton--advertencia:not(:disabled):hover {
+    border-color: var(--warn);
+    background: var(--warn-soft);
+  }
+}

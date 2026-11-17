@@ -163,3 +163,40 @@ export interface Notificacion {
 }
 
 export type FiltroCamaras = 'todas' | EstadoCamara
+
+/** Unidades válidas de un lote de inventario. */
+export type UnidadLote = 'kg' | 'l' | 'pz'
+
+/** Estados del lote; `merma` es historial y no se edita ni se borra. */
+export type EstadoLote = 'ok' | 'en_riesgo' | 'merma'
+
+/** Fila de `GET /lotes` y respuesta de las mutaciones de inventario. */
+export interface Lote {
+  id: number
+  producto: string
+  camara_id: number
+  cantidad: number
+  unidad: UnidadLote
+  costo_total_mxn: number
+  /** Fecha ISO `YYYY-MM-DD`. */
+  caducidad: string
+  estado: EstadoLote
+  /** ISO 8601 cuando el lote pasó a merma. */
+  merma_en: string | null
+}
+
+/** Body de `POST /lotes` y del `PATCH` de inventario. */
+export interface LoteCreacion {
+  producto: string
+  camara_id: number
+  cantidad: number
+  unidad: UnidadLote
+  costo_total_mxn: number
+  caducidad: string
+}
+
+/** Filtros opcionales de `GET /lotes`. */
+export interface FiltrosLotes {
+  camara_id?: number
+  estado?: EstadoLote
+}

@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   atenderAlerta,
+  crearLote,
   listarSensores,
   obtenerAlertasActivas,
   obtenerAlertasSeguridad,
@@ -16,6 +17,7 @@ import {
   obtenerHealth,
   obtenerKpis,
   obtenerLecturas,
+  obtenerLotes,
 } from './api/client'
 import App from './App'
 import { useStreamEvent } from './realtime/StreamProvider'
@@ -46,6 +48,11 @@ vi.mock('./api/client', async (importOriginal) => {
     rotarTokenSensor: vi.fn(),
     actualizarSensor: vi.fn(),
     eliminarSensor: vi.fn(),
+    obtenerLotes: vi.fn(),
+    crearLote: vi.fn(),
+    actualizarLote: vi.fn(),
+    eliminarLote: vi.fn(),
+    marcarLoteMerma: vi.fn(),
   }
 })
 
@@ -224,6 +231,7 @@ beforeEach(() => {
   vi.mocked(obtenerHealth).mockResolvedValue({ ok: true, escala_tiempo: 30 })
   vi.mocked(obtenerCamaras).mockResolvedValue(crearCamaras())
   vi.mocked(listarSensores).mockResolvedValue([])
+  vi.mocked(obtenerLotes).mockResolvedValue([])
   vi.mocked(obtenerKpis).mockResolvedValue(kpis)
   vi.mocked(obtenerAlertasSeguridad).mockResolvedValue([alertaSeguridad])
   vi.mocked(obtenerAlertasActivas).mockResolvedValue([alertaOperativa])
@@ -655,5 +663,63 @@ describe('vista general', () => {
     expect(
       screen.queryByText('Datos desactualizados · FríoTrack'),
     ).not.toBeInTheDocument()
+  })
+
+  it('muestra la sección Inventario para cualquier rol', async () => {
+    renderizarApp({ usuario: 'gerente', rol: 'gerente' })
+
+    expect(
+      await screen.findByRole('heading', { name: 'Inventario' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Agregar lote' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('refresca KPIs y cámaras después de crear un lote', async () => {
+    renderizarApp({ usuario: 'dueno-nuevo', rol: 'dueno' })
+    await screen.findAllByRole('article')
+    vi.mocked(crearLote).mockResolvedValue(null)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Agregar lote' }))
+    const dialogo = screen.getByRole('dialog', { name: 'Nuevo lote' })
+    fireEvent.change(within(dialogo).getByLabelText('Producto'), {
+      target: { value: 'Salmón fresco' },
+    })
+    fireEvent.change(within(dialogo).getByLabelText('Cámara'), {
+      target: { value: '1' },
+    })
+    fireEvent.change(within(dialogo).getByLabelText('Cantidad'), {
+      target: { value: '2.5' },
+    })
+    fireEvent.change(within(dialogo).getByLabelText('Costo total (MXN)'), {
+      target: { value: '450.50' },
+    })
+    fireEvent.change(within(dialogo).getByLabelText('Caducidad'), {
+      target: { value: '2026-12-31' },
+    })
+    fireEvent.click(
+      within(dialogo).getByRole('button', { name: 'Guardar lote' }),
+    )
+
+    await waitFor(() => expect(obtenerKpis).toHaveBeenCalledTimes(2))
+    expect(obtenerCamaras).toHaveBeenCalledTimes(2)
+    expect(
+      screen.queryByRole('dialog', { name: 'Nuevo lote' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('refresca inventario al recibir el evento SSE lote_actualizado', async () => {
+    renderizarApp()
+    await screen.findAllByRole('article')
+    await waitFor(() => expect(obtenerLotes).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      oyentes.get('lote_actualizado')?.(
+        new MessageEvent('lote_actualizado', { data: '{}' }),
+      )
+    })
+
+    await waitFor(() => expect(obtenerLotes).toHaveBeenCalledTimes(2))
   })
 })

@@ -425,6 +425,7 @@ describe('useDashboard', () => {
     const kpis = vi.mocked(obtenerKpis).mock.calls.length
     const seguridad = vi.mocked(obtenerAlertasSeguridad).mock.calls.length
     const activas = vi.mocked(obtenerAlertasActivas).mock.calls.length
+    const versionLotesInicial = result.current.versionLotes
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(INTERVALO_REFRESCO_MS)
@@ -434,6 +435,7 @@ describe('useDashboard', () => {
     expect(obtenerKpis).toHaveBeenCalledTimes(kpis + 1)
     expect(obtenerAlertasSeguridad).toHaveBeenCalledTimes(seguridad + 1)
     expect(obtenerAlertasActivas).toHaveBeenCalledTimes(activas + 1)
+    expect(result.current.versionLotes).toBe(versionLotesInicial + 1)
   })
 
   it('conserva las alertas activas si falla el refresco', async () => {
@@ -1175,5 +1177,17 @@ describe('fusionarSeries', () => {
 
     expect(resultado).toHaveLength(MAX_PUNTOS_SERIE)
     expect(resultado.at(-1)?.valor).toBe(MAX_PUNTOS_SERIE + 4)
+  })
+
+  it('incrementa versionLotes cuando llega lote_actualizado', async () => {
+    const { result } = renderHook(() => useDashboard())
+    await waitFor(() => expect(result.current.camaras).toHaveLength(2))
+    const inicial = result.current.versionLotes
+
+    act(() => {
+      emitir('lote_actualizado', { camara_id: 1 })
+    })
+
+    expect(result.current.versionLotes).toBe(inicial + 1)
   })
 })

@@ -4,12 +4,17 @@ import type {
   Camara,
   CamaraCreacion,
   EstadoCamara,
+  EstadoLote,
+  FiltrosLotes,
   Health,
+  Lote,
+  LoteCreacion,
   Kpis,
   Lectura,
   Sensor,
   SensorConToken,
   UltimaLectura,
+  UnidadLote,
 } from '../types'
 import { esObjeto } from '../lib/validacion'
 import { getToken, notificarNoAutorizado } from '../auth/token'
@@ -618,6 +623,143 @@ export async function actualizarCamara(
   })
 
   return normalizarCamara(respuesta)
+}
+
+const UNIDADES_LOTE: readonly UnidadLote[] = ['kg', 'l', 'pz']
+const ESTADOS_LOTE: readonly EstadoLote[] = ['ok', 'en_riesgo', 'merma']
+
+function esUnidadLote(valor: unknown): valor is UnidadLote {
+  return (
+    typeof valor === 'string' &&
+    (UNIDADES_LOTE as readonly string[]).includes(valor)
+  )
+}
+
+function esEstadoLote(valor: unknown): valor is EstadoLote {
+  return (
+    typeof valor === 'string' &&
+    (ESTADOS_LOTE as readonly string[]).includes(valor)
+  )
+}
+
+function normalizarLote(valor: unknown): Lote | null {
+  if (!esObjeto(valor)) {
+    return null
+  }
+
+  const {
+    id,
+    producto,
+    camara_id: camaraId,
+    cantidad,
+    unidad,
+    costo_total_mxn: costo,
+    caducidad,
+    estado,
+    merma_en: mermaEn,
+  } = valor
+
+  if (
+    typeof id !== 'number' ||
+    !Number.isFinite(id) ||
+    typeof producto !== 'string' ||
+    !producto.trim() ||
+    typeof camaraId !== 'number' ||
+    !Number.isFinite(camaraId) ||
+    typeof cantidad !== 'number' ||
+    !Number.isFinite(cantidad) ||
+    cantidad <= 0 ||
+    !esUnidadLote(unidad) ||
+    typeof costo !== 'number' ||
+    !Number.isFinite(costo) ||
+    costo < 0 ||
+    typeof caducidad !== 'string' ||
+    !caducidad ||
+    !esEstadoLote(estado)
+  ) {
+    return null
+  }
+
+  return {
+    id,
+    producto,
+    camara_id: camaraId,
+    cantidad,
+    unidad,
+    costo_total_mxn: costo,
+    caducidad,
+    estado,
+    merma_en: typeof mermaEn === 'string' ? mermaEn : null,
+  }
+}
+
+/**
+ * `GET /lotes`: inventario del restaurante con filtros opcionales.
+ *
+ * Filtra filas inválidas como cámaras y sensores; así una respuesta parcial no
+ * rompe la sección. El backend ya limita los datos al tenant del JWT.
+ */
+export async function obtenerLotes(
+  opciones: FiltrosLotes = {},
+  senal?: AbortSignal,
+): Promise<Lote[]> {
+  const parametros = new URLSearchParams()
+  if (opciones.camara_id !== undefined) {
+    parametros.set('camara_id', String(opciones.camara_id))
+  }
+  if (opciones.estado) {
+    parametros.set('estado', opciones.estado)
+  }
+  const consulta = parametros.toString()
+  const datos = await pedir<unknown>(
+    `/lotes${consulta ? `?${consulta}` : ''}`,
+    { signal: senal },
+  )
+
+  if (!Array.isArray(datos)) {
+    throw new Error('La API devolvió un formato inesperado para los lotes.')
+  }
+
+  return datos.map(normalizarLote).filter((lote): lote is Lote => lote !== null)
+}
+
+/**
+ * `POST /lotes`: crea un lote. Igual que las cámaras, un 201 con shape
+ * inválido devuelve `null`: el alta ya ocurrió y el llamador solo recarga.
+ */
+export async function crearLote(datos: LoteCreacion): Promise<Lote | null> {
+  const respuesta = await pedir<unknown>('/lotes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(datos),
+  })
+  return normalizarLote(respuesta)
+}
+
+/** `PATCH /lotes/{id}`: edita inventario o mueve el lote de cámara. */
+export async function actualizarLote(
+  id: number,
+  datos: Partial<LoteCreacion>,
+): Promise<Lote | null> {
+  const respuesta = await pedir<unknown>(`/lotes/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(datos),
+  })
+  return normalizarLote(respuesta)
+}
+
+/** `DELETE /lotes/{id}`: 204, o 409 si el lote ya está en merma. */
+export async function eliminarLote(id: number): Promise<void> {
+  await pedir<void>(`/lotes/${id}`, { method: 'DELETE' })
+}
+
+/** `POST /lotes/{id}/merma`: conserva el lote en el historial. */
+export async function marcarLoteMerma(id: number): Promise<Lote | null> {
+  const respuesta = await pedir<unknown>(`/lotes/${id}/merma`, {
+    method: 'POST',
+  })
+  return normalizarLote(respuesta)
 }
 
 /** `DELETE /camaras/{id}`: 204, o 409 si tiene sensores, lotes o lecturas. */
