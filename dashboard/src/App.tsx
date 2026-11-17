@@ -15,6 +15,7 @@ import { TiempoRelativo } from './components/TiempoRelativo'
 import { useDashboard } from './hooks/useDashboard'
 import { useNotificaciones } from './hooks/useNotificaciones'
 import { useReloj } from './hooks/useReloj'
+import { normalizarTexto } from './lib/texto'
 import type { FiltroCamaras } from './types'
 
 /** Pasado este tiempo sin datos nuevos, el pie deja de decir "en vivo". */
@@ -35,13 +36,6 @@ function estaVigente(fecha: Date | null, ahora: Date): boolean {
     fecha !== null &&
     ahora.getTime() - fecha.getTime() <= UMBRAL_DATOS_VIEJOS_MS
   )
-}
-
-function normalizar(texto: string): string {
-  return texto
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase()
 }
 
 interface AppProps {
@@ -75,13 +69,14 @@ function App({ usuario, rol, onLogout }: AppProps) {
     errorResumen,
     ultimoExitoHttp,
     ultimaActividadSse,
+    versionLotes,
     refrescar,
   } = useDashboard()
 
-  const consulta = normalizar(busqueda.trim())
+  const consulta = normalizarTexto(busqueda.trim())
   const camarasFiltradas = camaras.filter((camara) => {
     const coincideEstado = filtro === 'todas' || camara.estado === filtro
-    const coincideBusqueda = normalizar(camara.nombre).includes(consulta)
+    const coincideBusqueda = normalizarTexto(camara.nombre).includes(consulta)
     return coincideEstado && coincideBusqueda
   })
 
@@ -234,7 +229,10 @@ function App({ usuario, rol, onLogout }: AppProps) {
             <Inventario
               rol={rol}
               camaras={camaras}
-              onCambio={() => void refrescar()}
+              versionLotes={versionLotes}
+              camarasCargando={cargando && camaras.length === 0}
+              errorCamaras={camaras.length === 0 ? errorResumen : null}
+              onCambio={refrescar}
             />
 
             <SecurityPanel

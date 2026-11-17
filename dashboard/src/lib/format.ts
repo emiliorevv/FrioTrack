@@ -1,4 +1,4 @@
-import type { EstadoCamara, EstadoLote, UnidadLote } from '../types'
+import type { EstadoCamara, EstadoLote } from '../types'
 
 /** Etiquetas de estado compartidas por tarjetas, filtros y configuración. */
 export const ETIQUETA_ESTADO: Record<EstadoCamara, string> = {
@@ -48,13 +48,6 @@ export const ETIQUETA_ESTADO_LOTE: Record<EstadoLote, string> = {
   ok: 'Ok',
   en_riesgo: 'En riesgo',
   merma: 'Merma',
-}
-
-/** Etiqueta corta de la unidad. */
-export const ETIQUETA_UNIDAD_LOTE: Record<UnidadLote, string> = {
-  kg: 'kg',
-  l: 'l',
-  pz: 'pz',
 }
 
 /** Fecha ISO `YYYY-MM-DD` a texto local, sin desplazar el día por zona horaria. */

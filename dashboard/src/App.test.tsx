@@ -708,4 +708,18 @@ describe('vista general', () => {
       screen.queryByRole('dialog', { name: 'Nuevo lote' }),
     ).not.toBeInTheDocument()
   })
+
+  it('refresca inventario al recibir el evento SSE lote_actualizado', async () => {
+    renderizarApp()
+    await screen.findAllByRole('article')
+    await waitFor(() => expect(obtenerLotes).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      oyentes.get('lote_actualizado')?.(
+        new MessageEvent('lote_actualizado', { data: '{}' }),
+      )
+    })
+
+    await waitFor(() => expect(obtenerLotes).toHaveBeenCalledTimes(2))
+  })
 })

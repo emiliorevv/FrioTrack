@@ -21,6 +21,7 @@ import { mensajeDeError } from '../lib/erroresApi'
 import { ETIQUETA_ESTADO } from '../lib/format'
 import type { Camara, CamaraCreacion, Sensor } from '../types'
 import { Dialogo } from './Dialogo'
+import { DialogoConfirmacion } from './DialogoConfirmacion'
 import { FormularioCamara } from './FormularioCamara'
 import { TiempoRelativo } from './TiempoRelativo'
 
@@ -726,6 +727,7 @@ export function Configuracion({
           etiquetaConfirmar="Eliminar cámara"
           error={errorConfirmacion}
           ocupado={eliminando}
+          etiquetaOcupado="Eliminando…"
           cerrable={!eliminando}
           onCancelar={() => setConfirmarCamara(null)}
           onConfirmar={() => void borrarCamara()}
@@ -739,6 +741,7 @@ export function Configuracion({
           etiquetaConfirmar="Eliminar sensor"
           error={errorConfirmacion}
           ocupado={eliminando}
+          etiquetaOcupado="Eliminando…"
           cerrable={!eliminando}
           onCancelar={() => setConfirmarSensor(null)}
           onConfirmar={() => void borrarSensor()}
@@ -802,64 +805,5 @@ export function Configuracion({
         </Dialogo>
       )}
     </>
-  )
-}
-
-interface DialogoConfirmacionProps {
-  titulo: string
-  mensaje: string
-  etiquetaConfirmar: string
-  error: string | null
-  ocupado: boolean
-  cerrable: boolean
-  onCancelar: () => void
-  onConfirmar: () => void
-}
-
-function DialogoConfirmacion({
-  titulo,
-  mensaje,
-  etiquetaConfirmar,
-  error,
-  ocupado,
-  cerrable,
-  onCancelar,
-  onConfirmar,
-}: DialogoConfirmacionProps) {
-  return (
-    <Dialogo
-      titulo={titulo}
-      onCerrar={onCancelar}
-      etiquetaCerrar="Cancelar"
-      cerrable={cerrable}
-      acciones={
-        <>
-          <button
-            type="button"
-            className="boton boton--secundario"
-            onClick={onCancelar}
-            disabled={ocupado}
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            className="boton boton--peligro"
-            onClick={onConfirmar}
-            aria-busy={ocupado}
-            disabled={ocupado}
-          >
-            {ocupado ? 'Eliminando…' : etiquetaConfirmar}
-          </button>
-        </>
-      }
-    >
-      <p className="config__nota">{mensaje}</p>
-      {error && (
-        <p className="config-alerta" role="alert">
-          {error}
-        </p>
-      )}
-    </Dialogo>
   )
 }

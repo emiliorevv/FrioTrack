@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import {
   actualizarLote,
   crearLote,
@@ -13,11 +13,12 @@ import {
   fechaVencida,
   formatearCantidadLote,
   formatearFecha,
-  formatearMxn,
   formatearMxnConCentavos,
 } from '../lib/format'
+import { normalizarTexto } from '../lib/texto'
 import type { Camara, EstadoLote, Lote, LoteCreacion } from '../types'
 import { Dialogo } from './Dialogo'
+import { DialogoConfirmacion } from './DialogoConfirmacion'
 import { FormularioLote } from './FormularioLote'
 import { TiempoRelativo } from './TiempoRelativo'
 
@@ -32,21 +33,38 @@ interface Confirmacion {
 interface InventarioProps {
   rol: string
   camaras: Camara[]
+  /** Se incrementa con SSE `lote_actualizado` y con el polling del dashboard. */
+  versionLotes?: number
+  camarasCargando?: boolean
+  errorCamaras?: string | null
   /** Refresca cámaras/KPIs del dashboard después de una mutación. */
   onCambio?: () => void
 }
 
-type FiltroEstado = 'todos' | EstadoLote
-
-function normalizar(texto: string): string {
-  return texto
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase()
+interface LoteVista extends Lote {
+  productoNormalizado: string
+  vencido: boolean
 }
 
-export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
-  const [lotes, setLotes] = useState<Lote[]>([])
+type FiltroEstado = 'todos' | EstadoLote
+
+function prepararLote(lote: Lote): LoteVista {
+  return {
+    ...lote,
+    productoNormalizado: normalizarTexto(lote.producto),
+    vencido: fechaVencida(lote.caducidad),
+  }
+}
+
+function InventarioBase({
+  rol,
+  camaras,
+  versionLotes = 0,
+  camarasCargando = false,
+  errorCamaras = null,
+  onCambio,
+}: InventarioProps) {
+  const [lotes, setLotes] = useState<LoteVista[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
@@ -73,7 +91,7 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
     void obtenerLotes({}, controlador.signal)
       .then((datos) => {
         if (!controlador.signal.aborted) {
-          setLotes(datos)
+          setLotes(datos.map(prepararLote))
         }
       })
       .catch((fallo: unknown) => {
@@ -89,7 +107,7 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
     return () => {
       controlador.abort()
     }
-  }, [version])
+  }, [version, versionLotes])
 
   function recargar() {
     setError(null)
@@ -101,20 +119,30 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
     recargar()
   }
 
-  const consulta = normalizar(busqueda.trim())
-  const lotesFiltrados = lotes.filter((lote) => {
-    const coincideProducto = normalizar(lote.producto).includes(consulta)
-    const coincideCamara =
-      camaraFiltro === 'todas' || String(lote.camara_id) === camaraFiltro
-    const coincideEstado =
-      estadoFiltro === 'todos' || lote.estado === estadoFiltro
-    return coincideProducto && coincideCamara && coincideEstado
-  })
+  const consulta = normalizarTexto(busqueda.trim())
+  const lotesFiltrados = useMemo(
+    () =>
+      lotes.filter((lote) => {
+        const coincideProducto = lote.productoNormalizado.includes(consulta)
+        const coincideCamara =
+          camaraFiltro === 'todas' || String(lote.camara_id) === camaraFiltro
+        const coincideEstado =
+          estadoFiltro === 'todos' || lote.estado === estadoFiltro
+        return coincideProducto && coincideCamara && coincideEstado
+      }),
+    [lotes, consulta, camaraFiltro, estadoFiltro],
+  )
 
-  const totalInventario = lotes
-    .filter((lote) => lote.estado !== 'merma')
-    .reduce((total, lote) => total + lote.costo_total_mxn, 0)
-  const lotesActivos = lotes.filter((lote) => lote.estado !== 'merma').length
+  const { totalInventario, lotesActivos } = useMemo(() => {
+    const activos = lotes.filter((lote) => lote.estado !== 'merma')
+    return {
+      totalInventario: activos.reduce(
+        (total, lote) => total + lote.costo_total_mxn,
+        0,
+      ),
+      lotesActivos: activos.length,
+    }
+  }, [lotes])
   const hayFiltros =
     consulta.length > 0 || camaraFiltro !== 'todas' || estadoFiltro !== 'todos'
 
@@ -125,7 +153,6 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
   }
 
   function abrirFormulario(siguiente: FormularioAbierto) {
-    setGuardando(false)
     setFormularioVersion((actual) => actual + 1)
     setFormulario(siguiente)
   }
@@ -208,7 +235,7 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
           <h2 id="inventario-title">Inventario</h2>
           <p>
             {lotes.length} {lotes.length === 1 ? 'lote' : 'lotes'} ·{' '}
-            {formatearMxn(totalInventario)} en {lotesActivos}{' '}
+            {formatearMxnConCentavos(totalInventario)} en {lotesActivos}{' '}
             {lotesActivos === 1 ? 'lote activo' : 'lotes activos'}
           </p>
         </div>
@@ -275,9 +302,13 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
               }
             >
               <option value="todos">Todos</option>
-              <option value="ok">Ok</option>
-              <option value="en_riesgo">En riesgo</option>
-              <option value="merma">Merma</option>
+              {(
+                Object.entries(ETIQUETA_ESTADO_LOTE) as [EstadoLote, string][]
+              ).map(([valor, etiqueta]) => (
+                <option key={valor} value={valor}>
+                  {etiqueta}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -318,7 +349,13 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
               </button>
             )}
             {puedeEditar && camaras.length === 0 && (
-              <p>Primero agrega una cámara para registrar inventario.</p>
+              <p>
+                {camarasCargando
+                  ? 'Cargando cámaras…'
+                  : errorCamaras
+                    ? 'No se pudieron cargar las cámaras.'
+                    : 'Primero agrega una cámara para registrar inventario.'}
+              </p>
             )}
           </div>
         )
@@ -338,7 +375,6 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
       ) : (
         <ul className="inventario-grid">
           {lotesFiltrados.map((lote) => {
-            const vencido = fechaVencida(lote.caducidad)
             const merma = lote.estado === 'merma'
             return (
               <li className="lote-card" key={lote.id}>
@@ -364,11 +400,13 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
                     <dt>Costo</dt>
                     <dd>{formatearMxnConCentavos(lote.costo_total_mxn)}</dd>
                   </div>
-                  <div className={vencido ? 'is-warn' : undefined}>
+                  <div className={lote.vencido ? 'is-warn' : undefined}>
                     <dt>Caducidad</dt>
                     <dd>
                       {formatearFecha(lote.caducidad)}
-                      {vencido && <span className="lote-vencido">Vencido</span>}
+                      {lote.vencido && (
+                        <span className="lote-vencido">Vencido</span>
+                      )}
                     </dd>
                   </div>
                   {lote.merma_en && (
@@ -433,6 +471,7 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
             key={formularioVersion}
             lote={formulario.modo === 'editar' ? formulario.lote : undefined}
             camaras={camaras}
+            guardando={guardando}
             onGuardar={guardarLote}
             onCancelar={cerrarFormulario}
           />
@@ -454,6 +493,9 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
           etiquetaConfirmar={
             confirmacion.tipo === 'merma' ? 'Marcar merma' : 'Eliminar lote'
           }
+          etiquetaOcupado={
+            confirmacion.tipo === 'merma' ? 'Marcando…' : 'Eliminando…'
+          }
           peligro={confirmacion.tipo === 'eliminar'}
           error={errorConfirmacion}
           ocupado={procesando}
@@ -466,63 +508,28 @@ export function Inventario({ rol, camaras, onCambio }: InventarioProps) {
   )
 }
 
-interface DialogoConfirmacionProps {
-  titulo: string
-  mensaje: string
-  etiquetaConfirmar: string
-  peligro: boolean
-  error: string | null
-  ocupado: boolean
-  cerrable: boolean
-  onCancelar: () => void
-  onConfirmar: () => void
-}
-
-function DialogoConfirmacion({
-  titulo,
-  mensaje,
-  etiquetaConfirmar,
-  peligro,
-  error,
-  ocupado,
-  cerrable,
-  onCancelar,
-  onConfirmar,
-}: DialogoConfirmacionProps) {
+function mismasCamaras(a: Camara[], b: Camara[]): boolean {
   return (
-    <Dialogo
-      titulo={titulo}
-      onCerrar={onCancelar}
-      etiquetaCerrar="Cancelar"
-      cerrable={cerrable}
-      acciones={
-        <>
-          <button
-            type="button"
-            className="boton boton--secundario"
-            onClick={onCancelar}
-            disabled={ocupado}
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            className={`boton ${peligro ? 'boton--peligro' : 'boton--primario'}`}
-            onClick={onConfirmar}
-            aria-busy={ocupado}
-            disabled={ocupado}
-          >
-            {ocupado ? 'Procesando…' : etiquetaConfirmar}
-          </button>
-        </>
-      }
-    >
-      <p className="config__nota">{mensaje}</p>
-      {error && (
-        <p className="config-alerta" role="alert">
-          {error}
-        </p>
-      )}
-    </Dialogo>
+    a.length === b.length &&
+    a.every(
+      (camara, indice) =>
+        camara.id === b[indice].id && camara.nombre === b[indice].nombre,
+    )
   )
 }
+
+/**
+ * Solo se re-renderiza cuando cambia algo visible para Inventario; una lectura
+ * SSE que reemplaza el array de cámaras con los mismos ids/nombres no reabre
+ * la carga de lotes.
+ */
+export const Inventario = memo(
+  InventarioBase,
+  (previas, siguientes) =>
+    previas.rol === siguientes.rol &&
+    previas.versionLotes === siguientes.versionLotes &&
+    previas.camarasCargando === siguientes.camarasCargando &&
+    previas.errorCamaras === siguientes.errorCamaras &&
+    previas.onCambio === siguientes.onCambio &&
+    mismasCamaras(previas.camaras, siguientes.camaras),
+)

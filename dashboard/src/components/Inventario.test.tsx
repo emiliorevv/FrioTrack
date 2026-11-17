@@ -15,6 +15,7 @@ import {
   marcarLoteMerma,
   obtenerLotes,
 } from '../api/client'
+import { ETIQUETA_ESTADO_LOTE } from '../lib/format'
 import type { Camara, Lote } from '../types'
 import { Inventario } from './Inventario'
 
@@ -158,6 +159,7 @@ describe('Inventario', () => {
     const titulo = screen.getByRole('heading', { name: 'Inventario' })
     expect(titulo).toBeInTheDocument()
     expect(screen.getByText(/en 2 lotes activos/)).toBeInTheDocument()
+    expect(screen.getByText(/\$700\.50/)).toBeInTheDocument()
     expect(screen.getAllByText('Pescados y mariscos').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Carnes y aves').length).toBeGreaterThan(0)
     expect(screen.getByText('2.5 kg')).toBeInTheDocument()
@@ -523,5 +525,210 @@ describe('Inventario', () => {
         expect.objectContaining({ caducidad: '2020-01-01' }),
       ),
     )
+  })
+
+  it('renderiza las opciones de estado desde el mapa compartido', async () => {
+    const original = ETIQUETA_ESTADO_LOTE.en_riesgo
+    ETIQUETA_ESTADO_LOTE.en_riesgo = 'Riesgo de prueba'
+    try {
+      renderizar()
+      await esperarLotes()
+
+      expect(
+        screen.getByRole('option', { name: 'Riesgo de prueba' }),
+      ).toBeInTheDocument()
+    } finally {
+      ETIQUETA_ESTADO_LOTE.en_riesgo = original
+    }
+  })
+
+  it('edita un lote existente aunque no haya cámaras cargadas', async () => {
+    const onCambio = vi.fn()
+    render(<Inventario rol="dueno" camaras={[]} onCambio={onCambio} />)
+    await esperarLotes()
+    vi.mocked(actualizarLote).mockResolvedValue(salmon)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Editar lote Salmón fresco' }),
+    )
+    const dialogo = screen.getByRole('dialog', {
+      name: 'Editar Salmón fresco',
+    })
+    expect(
+      within(dialogo).getByRole('option', { name: 'Cámara 1' }),
+    ).toBeInTheDocument()
+
+    fireEvent.click(
+      within(dialogo).getByRole('button', { name: 'Guardar lote' }),
+    )
+
+    await waitFor(() =>
+      expect(actualizarLote).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ camara_id: 1 }),
+      ),
+    )
+    expect(within(dialogo).queryByText('Selecciona una cámara.')).toBeNull()
+  })
+
+  it('no sugiere crear una cámara cuando la carga de cámaras falló', async () => {
+    vi.mocked(obtenerLotes).mockResolvedValue([])
+    render(
+      <Inventario
+        rol="dueno"
+        camaras={[]}
+        camarasCargando={false}
+        errorCamaras="No se pudieron cargar las cámaras"
+      />,
+    )
+
+    expect(
+      await screen.findByText('No hay lotes registrados.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('No se pudieron cargar las cámaras.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        'Primero agrega una cámara para registrar inventario.',
+      ),
+    ).not.toBeInTheDocument()
+  })
+
+  it('recarga al cambiar versionLotes y quita acciones de una merma', async () => {
+    vi.mocked(obtenerLotes)
+      .mockResolvedValueOnce([salmon])
+      .mockResolvedValueOnce([
+        { ...salmon, estado: 'merma', merma_en: '2026-11-16T19:00:00.000Z' },
+      ])
+    const onCambio = vi.fn()
+    const { rerender } = render(
+      <Inventario
+        rol="dueno"
+        camaras={camaras}
+        versionLotes={0}
+        onCambio={onCambio}
+      />,
+    )
+    await screen.findByText('Salmón fresco')
+    expect(
+      screen.getByRole('button', { name: 'Editar lote Salmón fresco' }),
+    ).toBeInTheDocument()
+
+    rerender(
+      <Inventario
+        rol="dueno"
+        camaras={camaras}
+        versionLotes={1}
+        onCambio={onCambio}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Editar lote Salmón fresco' }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(
+      screen.queryByRole('button', { name: 'Eliminar lote Salmón fresco' }),
+    ).not.toBeInTheDocument()
+    expect(obtenerLotes).toHaveBeenCalledTimes(2)
+  })
+
+  it('un re-render con las mismas cámaras no vuelve a pedir lotes', async () => {
+    const onCambio = vi.fn()
+    const { rerender } = render(
+      <Inventario
+        rol="dueno"
+        camaras={camaras}
+        versionLotes={0}
+        onCambio={onCambio}
+      />,
+    )
+    await esperarLotes()
+    const llamadas = vi.mocked(obtenerLotes).mock.calls.length
+
+    rerender(
+      <Inventario
+        rol="dueno"
+        camaras={camaras.map((camara) => ({ ...camara }))}
+        versionLotes={0}
+        onCambio={onCambio}
+      />,
+    )
+
+    expect(obtenerLotes).toHaveBeenCalledTimes(llamadas)
+  })
+
+  it('no cierra el formulario ni duplica el estado busy mientras guarda', async () => {
+    renderizar()
+    await esperarLotes()
+    let resolver!: (valor: Lote | null) => void
+    vi.mocked(crearLote).mockReturnValue(
+      new Promise<Lote | null>((resolve) => {
+        resolver = resolve
+      }),
+    )
+
+    const dialogo = abrirFormularioNuevo()
+    llenarFormulario(dialogo)
+    fireEvent.click(
+      within(dialogo).getByRole('button', { name: 'Guardar lote' }),
+    )
+    await waitFor(() => expect(crearLote).toHaveBeenCalled())
+
+    expect(
+      within(dialogo).getByRole('button', { name: 'Cerrar formulario' }),
+    ).toBeDisabled()
+    expect(
+      within(dialogo).getByRole('button', { name: 'Guardando…' }),
+    ).toHaveAttribute('aria-busy', 'true')
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.mouseDown(dialogo.parentElement as HTMLElement)
+    expect(dialogo).toBeInTheDocument()
+
+    await act(async () => {
+      resolver(salmon)
+    })
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Nuevo lote' }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(crearLote).toHaveBeenCalledTimes(1)
+  })
+
+  it('usa centavos en el total del encabezado', async () => {
+    vi.mocked(obtenerLotes).mockResolvedValue([
+      { ...salmon, id: 10, producto: 'Lote A', costo_total_mxn: 10.4 },
+      { ...leche, id: 11, producto: 'Lote B', costo_total_mxn: 10.4 },
+    ])
+    renderizar()
+
+    expect(await screen.findByText('Lote A')).toBeInTheDocument()
+    expect(screen.getByText(/\$20\.80/)).toBeInTheDocument()
+  })
+
+  it('muestra la carga de cámaras sin sugerir crearlas', async () => {
+    vi.mocked(obtenerLotes).mockResolvedValue([])
+    render(
+      <Inventario
+        rol="dueno"
+        camaras={[]}
+        camarasCargando
+        errorCamaras={null}
+      />,
+    )
+
+    expect(
+      await screen.findByText('No hay lotes registrados.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Cargando cámaras…')).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        'Primero agrega una cámara para registrar inventario.',
+      ),
+    ).not.toBeInTheDocument()
   })
 })

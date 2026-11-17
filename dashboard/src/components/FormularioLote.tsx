@@ -1,12 +1,16 @@
-import { useId, useState, type FormEvent, type ReactNode } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import { mensajeDeError } from '../lib/erroresApi'
 import { fechaVencida, formatearFecha } from '../lib/format'
+import { aNumero } from '../lib/validacion'
 import type { Camara, Lote, LoteCreacion, UnidadLote } from '../types'
+import { Campo } from './Campo'
 
 interface FormularioLoteProps {
   /** Lote a editar; ausente para un alta. */
   lote?: Lote
   camaras: Camara[]
+  /** Estado de la petición; la única fuente de verdad es `Inventario`. */
+  guardando: boolean
   onGuardar: (datos: LoteCreacion) => Promise<void>
   onCancelar: () => void
 }
@@ -25,15 +29,6 @@ const UNIDADES: { valor: UnidadLote; etiqueta: string }[] = [
   { valor: 'l', etiqueta: 'Litros (l)' },
   { valor: 'pz', etiqueta: 'Piezas (pz)' },
 ]
-
-function aNumero(valor: string): number | null {
-  const limpio = valor.trim()
-  if (!limpio) {
-    return null
-  }
-  const numero = Number(limpio)
-  return Number.isFinite(numero) ? numero : null
-}
 
 function hastaDosDecimales(valor: number): boolean {
   return Math.abs(valor * 100 - Math.round(valor * 100)) < 1e-7
@@ -55,6 +50,7 @@ function fechaValida(valor: string): boolean {
 export function FormularioLote({
   lote,
   camaras,
+  guardando,
   onGuardar,
   onCancelar,
 }: FormularioLoteProps) {
@@ -67,7 +63,17 @@ export function FormularioLote({
   const [caducidad, setCaducidad] = useState(lote?.caducidad ?? '')
   const [errores, setErrores] = useState<ErroresCampos>({})
   const [errorServidor, setErrorServidor] = useState<string | null>(null)
-  const [guardando, setGuardando] = useState(false)
+
+  const camaraActual = lote
+    ? (camaras.find((actual) => actual.id === lote.camara_id) ?? {
+        id: lote.camara_id,
+        nombre: `Cámara ${lote.camara_id}`,
+      })
+    : null
+  const camarasDisponibles =
+    camaraActual && !camaras.some((actual) => actual.id === camaraActual.id)
+      ? [...camaras, camaraActual]
+      : camaras
 
   const advertenciaCaducidad =
     Boolean(caducidad) && !errores.caducidad && fechaVencida(caducidad)
@@ -79,7 +85,9 @@ export function FormularioLote({
       siguientes.producto = 'Escribe un producto de 2 a 120 caracteres.'
     }
 
-    const camara = camaras.find((actual) => String(actual.id) === camaraId)
+    const camara = camarasDisponibles.find(
+      (actual) => String(actual.id) === camaraId,
+    )
     if (!camara) {
       siguientes.camara_id = 'Selecciona una cámara.'
     }
@@ -131,13 +139,11 @@ export function FormularioLote({
       return
     }
 
-    setGuardando(true)
     setErrorServidor(null)
     try {
       await onGuardar(resultado.datos)
     } catch (error) {
       setErrorServidor(mensajeDeError(error, 'lote'))
-      setGuardando(false)
     }
   }
 
@@ -204,7 +210,7 @@ export function FormularioLote({
           aria-describedby={descrito('camara_id')}
         >
           <option value="">Selecciona una cámara</option>
-          {camaras.map((camara) => (
+          {camarasDisponibles.map((camara) => (
             <option key={camara.id} value={camara.id}>
               {camara.nombre}
             </option>
@@ -323,33 +329,5 @@ export function FormularioLote({
         </button>
       </div>
     </form>
-  )
-}
-
-interface CampoProps {
-  id: string
-  etiqueta: string
-  error?: string
-  ayuda: string
-  children: ReactNode
-}
-
-function Campo({ id, etiqueta, error, ayuda, children }: CampoProps) {
-  return (
-    <div className={`campo${error ? ' campo--error' : ''}`}>
-      <label className="campo__label" htmlFor={id}>
-        {etiqueta}
-      </label>
-      {children}
-      {error ? (
-        <p className="campo__error" id={`${id}-error`} role="alert">
-          {error}
-        </p>
-      ) : (
-        <p className="campo__ayuda" id={`${id}-ayuda`}>
-          {ayuda}
-        </p>
-      )}
-    </div>
   )
 }
