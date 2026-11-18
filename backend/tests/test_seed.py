@@ -143,13 +143,14 @@ def test_construir_seed_arma_los_quince_lotes():
     assert papas.costo_total_mxn == Decimal("520.00")
 
 
-def test_construir_seed_arma_los_dos_usuarios_con_password_verificable():
+def test_construir_seed_arma_los_tres_usuarios_con_password_verificable():
     _, _, _, usuarios = construir_seed(sensor_tokens=TOKENS, password="demo")
 
     por_nombre = {u.usuario: u for u in usuarios}
-    assert set(por_nombre) == {"jefe", "gerente"}
+    assert set(por_nombre) == {"jefe", "gerente", "dueno"}
     assert por_nombre["jefe"].rol == "jefe_cocina"
     assert por_nombre["gerente"].rol == "gerente"
+    assert por_nombre["dueno"].rol == "dueno"
     assert all(u.password_hash.startswith("pbkdf2_sha256$") for u in usuarios)
     assert all(u.password_hash != "demo" for u in usuarios)
     assert all(u.restaurante_id == RESTAURANTE_DEMO_ID for u in usuarios)
@@ -225,13 +226,13 @@ def test_cargar_seed_inserta_todo_y_hace_commit():
     assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is True
     assert sesion.flushes == 2
     assert sesion.commits == 1
-    assert len(sesion.agregados) == 1 + 5 + 5 + 15 + 2
+    assert len(sesion.agregados) == 1 + 5 + 5 + 15 + 3
     restaurantes = [fila for fila in sesion.agregados if isinstance(fila, Restaurante)]
     assert [(r.id, r.nombre) for r in restaurantes] == [(1, "FríoTrack Demo")]
     assert sum(isinstance(fila, Camara) for fila in sesion.agregados) == 5
     assert sum(isinstance(fila, Sensor) for fila in sesion.agregados) == 5
     assert sum(isinstance(fila, Lote) for fila in sesion.agregados) == 15
-    assert sum(isinstance(fila, Usuario) for fila in sesion.agregados) == 2
+    assert sum(isinstance(fila, Usuario) for fila in sesion.agregados) == 3
 
 
 def test_cargar_seed_no_duplica_el_restaurante_demo():

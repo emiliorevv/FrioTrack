@@ -45,6 +45,10 @@ services:
       # sync: false para que el blueprint no pise el valor del panel.
       - key: AUTH_REQUERIDA
         sync: false
+      # Habilita /api/demo/* (falla, puerta, ataque, recuperar) para el tenant
+      # demo. Es la demo actual; en producción real pon "0" o elimina la variable.
+      - key: DEMO_HABILITADA
+        value: "1"
 
       # Supabase → Project Settings → Database → Session Pooler.
       # Formato: postgresql+psycopg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
@@ -59,8 +63,8 @@ services:
       # JSON con un token por sensor: {"S-PES-01":"...","S-CAR-01":"...",...}
       - key: SENSOR_TOKENS
         sync: false
-      # Contraseña de los usuarios semilla `jefe` y `gerente`; debe coincidir
-      # con la usada al correr `python -m app.db.init_db`.
+      # Contraseña de los usuarios semilla `jefe`, `gerente` y `dueno`; debe
+      # coincidir con la usada al correr `python -m app.db.init_db`.
       - key: SEED_PASSWORD
         sync: false
 

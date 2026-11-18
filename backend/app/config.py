@@ -35,9 +35,12 @@ class Settings(BaseSettings):
     # Con False (local) las rutas de consulta siguen abiertas; en producción se
     # pone AUTH_REQUERIDA=1 junto con el login del dashboard.
     auth_requerida: bool = False
+    # Habilita `/api/demo/*` (solo tenant demo). En producción real se apaga:
+    # los endpoints quedan en 404 sin tocar la demo ni exponer tokens.
+    demo_habilitada: bool = False
     cron_token: str = ""
     sensor_tokens: str = "{}"
-    # Obligatoria para cargar el seed (usuarios `jefe` y `gerente`); sin default.
+    # Obligatoria para cargar el seed (usuarios `jefe`, `gerente` y `dueno`); sin default.
     seed_password: str = ""
     cors_origins: str = "*"
     # Con False el middleware de acceso solo imprime en stdout: no consulta

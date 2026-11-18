@@ -166,6 +166,12 @@ def construir_seed(
             password_hash=password_hash,
             rol="gerente",
         ),
+        Usuario(
+            restaurante_id=RESTAURANTE_DEMO_ID,
+            usuario="dueno",
+            password_hash=password_hash,
+            rol="dueno",
+        ),
     ]
 
     return camaras, sensores, lotes, usuarios

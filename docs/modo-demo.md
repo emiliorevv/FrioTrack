@@ -29,23 +29,35 @@ Reglas para que no se rompa nada:
 - El dashboard muestra una etiqueta "MODO DEMO ×30" cuando la escala es distinta de 1 (`GET /health` regresa `{ "escala_tiempo": 30 }`).
 - El detector SIEM **no** se escala: sus ventanas (5 minutos para fuerza bruta) ya caben en la demo.
 
-## Cómo conviven el simulador y el cron
+## Cómo se activa
 
-- El Cloudflare Worker llama a `/simulador/tick` cada minuto y genera lecturas **normales**.
+Los endpoints de simulación viven en `/api/demo/*` y solo existen para el restaurante demo (id 1). El interruptor es **`DEMO_HABILITADA`**:
+
+- En la demo actual, `render.yaml` la define con `value: "1"`.
+- En local, `.env` puede llevar `DEMO_HABILITADA=1`; `.env.example` la deja en `0`.
+- En producción real se pone `0` o se elimina: los cuatro endpoints responden **404** y no queda ninguna puerta de simulación abierta.
+
+La cuenta demo `dueno` (rol `dueno`) y el usuario `jefe` (rol `jefe_cocina`) ven el panel y pueden lanzar las simulaciones; `gerente` recibe **403**. Con el login activo (`AUTH_REQUERIDA=1`) hace falta el JWT; el backend resuelve el sensor de cada cámara y **nunca manda tokens de sensor al dashboard**.
+
+## Los botones (endpoints)
+
+El dashboard llama a estos endpoints; todos responden `202` (o `201` en el ataque) y trabajan en segundo plano:
+
+| Botón | Endpoint | Qué hace | Qué se ve |
+|---|---|---|---|
+| **Falla de compresor** | `POST /api/demo/falla` | 12 lecturas cada ~1.8 s con la temperatura subiendo 0.4 °C desde 1.0 (y refuerzo si hace falta) | La tarjeta pasa a amarilla, luego roja; notificación simulada, lotes en riesgo y alerta para atender |
+| **Puerta abierta** | `POST /api/demo/puerta` | ~8 lecturas con la puerta abierta en el congelador (-19.5 °C) | Alerta de puerta a los ~10 s |
+| **Ataque SIEM** | `POST /api/demo/ataque` | Inserta un hallazgo de fuerza bruta simulado (IP de documentación) | La alerta aparece en el panel de seguridad; **no** bloquea ninguna IP real |
+| **Recuperar** | `POST /api/demo/recuperar` | Lectura normal en cada cámara demo | Las alertas se cierran y las cámaras vuelven a verde |
+
+`falla` usa la cámara 1 por defecto y `puerta` la 5; ambos aceptan `{ "camara_id": N }`. Si ya hay una simulación del mismo tipo en curso, el endpoint responde **409**; el registro se libera solo al terminar. Una cámara sin sensor activo responde **409**, y una cámara de otro restaurante **404**.
+
+## Cómo conviven los botones y el cron
+
+- El Cloudflare Worker llama a `/simulador/tick` cada minuto y genera lecturas **normales** solo para las cámaras del seed (`es_demo=true`).
 - El tick **solo genera en modo demo** (`ESCALA_TIEMPO > 1`). En producción no inventa lecturas: solo mantiene Render despierto y responde `{lecturas: 0, saltadas: []}`.
 - Si una cámara recibió una lectura real del simulador (cualquier `sensor_id` distinto de `SIM-CRON`) en los últimos 2 minutos, el tick **se la salta**. Así el cron no "arregla" la temperatura de una falla que se está provocando en vivo.
 - Si dos ticks se solapan (por ejemplo, por el cold start de Render), el segundo **se salta** las cámaras que ya recibieron un tick en los últimos 30 segundos.
-
-## Escenarios del simulador
-
-| Escenario | Qué hace | Qué se ve |
-|---|---|---|
-| `normal` | Temperatura en el centro del rango con ruido de ±0.3 °C, puerta cerrada | Todo verde |
-| `puerta_abierta --camara N` | Puerta abierta y la temperatura sube 0.2 °C por lectura | Alerta de puerta a los 10 s, luego fuera de rango |
-| `falla_compresor --camara N` | Puerta cerrada y la temperatura sube 0.4 °C por lectura sin parar | En riesgo, notificación simulada y, si se deja correr, merma con su costo |
-| `recuperar --camara N` | Regresa la temperatura al rango poco a poco | La alerta se cierra y los lotes en riesgo vuelven a `ok` |
-
-Intervalo por defecto: una lectura cada 3 segundos por cámara.
 
 ## Guion sugerido (6 minutos)
 
@@ -53,17 +65,21 @@ Intervalo por defecto: una lectura cada 3 segundos por cámara.
 |---|---|---|
 | 0:00–1:00 | Integrante 1 | El problema y la arquitectura (diagrama del README) |
 | 1:00–2:00 | Integrante 2 | Dashboard en el celular proyectado; QR para que el profe lo abra; KPIs moviéndose en vivo |
-| 2:00–3:30 | Integrante 2 | `falla_compresor --camara 1`: la tarjeta se pone amarilla, luego roja, aparece la notificación simulada en el dashboard, aparecen los pesos en riesgo; se atiende la alerta desde el celular |
-| 3:30–4:30 | Integrante 3 | Diagrama IDMZ y regla Sigma; se corre el script de ataque y el detector bloquea la IP; se ve en el dashboard |
+| 2:00–3:30 | Integrante 2 | Botón **Falla de compresor**: la tarjeta se pone amarilla, luego roja, aparece la notificación simulada, los pesos en riesgo y la alerta; se atiende desde el celular |
+| 3:30–4:30 | Integrante 3 | Diagrama IDMZ y regla Sigma; botón **Ataque SIEM** y la alerta aparece en el panel; se explica que la IP es de documentación y no se bloquea nada real |
 | 4:30–5:30 | Integrante 1 | Barreras legacy y culturales, valor conectado, por qué PaaS |
-| 5:30–6:00 | Todos | Cierre |
+| 5:30–6:00 | Todos | **Recuperar** para dejar la demo en verde y cierre |
 
 Plan B si falla internet: video grabado de la misma demo (la rúbrica lo acepta, pero baja la calificación del criterio 4, así que es solo emergencia).
 
 ## Antes de exponer
 
 1. 30 minutos antes: abrir la API para que Render despierte y revisar `/health`.
-2. Confirmar `ESCALA_TIEMPO=30` en Render.
-3. Correr `recuperar` en todas las cámaras para empezar en verde.
+2. Confirmar `ESCALA_TIEMPO=30` y `DEMO_HABILITADA=1` en Render.
+3. Entrar con la cuenta demo (`dueno` o `jefe`) y pulsar **Recuperar** para empezar en verde.
 4. Confirmar que el canal de notificaciones es el simulado: la notificación aparece en el dashboard y no se manda ningún SMS (Twilio queda para producción).
 5. Desbloquear la IP del salón si quedó bloqueada en un ensayo.
+
+## Apagar la demo
+
+Cuando la demo ya no se use, pon `DEMO_HABILITADA=0` (o elimina la variable) y redespliega. Los endpoints `/api/demo/*` responden `404`; el resto de la API y el dashboard siguen funcionando igual.

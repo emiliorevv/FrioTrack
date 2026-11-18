@@ -195,4 +195,4 @@ El backend crea las tablas y carga esto si la base está vacía:
   otros tenants que ya ocupen un id.
 - Un sensor por cámara (el tenant se deriva de la cámara).
 - 2 o 3 lotes por cámara con costos realistas (por ejemplo: robalo 12 kg $3,240; camarón 5 kg $1,610; arrachera 10 kg $3,100; pechuga 15 kg $1,650; crema 6 l $420; queso Oaxaca 4 kg $640; lechuga 20 pz $300; cilantro y hierbas $180; papas congeladas 10 kg $520; helado 8 l $760).
-- Dos usuarios del restaurante demo: `jefe` (`jefe_cocina`) y `gerente` (`gerente`), con contraseña desde una variable de entorno. El sign-up crea un usuario `dueno` por cada restaurante nuevo.
+- Tres usuarios del restaurante demo: `jefe` (`jefe_cocina`), `gerente` (`gerente`) y `dueno` (`dueno`, el que usa la demo), con contraseña desde una variable de entorno. El sign-up crea un usuario `dueno` por cada restaurante nuevo.

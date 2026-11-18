@@ -266,6 +266,55 @@ Body parcial con cualquiera de `producto`, `camara_id`, `cantidad`, `unidad`, `c
 #### `POST /lotes/{id}/merma`
 Sin body. Marca `estado: "merma"` y `merma_en` con la hora del servidor. Es la vía para registrar una pérdida manual sin borrar el lote. Es idempotente: si ya estaba en merma conserva la fecha original y devuelve el mismo objeto. Respuesta `200` con el lote.
 
+### Demo
+
+Los endpoints de simulación solo existen cuando `DEMO_HABILITADA=1` y la petición pertenece al restaurante demo (id 1). Fuera de ese caso responden **404** aunque la ruta exista. Requieren el JWT de usuario (como el resto de consultas) y solo los roles `dueno` y `jefe_cocina` pueden usarlos; otro rol recibe **403**. Con `AUTH_REQUERIDA=0` (local y pruebas) se aceptan sobre el tenant demo. Nunca se exponen tokens de sensor: el backend usa directamente el sensor activo de la cámara.
+
+Todas las simulaciones de lecturas corren en segundo plano (no bloquean la respuesta) y usan las mismas reglas que la ingesta real. Una simulación del mismo tipo en curso responde **409**; el registro se libera al terminar.
+
+#### `POST /demo/falla`
+Body opcional `{ "camara_id": 1 }` (default `1`). Simula una falla de compresor: 12 lecturas cada ~1.8 s con la temperatura subiendo desde 1.0 °C en pasos de 0.4 y la puerta cerrada; si el umbral de riesgo aún no se cumple, envía hasta 4 lecturas de refuerzo para que la alerta abra dentro de la simulación. Con `ESCALA_TIEMPO=30` la alerta aparece alrededor de los 25 s (las primeras lecturas aún están en rango; el refuerzo cubre el umbral). Respuesta `202`:
+
+```json
+{ "mensaje": "Falla de compresor en curso.", "camara_id": 1 }
+```
+
+`404` si la cámara no es del tenant demo; `409` si no tiene sensor activo o ya hay una falla en curso.
+
+#### `POST /demo/puerta`
+Body opcional `{ "camara_id": 5 }` (default `5`, congelador). Mantiene la puerta abierta con temperatura normal de congelador (-19.5 °C) durante ~8 lecturas cada ~1.5 s; con `ESCALA_TIEMPO=30` la alerta de puerta abre a los ~10 s. Respuesta `202` con el mismo shape. Mismos `404`/`409` que `falla`.
+
+#### `POST /demo/ataque`
+Sin body. Inserta una `AlertaSeguridad` simulada de la regla real de fuerza bruta:
+
+```json
+{
+  "id": 7,
+  "regla_id": "3b8e2f6a-9c41-4d7e-8a15-2f6c0d9e7b41",
+  "regla": "Fuerza bruta de credenciales en la API",
+  "severidad": "high",
+  "ts": "2026-11-18T19:05:00+00:00",
+  "ip_origen": "203.0.113.66",
+  "detalle": {
+    "clave": "ip:203.0.113.66",
+    "intentos": 12,
+    "ventana_s": 300,
+    "rutas": ["/api/auth/login", "/api/telemetria"],
+    "simulado": true
+  },
+  "accion": "bloquear_ip"
+}
+```
+
+`201` con el shape de `GET /seguridad/alertas`. **No** bloquea ninguna IP real: solo inserta el hallazgo para la demo del SIEM.
+
+#### `POST /demo/recuperar`
+Sin body. Manda una lectura normal al centro del rango de cada cámara demo para cerrar alertas y volver a `en_rango`. Respuesta `202`:
+
+```json
+{ "mensaje": "Recuperación en curso.", "camara_id": null }
+```
+
 ### Tiempo real
 
 #### `GET /stream?token=<jwt>`
