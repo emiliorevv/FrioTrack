@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import './App.css'
-import { puedeAtenderAlertas } from './auth/roles'
+import { puedeAtenderAlertas, puedeSimularDemo } from './auth/roles'
 import { AlertasActivas } from './components/AlertasActivas'
 import { CameraCard } from './components/CameraCard'
 import { Configuracion } from './components/Configuracion'
@@ -10,6 +10,7 @@ import { Inventario } from './components/Inventario'
 import { KpiStrip } from './components/KpiStrip'
 import { NotificationToast } from './components/NotificationToast'
 import { OnboardingBanner } from './components/OnboardingBanner'
+import { PanelDemo } from './components/PanelDemo'
 import { SecurityPanel } from './components/SecurityPanel'
 import { TiempoRelativo } from './components/TiempoRelativo'
 import { useDashboard } from './hooks/useDashboard'
@@ -41,14 +42,16 @@ function estaVigente(fecha: Date | null, ahora: Date): boolean {
 interface AppProps {
   usuario: string
   rol: string
+  esDemo?: boolean
   onLogout: () => void
 }
 
-function App({ usuario, rol, onLogout }: AppProps) {
+function App({ usuario, rol, esDemo = false, onLogout }: AppProps) {
   const [filtro, setFiltro] = useState<FiltroCamaras>('todas')
   const [busqueda, setBusqueda] = useState('')
   const [configuracionAbierta, setConfiguracionAbierta] = useState(false)
   const [formularioCamaraInicial, setFormularioCamaraInicial] = useState(false)
+  const [demoAbierta, setDemoAbierta] = useState(false)
   const { notificacion, cerrar } = useNotificaciones()
   const {
     health,
@@ -90,6 +93,7 @@ function App({ usuario, rol, onLogout }: AppProps) {
   const equiposEnAlerta = conteos.alerta + conteos.critica
   const sinDatos = camaras.length === 0 && kpis === null
   const mostrarBienvenida = camaras.length === 0 && !cargando && rol === 'dueno'
+  const mostrarDemo = puedeSimularDemo(esDemo, rol)
   const actualizadoEn = fechaMasReciente(ultimoExitoHttp, ultimaActividadSse)
 
   function abrirConfiguracion(conFormularioDeCamara = false) {
@@ -115,6 +119,8 @@ function App({ usuario, rol, onLogout }: AppProps) {
         rol={rol}
         onLogout={onLogout}
         onAbrirConfiguracion={() => abrirConfiguracion()}
+        mostrarDemo={mostrarDemo}
+        onAbrirDemo={() => setDemoAbierta(true)}
       />
 
       <main id="contenido" className="app-main" tabIndex={-1}>
@@ -262,7 +268,16 @@ function App({ usuario, rol, onLogout }: AppProps) {
         <Configuracion
           formularioCamaraInicial={formularioCamaraInicial}
           onCerrar={cerrarConfiguracion}
-          onCambio={() => void refrescar()}
+          onCambio={refrescar}
+        />
+      )}
+
+      {demoAbierta && mostrarDemo && (
+        <PanelDemo
+          esDemo={esDemo}
+          rol={rol}
+          onCerrar={() => setDemoAbierta(false)}
+          onCambio={refrescar}
         />
       )}
     </div>

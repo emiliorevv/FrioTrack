@@ -21,3 +21,8 @@ export function puedeAtenderAlertas(rol: string): boolean {
 export function puedeEditarInventario(rol: string): boolean {
   return rol === 'dueno' || rol === 'jefe_cocina'
 }
+
+/** Permiso del panel de demo: solo el tenant demo y dueño/jefe de cocina. */
+export function puedeSimularDemo(esDemo: boolean, rol: string): boolean {
+  return esDemo && (rol === 'dueno' || rol === 'jefe_cocina')
+}

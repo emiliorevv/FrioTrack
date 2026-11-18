@@ -19,6 +19,8 @@ export function Login() {
   const [errorLocal, setErrorLocal] = useState<string | null>(null)
 
   const mensajeError = errorLocal ?? error
+  const mostrarDemo =
+    import.meta.env.DEV || import.meta.env.VITE_MOSTRAR_DEMO === '1'
   const [textoNormal, textoCargando] = TEXTOS_BOTON[modo]
   const textoBoton = cargando ? textoCargando : textoNormal
 
@@ -181,8 +183,10 @@ export function Login() {
           </button>
         </p>
 
-        {import.meta.env.DEV && (
-          <p className="auth-demo">Demo: jefe / friotrack-demo</p>
+        {mostrarDemo && (
+          <p className="auth-demo">
+            Demo: jefe / dueno / gerente · friotrack-demo
+          </p>
         )}
       </div>
     </main>

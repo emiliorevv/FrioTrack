@@ -19,3 +19,4 @@ Dashboard web en React + Vite, pensado primero para celular, desplegado en Verce
 
 ## Variables de entorno
 `VITE_API_URL` con la URL de la API en Render.
+`VITE_MOSTRAR_DEMO=1` muestra la pista de cuentas demo también en builds de producción.

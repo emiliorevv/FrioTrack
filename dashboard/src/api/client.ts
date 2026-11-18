@@ -98,6 +98,8 @@ async function leerDetalle(respuesta: Response): Promise<DetalleError> {
 export interface OpcionesPedir {
   /** No adjunta token ni dispara el logout global (login). */
   sinAuth?: boolean
+  /** Acepta un 2xx sin cuerpo JSON (endpoints de demo). */
+  tolerarCuerpoVacio?: boolean
 }
 
 export async function pedir<T>(
@@ -179,6 +181,14 @@ export async function pedir<T>(
   // Los DELETE responden 204 sin cuerpo; intentar parsear JSON rompería.
   if (respuesta.status === 204) {
     return undefined as T
+  }
+
+  if (opciones.tolerarCuerpoVacio) {
+    const texto = await respuesta.text()
+    if (!texto.trim()) {
+      return undefined as T
+    }
+    return JSON.parse(texto) as T
   }
 
   return (await respuesta.json()) as T
@@ -817,4 +827,45 @@ export async function actualizarSensor(
 /** `DELETE /sensores/{id}`: 204, o 409 si el sensor ya tiene lecturas. */
 export async function eliminarSensor(id: string): Promise<void> {
   await pedir<void>(`/sensores/${id}`, { method: 'DELETE' })
+}
+
+/* ------------------------------------------------------------------ */
+/* Panel de simulación de la demo                                      */
+/* ------------------------------------------------------------------ */
+
+async function pedirDemo(ruta: string, cuerpo?: unknown): Promise<unknown> {
+  return pedir<unknown>(
+    ruta,
+    {
+      method: 'POST',
+      ...(cuerpo === undefined
+        ? {}
+        : {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(cuerpo),
+          }),
+    },
+    { tolerarCuerpoVacio: true },
+  )
+}
+
+/** `POST /demo/falla`: fuerza una temperatura fuera de rango en la cámara. */
+export async function simularFalla(camaraId = 1): Promise<void> {
+  await pedirDemo('/demo/falla', { camara_id: camaraId })
+}
+
+/** `POST /demo/puerta`: deja la puerta del congelador abierta. */
+export async function simularPuerta(camaraId = 5): Promise<void> {
+  await pedirDemo('/demo/puerta', { camara_id: camaraId })
+}
+
+/** `POST /demo/ataque`: publica una alerta SIEM simulada. */
+export async function simularAtaque(): Promise<AlertaSeguridad | null> {
+  const respuesta = await pedirDemo('/demo/ataque')
+  return normalizarAlertaSeguridad(respuesta)
+}
+
+/** `POST /demo/recuperar`: devuelve las cámaras demo a su estado normal. */
+export async function recuperarDemo(): Promise<void> {
+  await pedirDemo('/demo/recuperar')
 }

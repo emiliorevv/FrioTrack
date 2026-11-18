@@ -53,6 +53,10 @@ vi.mock('./api/client', async (importOriginal) => {
     actualizarLote: vi.fn(),
     eliminarLote: vi.fn(),
     marcarLoteMerma: vi.fn(),
+    simularFalla: vi.fn(),
+    simularPuerta: vi.fn(),
+    simularAtaque: vi.fn(),
+    recuperarDemo: vi.fn(),
   }
 })
 
@@ -67,6 +71,7 @@ function renderizarApp(
   props: Partial<{
     usuario: string
     rol: string
+    esDemo: boolean
     onLogout: () => void
   }> = {},
 ) {
@@ -721,5 +726,47 @@ describe('vista general', () => {
     })
 
     await waitFor(() => expect(obtenerLotes).toHaveBeenCalledTimes(2))
+  })
+
+  it('no muestra el panel demo fuera del tenant demo', async () => {
+    renderizarApp({ usuario: 'dueno', rol: 'dueno', esDemo: false })
+    await screen.findAllByRole('article')
+
+    expect(
+      screen.queryByRole('button', { name: 'Abrir panel de demo' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('muestra el panel demo al dueño del tenant demo', async () => {
+    renderizarApp({ usuario: 'dueno', rol: 'dueno', esDemo: true })
+    await screen.findAllByRole('article')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir panel de demo' }))
+
+    expect(
+      screen.getByRole('dialog', { name: 'Panel de demo' }),
+    ).toBeInTheDocument()
+  })
+
+  it('muestra el panel demo al jefe de cocina del tenant demo', async () => {
+    renderizarApp({
+      usuario: 'jefe',
+      rol: 'jefe_cocina',
+      esDemo: true,
+    })
+    await screen.findAllByRole('article')
+
+    expect(
+      screen.getByRole('button', { name: 'Abrir panel de demo' }),
+    ).toBeInTheDocument()
+  })
+
+  it('no muestra el panel demo al gerente del tenant demo', async () => {
+    renderizarApp({ usuario: 'gerente', rol: 'gerente', esDemo: true })
+    await screen.findAllByRole('article')
+
+    expect(
+      screen.queryByRole('button', { name: 'Abrir panel de demo' }),
+    ).not.toBeInTheDocument()
   })
 })

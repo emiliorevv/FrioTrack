@@ -24,6 +24,7 @@ function sesionNueva(usuario = 'dueno-nuevo', rol = 'dueno') {
       sub: usuario,
       uid: 7,
       rol,
+      restaurante_id: 1,
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 3600,
       pwd: 'hash',
@@ -93,7 +94,9 @@ describe('Login', () => {
       'current-password',
     )
     expect(screen.getByRole('button', { name: 'Entrar' })).toBeEnabled()
-    expect(screen.getByText('Demo: jefe / friotrack-demo')).toBeInTheDocument()
+    expect(
+      screen.getByText('Demo: jefe / dueno / gerente · friotrack-demo'),
+    ).toBeInTheDocument()
   })
 
   it('envía usuario y contraseña al login', async () => {

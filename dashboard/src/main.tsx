@@ -15,7 +15,12 @@ function Raiz() {
 
   return (
     <StreamProvider token={auth.token}>
-      <App usuario={auth.usuario} rol={auth.rol} onLogout={auth.logout} />
+      <App
+        usuario={auth.usuario}
+        rol={auth.rol}
+        esDemo={auth.esDemo}
+        onLogout={auth.logout}
+      />
     </StreamProvider>
   )
 }

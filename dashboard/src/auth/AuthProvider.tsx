@@ -27,6 +27,7 @@ interface Sesion {
   token: string
   usuario: string
   rol: string
+  restauranteId: number
   /** Segundos desde epoch, igual que el `exp` del JWT. */
   exp: number
 }
@@ -51,12 +52,16 @@ export interface Autenticado extends BaseAuth {
   token: string
   usuario: string
   rol: string
+  restauranteId: number
+  esDemo: boolean
 }
 
 export interface NoAutenticado extends BaseAuth {
   token: null
   usuario: null
   rol: null
+  restauranteId: null
+  esDemo: false
 }
 
 export type ContextoAuth = Autenticado | NoAutenticado
@@ -80,6 +85,7 @@ function restaurarSesion(): Sesion | null {
     token,
     usuario: payload.usuario,
     rol: payload.rol,
+    restauranteId: payload.restaurante_id,
     exp: payload.exp,
   }
 }
@@ -109,6 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token: respuesta.access_token,
       usuario: payload.usuario,
       rol: payload.rol,
+      restauranteId: payload.restaurante_id,
       exp: payload.exp,
     })
     return true
@@ -202,8 +209,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           token: sesion.token,
           usuario: sesion.usuario,
           rol: sesion.rol,
+          restauranteId: sesion.restauranteId,
+          esDemo: sesion.restauranteId === 1,
         }
-      : { ...base, token: null, usuario: null, rol: null }
+      : {
+          ...base,
+          token: null,
+          usuario: null,
+          rol: null,
+          restauranteId: null,
+          esDemo: false,
+        }
   }, [sesion, cargando, error, login, registro, logout, limpiarError])
 
   return <AuthContext.Provider value={valor}>{children}</AuthContext.Provider>

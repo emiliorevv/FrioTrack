@@ -7,6 +7,8 @@ interface ImportMetaEnv {
    * un error en consola.
    */
   readonly VITE_API_URL?: string
+  /** `1` muestra la pista de cuentas demo en builds que no son de desarrollo. */
+  readonly VITE_MOSTRAR_DEMO?: string
 }
 
 interface ImportMeta {
