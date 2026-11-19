@@ -30,7 +30,7 @@ VENTANA_LECTURA_REAL = timedelta(minutes=2)
 VENTANA_TICK = timedelta(seconds=30)
 
 
-def _ids_de_camaras(session: Session) -> list[int]:
+def ids_camaras_demo(session: Session) -> list[int]:
     """IDs de las cámaras demo del seed, ordenados.
 
     Solo las cámaras con `es_demo=true` reciben lecturas simuladas: las que se
@@ -92,7 +92,7 @@ def ejecutar_tick(session: Session) -> tuple[int, list[int]]:
 
     generadas = 0
     saltadas: list[int] = []
-    for camara_id in _ids_de_camaras(session):
+    for camara_id in ids_camaras_demo(session):
         # El lock serializa contra `procesar_telemetria`: así una lectura real
         # que llega a mitad del tick no se pierde. Se pide por id (no por
         # entidad) para que el lock sí se emita.

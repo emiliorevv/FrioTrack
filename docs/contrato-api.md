@@ -32,7 +32,7 @@ Respuesta `200`:
 { "access_token": "<jwt>", "token_type": "bearer", "expira_en_segundos": 28800 }
 ```
 
-El JWT usa HS256 y lleva `sub` (usuario), `uid` (id del usuario), `rol`, `pwd` (huella corta del hash de la contraseña), `restaurante_id` (tenant del usuario), `iat` y `exp`; `JWT_EXPIRA_HORAS` define su vigencia (8 h por defecto). Un cambio de contraseña invalida los tokens anteriores, igual que un usuario borrado o recreado. Si el usuario no existe o la contraseña no coincide, la respuesta es `401` con el mismo mensaje (`Usuario o contraseña incorrectos.`) y `WWW-Authenticate: Bearer`, sin revelar cuál de los dos falló. Tras 10 intentos por IP en 5 minutos el login responde `429` con `Retry-After`.
+El JWT usa HS256 y lleva `sub` (usuario), `uid` (id del usuario), `rol`, `pwd` (huella corta del hash de la contraseña), `restaurante_id` (tenant del usuario), `es_demo` (`true` si el usuario pertenece al restaurante demo; el frontend lo usa para mostrar el panel de demo sin hardcodear el id), `iat` y `exp`; `JWT_EXPIRA_HORAS` define su vigencia (8 h por defecto). Un cambio de contraseña invalida los tokens anteriores, igual que un usuario borrado o recreado. Si el usuario no existe o la contraseña no coincide, la respuesta es `401` con el mismo mensaje (`Usuario o contraseña incorrectos.`) y `WWW-Authenticate: Bearer`, sin revelar cuál de los dos falló. Tras 10 intentos por IP en 5 minutos el login responde `429` con `Retry-After`.
 
 ### `POST /auth/registro`
 
@@ -268,12 +268,12 @@ Sin body. Marca `estado: "merma"` y `merma_en` con la hora del servidor. Es la v
 
 ### Demo
 
-Los endpoints de simulación solo existen cuando `DEMO_HABILITADA=1` y la petición pertenece al restaurante demo (id 1). Fuera de ese caso responden **404** aunque la ruta exista. Requieren el JWT de usuario (como el resto de consultas) y solo los roles `dueno` y `jefe_cocina` pueden usarlos; otro rol recibe **403**. Con `AUTH_REQUERIDA=0` (local y pruebas) se aceptan sobre el tenant demo. Nunca se exponen tokens de sensor: el backend usa directamente el sensor activo de la cámara.
+Los endpoints de simulación solo existen cuando `DEMO_HABILITADA=1`: con el flag apagado el router no se registra y cualquier llamada responde **404** sin pedir autenticación. Con el flag encendido, la petición debe pertenecer al restaurante demo (id 1); otro tenant recibe **404**. Requieren el JWT de usuario (como el resto de consultas) y solo los roles `dueno` y `jefe_cocina` pueden usarlos; otro rol recibe **403**. Con `AUTH_REQUERIDA=0` (local y pruebas) se aceptan sobre el tenant demo. Nunca se exponen tokens de sensor: el backend usa directamente el sensor activo de la cámara.
 
-Todas las simulaciones de lecturas corren en segundo plano (no bloquean la respuesta) y usan las mismas reglas que la ingesta real. Una simulación del mismo tipo en curso responde **409**; el registro se libera al terminar.
+Todas las simulaciones de lecturas corren en segundo plano (no bloquean la respuesta) y usan las mismas reglas que la ingesta real. Una simulación del mismo tipo en curso responde **409**; el registro se libera al terminar y también expira a los 120 s si la tarea nunca llegó a ejecutarse. `recuperar` cancela y espera a las simulaciones de `falla`/`puerta` activas antes de mandar lecturas normales.
 
 #### `POST /demo/falla`
-Body opcional `{ "camara_id": 1 }` (default `1`). Simula una falla de compresor: 12 lecturas cada ~1.8 s con la temperatura subiendo desde 1.0 °C en pasos de 0.4 y la puerta cerrada; si el umbral de riesgo aún no se cumple, envía hasta 4 lecturas de refuerzo para que la alerta abra dentro de la simulación. Con `ESCALA_TIEMPO=30` la alerta aparece alrededor de los 25 s (las primeras lecturas aún están en rango; el refuerzo cubre el umbral). Respuesta `202`:
+Body opcional `{ "camara_id": 1 }` (default `1`). Simula una falla de compresor en una cámara del seed (`es_demo=true`): las lecturas se calculan con su rango (la primera queda dentro, cerca del máximo, y la segunda ya lo cruza) y suben hasta que abre la alerta de temperatura o se agota el tiempo máximo (60 s, o el umbral de la cámara escalado más 20 s de margen). Con `ESCALA_TIEMPO=30` la alerta aparece alrededor de los 25 s. Respuesta `202`:
 
 ```json
 { "mensaje": "Falla de compresor en curso.", "camara_id": 1 }
@@ -282,7 +282,7 @@ Body opcional `{ "camara_id": 1 }` (default `1`). Simula una falla de compresor:
 `404` si la cámara no es del tenant demo; `409` si no tiene sensor activo o ya hay una falla en curso.
 
 #### `POST /demo/puerta`
-Body opcional `{ "camara_id": 5 }` (default `5`, congelador). Mantiene la puerta abierta con temperatura normal de congelador (-19.5 °C) durante ~8 lecturas cada ~1.5 s; con `ESCALA_TIEMPO=30` la alerta de puerta abre a los ~10 s. Respuesta `202` con el mismo shape. Mismos `404`/`409` que `falla`.
+Body opcional `{ "camara_id": 5 }` (default `5`, congelador). Mantiene la puerta abierta con la temperatura normal de esa cámara (punto medio de su rango, no una temperatura fija) durante ~8 lecturas cada ~1.5 s; con `ESCALA_TIEMPO=30` la alerta de puerta abre a los ~10 s. Respuesta `202` con el mismo shape. Mismos `404`/`409` que `falla`; una cámara creada por API (`es_demo=false`) responde `409`.
 
 #### `POST /demo/ataque`
 Sin body. Inserta una `AlertaSeguridad` simulada de la regla real de fuerza bruta:
@@ -309,7 +309,7 @@ Sin body. Inserta una `AlertaSeguridad` simulada de la regla real de fuerza brut
 `201` con el shape de `GET /seguridad/alertas`. **No** bloquea ninguna IP real: solo inserta el hallazgo para la demo del SIEM.
 
 #### `POST /demo/recuperar`
-Sin body. Manda una lectura normal al centro del rango de cada cámara demo para cerrar alertas y volver a `en_rango`. Respuesta `202`:
+Sin body. Cancela las simulaciones de `falla`/`puerta` en curso, espera a que terminen y manda una lectura normal al centro del rango de cada cámara demo para cerrar alertas y volver a `en_rango`. Respuesta `202`:
 
 ```json
 { "mensaje": "Recuperación en curso.", "camara_id": null }

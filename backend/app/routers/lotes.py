@@ -12,9 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.core.auth import RestauranteId, get_current_user, require_rol
+from app.core.auth import DuenoOjefe, RestauranteId, get_current_user
 from app.db.base import utcnow
-from app.db.models import Camara, Lectura, Lote, Usuario
+from app.db.models import Camara, Lectura, Lote
 from app.db.session import get_db
 from app.erp import reglas
 from app.routers.camaras import camara_del_restaurante
@@ -29,7 +29,6 @@ router = APIRouter(
 )
 
 Db = Annotated[Session, Depends(get_db)]
-DuenoOjefe = Annotated[Usuario | None, Depends(require_rol("dueno", "jefe_cocina"))]
 
 MENSAJE_LOTE_EN_MERMA_ELIMINAR = (
     "El lote ya está en merma; no se puede eliminar del historial."

@@ -62,7 +62,8 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(camaras_router)
-    app.include_router(demo_router)
+    if settings.demo_habilitada:
+        app.include_router(demo_router)
     app.include_router(lotes_router)
     app.include_router(operacion_router)
     app.include_router(simulador_router)

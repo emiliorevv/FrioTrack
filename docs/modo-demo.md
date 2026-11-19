@@ -33,11 +33,13 @@ Reglas para que no se rompa nada:
 
 Los endpoints de simulación viven en `/api/demo/*` y solo existen para el restaurante demo (id 1). El interruptor es **`DEMO_HABILITADA`**:
 
-- En la demo actual, `render.yaml` la define con `value: "1"`.
+- En Render, define `DEMO_HABILITADA=1` en el panel para la demo actual y `0` en producción real. `render.yaml` usa `sync: false`, así que el blueprint no pisa lo que pongas en el panel.
 - En local, `.env` puede llevar `DEMO_HABILITADA=1`; `.env.example` la deja en `0`.
-- En producción real se pone `0` o se elimina: los cuatro endpoints responden **404** y no queda ninguna puerta de simulación abierta.
+- Con el flag en `0`, el router ni siquiera se registra: los cuatro endpoints responden **404** sin pedir autenticación y no queda ninguna puerta de simulación abierta.
 
-La cuenta demo `dueno` (rol `dueno`) y el usuario `jefe` (rol `jefe_cocina`) ven el panel y pueden lanzar las simulaciones; `gerente` recibe **403**. Con el login activo (`AUTH_REQUERIDA=1`) hace falta el JWT; el backend resuelve el sensor de cada cámara y **nunca manda tokens de sensor al dashboard**.
+La cuenta demo `dueno` (rol `dueno`) y el usuario `jefe` (rol `jefe_cocina`) ven el panel y pueden lanzar las simulaciones; `gerente` recibe **403**. Con el login activo (`AUTH_REQUERIDA=1`) hace falta el JWT. El claim `es_demo` del token permite al frontend mostrar el panel sin hardcodear el id del restaurante. El backend resuelve el sensor de cada cámara y **nunca manda tokens de sensor al dashboard**. Solo se pueden simular cámaras del seed (`es_demo=true`); una cámara creada por API queda fuera de la demo y responde **409**.
+
+El seed garantiza la cuenta `dueno` también en bases que ya tenían cámaras: `python -m app.db.init_db` agrega los usuarios demo que falten sin tocar los existentes.
 
 ## Los botones (endpoints)
 
@@ -45,12 +47,12 @@ El dashboard llama a estos endpoints; todos responden `202` (o `201` en el ataqu
 
 | Botón | Endpoint | Qué hace | Qué se ve |
 |---|---|---|---|
-| **Falla de compresor** | `POST /api/demo/falla` | 12 lecturas cada ~1.8 s con la temperatura subiendo 0.4 °C desde 1.0 (y refuerzo si hace falta) | La tarjeta pasa a amarilla, luego roja; notificación simulada, lotes en riesgo y alerta para atender |
-| **Puerta abierta** | `POST /api/demo/puerta` | ~8 lecturas con la puerta abierta en el congelador (-19.5 °C) | Alerta de puerta a los ~10 s |
+| **Falla de compresor** | `POST /api/demo/falla` | Lecturas cada ~1.8 s relativas al rango de la cámara (la segunda ya cruza el máximo), hasta que abre la alerta o se agota el máximo de 60 s (o el umbral de la cámara + 20 s) | La tarjeta pasa a amarilla, luego roja; notificación simulada, lotes en riesgo y alerta para atender |
+| **Puerta abierta** | `POST /api/demo/puerta` | ~8 lecturas con la puerta abierta a la temperatura normal de esa cámara (punto medio de su rango) | Alerta de puerta a los ~10 s, sin disparar la de temperatura |
 | **Ataque SIEM** | `POST /api/demo/ataque` | Inserta un hallazgo de fuerza bruta simulado (IP de documentación) | La alerta aparece en el panel de seguridad; **no** bloquea ninguna IP real |
-| **Recuperar** | `POST /api/demo/recuperar` | Lectura normal en cada cámara demo | Las alertas se cierran y las cámaras vuelven a verde |
+| **Recuperar** | `POST /api/demo/recuperar` | Cancela falla/puerta en curso, espera a que terminen y manda una lectura normal a cada cámara demo | Las alertas se cierran, las cámaras vuelven a verde y no siguen subiendo |
 
-`falla` usa la cámara 1 por defecto y `puerta` la 5; ambos aceptan `{ "camara_id": N }`. Si ya hay una simulación del mismo tipo en curso, el endpoint responde **409**; el registro se libera solo al terminar. Una cámara sin sensor activo responde **409**, y una cámara de otro restaurante **404**.
+`falla` usa la cámara 1 por defecto y `puerta` la 5; ambos aceptan `{ "camara_id": N }`, pero solo de cámaras del seed. Si ya hay una simulación del mismo tipo en curso, el endpoint responde **409**; el registro se libera al terminar y expira a los 120 s si la tarea nunca llegó a ejecutarse. Una cámara sin sensor activo o creada por API responde **409**, y una cámara de otro restaurante **404**.
 
 ## Cómo conviven los botones y el cron
 

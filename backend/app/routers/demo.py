@@ -1,8 +1,9 @@
 """Endpoints de simulación para la demo: falla, puerta, ataque y recuperación.
 
-Solo existen en el tenant demo y con `DEMO_HABILITADA=1`; el resto del mundo
-recibe 404 aunque conozca las rutas. Nunca se exponen tokens de sensor: las
-lecturas simuladas usan directamente `procesar_lectura`, como el tick del cron.
+Solo existen en el tenant demo y se registran únicamente con
+`DEMO_HABILITADA=1`; el resto del mundo recibe 404 aunque conozca las rutas.
+Nunca se exponen tokens de sensor: las lecturas simuladas usan directamente
+`procesar_lectura`, como el tick del cron.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -18,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.core.auth import RestauranteId, get_current_user
+from app.core.auth import DuenoOjefe, RestauranteId
 from app.db.base import utcnow
 from app.db.models import (
     RESTAURANTE_DEMO_ID,
@@ -29,54 +31,69 @@ from app.db.models import (
     Usuario,
 )
 from app.db.session import SessionLocal, get_db, get_engine
+from app.erp import reglas
 from app.erp.procesador import TIPO_ALERTA_TEMPERATURA
 from app.routers.camaras import camara_del_restaurante
 from app.schemas.demo import CamaraDemoEntrada, SimulacionOut
 from app.schemas.operacion import AlertaSeguridadSalida, alerta_seguridad_salida
 from app.schemas.telemetria import TelemetriaIn
 from app.services.telemetria import procesar_lectura
+from app.services.tick import ids_camaras_demo
 
 logger = logging.getLogger(__name__)
 
-ROLES_DEMO = frozenset({"dueno", "jefe_cocina"})
 MENSAJE_NO_DISPONIBLE = "Demo no disponible."
-MENSAJE_ROL = "Permisos insuficientes: se requiere rol dueno o jefe_cocina."
 
-# Falla de compresor: 12 lecturas base y hasta 4 de refuerzo. Con la escala 30,
-# el umbral de riesgo son 20 s reales; las primeras lecturas aún están en rango,
-# así que el refuerzo garantiza que la alerta abra dentro de la misma tarea.
-LECTURAS_FALLA = 12
-LECTURAS_REFUERZO_FALLA = 4
+# Falla: las lecturas se calculan con el rango de la cámara. Se envían hasta que
+# la alerta de temperatura abra o se agote el tiempo máximo (con margen sobre el
+# umbral real de la cámara, que depende de ESCALA_TIEMPO).
 INTERVALO_FALLA_S = 1.8
-TEMPERATURA_INICIAL_FALLA = 1.0
-PASO_FALLA_C = 0.4
+MAX_DURACION_FALLA_S = 60.0
+MARGEN_FALLA_S = 20.0
 
-# Puerta abierta en el congelador: umbral de 5 min / 30 = 10 s reales.
+# Puerta: 8 lecturas con la puerta abierta; el umbral son 5 min / escala.
 LECTURAS_PUERTA = 8
 INTERVALO_PUERTA_S = 1.5
-TEMPERATURA_CONGELADOR_C = -19.5
 
 HUMEDAD_DEMO_PCT = 80.0
+EXPIRACION_SIMULACION_S = 120.0
+ESPERA_CANCELACION_S = 10.0
 
 # Valores de la regla Sigma real `security/siem/fuerza-bruta-tokens.yml`.
 REGLA_FUERZA_BRUTA_ID = "3b8e2f6a-9c41-4d7e-8a15-2f6c0d9e7b41"
 REGLA_FUERZA_BRUTA = "Fuerza bruta de credenciales en la API"
 IP_ATAQUE = "203.0.113.66"
 
-# Una simulación activa por tipo; se libera en el `finally` de la tarea.
-_activas: set[str] = set()
+
+@dataclass
+class _Simulacion:
+    """Slot de una simulación activa, con cancelación y expiración."""
+
+    cancelar: threading.Event
+    terminada: threading.Event
+    iniciada_en: float
+
+
+# Una simulación activa por tipo. El timestamp permite liberar slots vencidos
+# aunque Starlette no llegue a ejecutar la tarea en segundo plano.
+_activas: dict[str, _Simulacion] = {}
 _cerrojo = threading.Lock()
 
 
 def _demo_autorizado(
-    usuario: Annotated[Usuario | None, Depends(get_current_user)],
+    usuario: DuenoOjefe,
     restaurante_id: RestauranteId,
 ) -> Usuario | None:
-    """Gate de la demo: 404 fuera del tenant demo, 403 para roles sin permiso."""
-    if not get_settings().demo_habilitada or restaurante_id != RESTAURANTE_DEMO_ID:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=MENSAJE_NO_DISPONIBLE)
-    if usuario is not None and usuario.rol not in ROLES_DEMO:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=MENSAJE_ROL)
+    """Solo el tenant demo; los roles los exige `DuenoOjefe`.
+
+    Con `DEMO_HABILITADA=0` el router ni siquiera se registra en `create_app`,
+    así que la ruta responde 404 sin pasar por autenticación.
+    """
+    if restaurante_id != RESTAURANTE_DEMO_ID:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=MENSAJE_NO_DISPONIBLE,
+        )
     return usuario
 
 
@@ -85,28 +102,54 @@ router = APIRouter(prefix="/api/demo", tags=["demo"], dependencies=[Depends(_dem
 Db = Annotated[Session, Depends(get_db)]
 
 
-def _reservar(tipo: str) -> None:
-    """Reserva una simulación; si ya hay una del mismo tipo, responde 409."""
+def _reservar(tipo: str) -> _Simulacion:
+    """Reserva una simulación; purga slots vencidos y responde 409 si sigue activa."""
+    ahora = time.monotonic()
     with _cerrojo:
+        vencidas = [
+            nombre
+            for nombre, simulacion in _activas.items()
+            if ahora - simulacion.iniciada_en > EXPIRACION_SIMULACION_S
+        ]
+        for nombre in vencidas:
+            simulacion = _activas.pop(nombre)
+            simulacion.cancelar.set()
+            simulacion.terminada.set()
+
         if tipo in _activas:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Ya hay una simulación de {tipo} en curso.",
             )
-        _activas.add(tipo)
+
+        simulacion = _Simulacion(
+            cancelar=threading.Event(),
+            terminada=threading.Event(),
+            iniciada_en=ahora,
+        )
+        _activas[tipo] = simulacion
+        return simulacion
 
 
-def _liberar(tipo: str) -> None:
+def _liberar(tipo: str, simulacion: _Simulacion) -> None:
+    """Suelta el slot solo si sigue siendo el mismo (no pisa una simulación nueva)."""
     with _cerrojo:
-        _activas.discard(tipo)
+        if _activas.get(tipo) is simulacion:
+            _activas.pop(tipo, None)
+    simulacion.terminada.set()
 
 
-def _ejecutar(tipo: str, tarea: Callable[..., None], *args: object) -> None:
+def _ejecutar(
+    tipo: str,
+    simulacion: _Simulacion,
+    tarea: Callable[..., None],
+    *args: object,
+) -> None:
     """Corre la tarea en background y libera el registro pase lo que pase."""
     try:
         tarea(*args)
     finally:
-        _liberar(tipo)
+        _liberar(tipo, simulacion)
 
 
 def _camara_entrada(datos: CamaraDemoEntrada | None, por_defecto: int) -> int:
@@ -125,8 +168,13 @@ def _sensor_activo(db: Session, camara_id: int) -> Sensor | None:
 
 
 def _camara_y_sensor(db: Session, camara_id: int) -> tuple[Camara, Sensor]:
-    """Valida cámara del tenant demo y sensor activo; 404/409 si no."""
+    """Valida cámara del tenant demo, marcada `es_demo`, y su sensor activo."""
     camara = camara_del_restaurante(db, camara_id, RESTAURANTE_DEMO_ID)
+    if not camara.es_demo:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La cámara no es de la demo; usa una cámara del seed.",
+        )
     sensor = _sensor_activo(db, camara.id)
     if sensor is None:
         raise HTTPException(
@@ -134,6 +182,25 @@ def _camara_y_sensor(db: Session, camara_id: int) -> tuple[Camara, Sensor]:
             detail="La cámara no tiene un sensor activo; crea uno antes de simular.",
         )
     return camara, sensor
+
+
+def _rango(camara: Camara) -> tuple[float, float]:
+    return float(camara.rango_min_c), float(camara.rango_max_c)
+
+
+def _base_y_paso_falla(camara: Camara) -> tuple[float, float]:
+    """Serie relativa al rango: la segunda lectura ya cruza el máximo."""
+    rango_min, rango_max = _rango(camara)
+    ancho = rango_max - rango_min
+    base = rango_max - min(0.2, ancho * 0.1)
+    paso = max(0.4, ancho * 0.2)
+    return base, paso
+
+
+def _temperatura_centro(camara: Camara) -> float:
+    """Punto medio del rango; para la puerta y la recuperación."""
+    rango_min, rango_max = _rango(camara)
+    return (rango_min + rango_max) / 2
 
 
 def _enviar_lectura(
@@ -173,17 +240,30 @@ def _enviar_lectura(
         return estado, alerta is not None
 
 
-def _simular_falla(camara_id: int, sensor_id: str) -> None:
-    """Sube la temperatura 0.4 °C por lectura hasta que la alerta abra.
+def _simular_falla(
+    camara_id: int,
+    sensor_id: str,
+    base: float,
+    paso: float,
+    min_para_riesgo: int,
+    cancelar: threading.Event,
+) -> None:
+    """Sube la temperatura hasta que abra la alerta o se agote el tiempo máximo.
 
-    Las 12 lecturas base empiezan en 1.0 °C; las primeras aún están en rango y
-    el umbral de riesgo se mide desde la primera lectura fuera de rango. Si aun
-    así no se abrió la alerta, se mandan hasta 4 lecturas de refuerzo para que
-    la demo termine mostrándola.
+    El máximo cubre al menos 60 s y deja 20 s de margen sobre el umbral real de
+    la cámara (`min_para_riesgo` escalado); si la alerta no abre en ese plazo,
+    la simulación termina sin colgar el slot.
     """
-    total = LECTURAS_FALLA + LECTURAS_REFUERZO_FALLA
-    for indice in range(total):
-        temperatura = TEMPERATURA_INICIAL_FALLA + indice * PASO_FALLA_C
+    escala = get_settings().escala_tiempo
+    umbral = reglas.segundos_efectivos(min_para_riesgo, escala)
+    limite = max(MAX_DURACION_FALLA_S, umbral + MARGEN_FALLA_S)
+    inicio = time.monotonic()
+    indice = 0
+
+    while time.monotonic() - inicio < limite:
+        if cancelar.is_set():
+            return
+        temperatura = base + paso * indice
         try:
             estado, alerta_abierta = _enviar_lectura(
                 camara_id,
@@ -193,55 +273,92 @@ def _simular_falla(camara_id: int, sensor_id: str) -> None:
             )
         except Exception:
             logger.exception(
-                "La simulación de falla no pudo enviar la lectura %s", indice
+                "La simulación de falla no pudo enviar la lectura %s; reintenta",
+                indice,
             )
-            estado, alerta_abierta = None, False
+            if cancelar.wait(0.2):
+                return
+            try:
+                estado, alerta_abierta = _enviar_lectura(
+                    camara_id,
+                    sensor_id,
+                    temperatura,
+                    False,
+                )
+            except Exception:
+                logger.exception(
+                    "La simulación de falla sigue fallando en la lectura %s",
+                    indice,
+                )
+                indice += 1
+                if cancelar.wait(INTERVALO_FALLA_S):
+                    return
+                continue
+
         if estado is None:
             return
-        if indice >= LECTURAS_FALLA - 1 and alerta_abierta:
-            break
-        if indice < total - 1:
-            time.sleep(INTERVALO_FALLA_S)
+        if alerta_abierta:
+            return
+        indice += 1
+        if cancelar.wait(INTERVALO_FALLA_S):
+            return
 
 
-def _simular_puerta(camara_id: int, sensor_id: str) -> None:
-    """Mantiene la puerta abierta con la temperatura normal del congelador."""
+def _simular_puerta(
+    camara_id: int,
+    sensor_id: str,
+    temperatura: float,
+    cancelar: threading.Event,
+) -> None:
+    """Mantiene la puerta abierta con la temperatura normal de la cámara."""
     for indice in range(LECTURAS_PUERTA):
+        if cancelar.is_set():
+            return
         try:
-            _enviar_lectura(
-                camara_id,
-                sensor_id,
-                TEMPERATURA_CONGELADOR_C,
-                True,
-            )
+            _enviar_lectura(camara_id, sensor_id, temperatura, True)
         except Exception:
             logger.exception(
                 "La simulación de puerta no pudo enviar la lectura %s", indice
             )
-        if indice < LECTURAS_PUERTA - 1:
-            time.sleep(INTERVALO_PUERTA_S)
+        if indice < LECTURAS_PUERTA - 1 and cancelar.wait(INTERVALO_PUERTA_S):
+            return
+
+
+def _cancelar_simulaciones() -> None:
+    """Pide a falla/puerta que terminen y espera (con timeout) a que lo hagan."""
+    with _cerrojo:
+        activas = [
+            simulacion
+            for tipo in ("falla", "puerta")
+            if (simulacion := _activas.get(tipo)) is not None
+        ]
+        for simulacion in activas:
+            simulacion.cancelar.set()
+    for simulacion in activas:
+        simulacion.terminada.wait(timeout=ESPERA_CANCELACION_S)
 
 
 def _simular_recuperacion() -> None:
-    """Manda una lectura normal a cada cámara demo para cerrar alertas."""
+    """Cancela falla/puerta y manda una lectura normal a cada cámara demo."""
+    _cancelar_simulaciones()
+
     objetivos: list[tuple[int, str, float]] = []
     with SessionLocal(bind=get_engine()) as session:
-        camaras = list(
-            session.scalars(
-                select(Camara)
-                .where(
-                    Camara.restaurante_id == RESTAURANTE_DEMO_ID,
-                    Camara.es_demo.is_(True),
+        ids = ids_camaras_demo(session)
+        camaras = (
+            list(
+                session.scalars(
+                    select(Camara).where(Camara.id.in_(ids)).order_by(Camara.id)
                 )
-                .order_by(Camara.id)
             )
+            if ids
+            else []
         )
         for camara in camaras:
             sensor = _sensor_activo(session, camara.id)
             if sensor is None:
                 continue
-            centro = (float(camara.rango_min_c) + float(camara.rango_max_c)) / 2
-            objetivos.append((camara.id, sensor.id, centro))
+            objetivos.append((camara.id, sensor.id, _temperatura_centro(camara)))
 
     # Cada lectura abre su propia sesión y toma el lock de la cámara; hacerlo
     # dentro de la sesión anterior volvería a pedir el mismo lock.
@@ -261,10 +378,22 @@ def simular_falla(
     db: Db,
     datos: CamaraDemoEntrada | None = None,
 ) -> SimulacionOut:
-    """Programa una falla de compresor en la cámara indicada (default 1)."""
+    """Programa una falla de compresor en una cámara demo (default 1)."""
     camara, sensor = _camara_y_sensor(db, _camara_entrada(datos, 1))
-    _reservar("falla")
-    tareas.add_task(_ejecutar, "falla", _simular_falla, camara.id, sensor.id)
+    base, paso = _base_y_paso_falla(camara)
+    simulacion = _reservar("falla")
+    tareas.add_task(
+        _ejecutar,
+        "falla",
+        simulacion,
+        _simular_falla,
+        camara.id,
+        sensor.id,
+        base,
+        paso,
+        camara.min_para_riesgo,
+        simulacion.cancelar,
+    )
     return SimulacionOut(
         mensaje="Falla de compresor en curso.",
         camara_id=camara.id,
@@ -277,10 +406,19 @@ def simular_puerta(
     db: Db,
     datos: CamaraDemoEntrada | None = None,
 ) -> SimulacionOut:
-    """Programa una puerta abierta en la cámara indicada (default 5)."""
+    """Programa una puerta abierta en una cámara demo (default 5)."""
     camara, sensor = _camara_y_sensor(db, _camara_entrada(datos, 5))
-    _reservar("puerta")
-    tareas.add_task(_ejecutar, "puerta", _simular_puerta, camara.id, sensor.id)
+    simulacion = _reservar("puerta")
+    tareas.add_task(
+        _ejecutar,
+        "puerta",
+        simulacion,
+        _simular_puerta,
+        camara.id,
+        sensor.id,
+        _temperatura_centro(camara),
+        simulacion.cancelar,
+    )
     return SimulacionOut(
         mensaje="Puerta abierta en curso.",
         camara_id=camara.id,
@@ -312,7 +450,7 @@ def simular_ataque(db: Db) -> AlertaSeguridadSalida:
 
 @router.post("/recuperar", response_model=SimulacionOut, status_code=status.HTTP_202_ACCEPTED)
 def recuperar_demo(tareas: BackgroundTasks) -> SimulacionOut:
-    """Manda lecturas normales a las cámaras demo para cerrar alertas."""
-    _reservar("recuperar")
-    tareas.add_task(_ejecutar, "recuperar", _simular_recuperacion)
+    """Cancela falla/puerta y manda lecturas normales a las cámaras demo."""
+    simulacion = _reservar("recuperar")
+    tareas.add_task(_ejecutar, "recuperar", simulacion, _simular_recuperacion)
     return SimulacionOut(mensaje="Recuperación en curso.")

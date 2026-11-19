@@ -45,10 +45,10 @@ services:
       # sync: false para que el blueprint no pise el valor del panel.
       - key: AUTH_REQUERIDA
         sync: false
-      # Habilita /api/demo/* (falla, puerta, ataque, recuperar) para el tenant
-      # demo. Es la demo actual; en producción real pon "0" o elimina la variable.
+      # En Render define DEMO_HABILITADA=1 para la demo actual y 0 en producción
+      # real. sync: false para que el blueprint no pise el valor del panel.
       - key: DEMO_HABILITADA
-        value: "1"
+        sync: false
 
       # Supabase → Project Settings → Database → Session Pooler.
       # Formato: postgresql+psycopg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require

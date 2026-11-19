@@ -42,6 +42,13 @@ SENSORES = {
     5: "S-CON-01",
 }
 
+# Usuarios del tenant demo; se garantizan también en bases ya sembradas.
+USUARIOS_DEMO: tuple[tuple[str, str], ...] = (
+    ("jefe", "jefe_cocina"),
+    ("gerente", "gerente"),
+    ("dueno", "dueno"),
+)
+
 # (producto, camara_id, cantidad, unidad, costo_total_mxn, días de caducidad)
 LOTES: list[tuple[str, int, Decimal, str, Decimal, int]] = [
     ("Robalo fresco", 1, Decimal("12.00"), "kg", Decimal("3240.00"), 2),
@@ -156,25 +163,53 @@ def construir_seed(
     usuarios = [
         Usuario(
             restaurante_id=RESTAURANTE_DEMO_ID,
-            usuario="jefe",
+            usuario=nombre,
             password_hash=password_hash,
-            rol="jefe_cocina",
-        ),
-        Usuario(
-            restaurante_id=RESTAURANTE_DEMO_ID,
-            usuario="gerente",
-            password_hash=password_hash,
-            rol="gerente",
-        ),
-        Usuario(
-            restaurante_id=RESTAURANTE_DEMO_ID,
-            usuario="dueno",
-            password_hash=password_hash,
-            rol="dueno",
-        ),
+            rol=rol,
+        )
+        for nombre, rol in USUARIOS_DEMO
     ]
 
     return camaras, sensores, lotes, usuarios
+
+
+def asegurar_usuarios_demo(
+    session: Session,
+    password: str | None = None,
+) -> bool:
+    """Crea los usuarios demo que falten aunque la base ya tenga cámaras.
+
+    Es idempotente y no resetea contraseñas existentes: solo agrega los
+    nombres ausentes. Regresa True si insertó alguno.
+    """
+    password = password if password is not None else get_settings().seed_password
+    if not password:
+        raise RuntimeError(
+            "Falta SEED_PASSWORD: define la contraseña de los usuarios demo."
+        )
+
+    nombres = [nombre for nombre, _rol in USUARIOS_DEMO]
+    existentes = set(
+        session.scalars(select(Usuario.usuario).where(Usuario.usuario.in_(nombres)))
+    )
+    faltantes = [
+        (nombre, rol) for nombre, rol in USUARIOS_DEMO if nombre not in existentes
+    ]
+    if not faltantes:
+        return False
+
+    password_hash = hash_password(password)
+    for nombre, rol in faltantes:
+        session.add(
+            Usuario(
+                restaurante_id=RESTAURANTE_DEMO_ID,
+                usuario=nombre,
+                password_hash=password_hash,
+                rol=rol,
+            )
+        )
+    session.commit()
+    return True
 
 
 def cargar_seed(
@@ -193,6 +228,9 @@ def cargar_seed(
         .where(Camara.restaurante_id == RESTAURANTE_DEMO_ID)
         .limit(1)
     ) is not None:
+        # La base ya estaba sembrada: al menos garantiza las cuentas demo
+        # (por ejemplo, `dueno` en una base anterior a este cambio).
+        asegurar_usuarios_demo(session, password)
         return False
 
     camaras, sensores, lotes, usuarios = construir_seed(sensor_tokens, password)

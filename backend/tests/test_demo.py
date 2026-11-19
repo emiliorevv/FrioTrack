@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -75,15 +78,21 @@ class SesionFalsa:
         self.commits += 1
 
 
-def _camara(camara_id: int) -> Camara:
+def _camara(
+    camara_id: int,
+    rango_min_c: float = 0.0,
+    rango_max_c: float = 4.0,
+    es_demo: bool = True,
+    min_para_riesgo: int = 10,
+) -> Camara:
     return Camara(
         id=camara_id,
         restaurante_id=RESTAURANTE_DEMO_ID,
-        es_demo=True,
+        es_demo=es_demo,
         nombre=f"Cámara {camara_id}",
-        rango_min_c=0,
-        rango_max_c=4,
-        min_para_riesgo=10,
+        rango_min_c=rango_min_c,
+        rango_max_c=rango_max_c,
+        min_para_riesgo=min_para_riesgo,
         min_para_merma=60,
         estado="en_rango",
     )
@@ -120,6 +129,14 @@ def _cliente_con_auth(
     return TestClient(app), {"Authorization": f"Bearer {crear_token(usuario)}"}
 
 
+def _limpiar_activas() -> None:
+    with demo_mod._cerrojo:
+        for simulacion in demo_mod._activas.values():
+            simulacion.cancelar.set()
+            simulacion.terminada.set()
+        demo_mod._activas.clear()
+
+
 @pytest.fixture(autouse=True)
 def _entorno_demo(monkeypatch):
     """Demo encendida y registro de simulaciones limpio en cada prueba."""
@@ -127,20 +144,25 @@ def _entorno_demo(monkeypatch):
     monkeypatch.setenv("ENTORNO", "local")
     monkeypatch.delenv("RENDER", raising=False)
     limpiar_cache_settings()
-    with demo_mod._cerrojo:
-        demo_mod._activas.clear()
+    _limpiar_activas()
     yield
-    with demo_mod._cerrojo:
-        demo_mod._activas.clear()
+    _limpiar_activas()
     limpiar_cache_settings()
 
 
 def _sesion_basica() -> SesionFalsa:
     return SesionFalsa(
-        camaras=[_camara(1), _camara(5)],
+        camaras=[
+            _camara(1, rango_min_c=0.0, rango_max_c=2.0),
+            _camara(4, rango_min_c=4.0, rango_max_c=8.0),
+            _camara(5, rango_min_c=-22.0, rango_max_c=-18.0),
+            _camara(6, es_demo=False),
+        ],
         sensores=[
             _sensor("S-PES-01", 1),
+            _sensor("S-VER-01", 4),
             _sensor("S-CON-01", 5),
+            _sensor("S-API-06", 6),
         ],
     )
 
@@ -148,15 +170,16 @@ def _sesion_basica() -> SesionFalsa:
 # --- Gate y roles -----------------------------------------------------------
 
 
-def test_demo_apagada_regresa_404(monkeypatch):
+def test_demo_apagada_regresa_404_sin_registrar_la_ruta(monkeypatch):
+    """Con el flag apagado la ruta no existe: 404 aunque no haya token."""
     monkeypatch.setenv("DEMO_HABILITADA", "0")
+    monkeypatch.setenv("AUTH_REQUERIDA", "1")
     limpiar_cache_settings()
 
     with _cliente(_sesion_basica()) as cliente:
         respuesta = cliente.post("/api/demo/ataque")
 
     assert respuesta.status_code == 404
-    assert respuesta.json()["detail"] == "Demo no disponible."
 
 
 def test_otro_tenant_regresa_404():
@@ -219,13 +242,9 @@ def test_usuario_de_otro_tenant_regresa_404(monkeypatch):
 # --- Falla, puerta y recuperación ------------------------------------------
 
 
-def test_falla_programa_la_tarea_y_responde_202(monkeypatch):
-    llamadas: list[tuple[int, str]] = []
-    monkeypatch.setattr(
-        demo_mod,
-        "_simular_falla",
-        lambda camara_id, sensor_id: llamadas.append((camara_id, sensor_id)),
-    )
+def test_falla_programa_la_tarea_con_temperaturas_del_rango(monkeypatch):
+    llamadas: list[tuple] = []
+    monkeypatch.setattr(demo_mod, "_simular_falla", lambda *args: llamadas.append(args))
 
     with _cliente(_sesion_basica()) as cliente:
         respuesta = cliente.post("/api/demo/falla", json={"camara_id": 1})
@@ -235,40 +254,89 @@ def test_falla_programa_la_tarea_y_responde_202(monkeypatch):
         "mensaje": "Falla de compresor en curso.",
         "camara_id": 1,
     }
-    assert llamadas == [(1, "S-PES-01")]
+    camara_id, sensor_id, base, paso, min_para_riesgo, cancelar = llamadas[0]
+    assert (camara_id, sensor_id, min_para_riesgo) == (1, "S-PES-01", 10)
+    assert base == pytest.approx(1.8)
+    assert paso == pytest.approx(0.4)
+    assert isinstance(cancelar, threading.Event)
     assert "falla" not in demo_mod._activas
 
 
 def test_falla_usa_la_camara_1_por_defecto(monkeypatch):
-    llamadas: list[tuple[int, str]] = []
-    monkeypatch.setattr(
-        demo_mod,
-        "_simular_falla",
-        lambda camara_id, sensor_id: llamadas.append((camara_id, sensor_id)),
-    )
+    llamadas: list[tuple] = []
+    monkeypatch.setattr(demo_mod, "_simular_falla", lambda *args: llamadas.append(args))
 
     with _cliente(_sesion_basica()) as cliente:
         respuesta = cliente.post("/api/demo/falla")
 
     assert respuesta.status_code == 202
     assert respuesta.json()["camara_id"] == 1
-    assert llamadas == [(1, "S-PES-01")]
+    assert llamadas[0][0:2] == (1, "S-PES-01")
 
 
-def test_puerta_usa_la_camara_5_por_defecto(monkeypatch):
-    llamadas: list[tuple[int, str]] = []
-    monkeypatch.setattr(
-        demo_mod,
-        "_simular_puerta",
-        lambda camara_id, sensor_id: llamadas.append((camara_id, sensor_id)),
-    )
+@pytest.mark.parametrize(
+    ("camara_id", "base", "paso", "rango_max", "min_para_riesgo", "sensor_id"),
+    [
+        (4, 7.8, 0.8, 8.0, 30, "S-VER-01"),
+        (5, -18.2, 0.8, -18.0, 20, "S-CON-01"),
+    ],
+    ids=["camara-4", "camara-5"],
+)
+def test_falla_calcula_temperaturas_para_camaras_4_y_5(
+    monkeypatch, camara_id, base, paso, rango_max, min_para_riesgo, sensor_id
+):
+    if camara_id == 4:
+        sesion = SesionFalsa(
+            camaras=[_camara(4, rango_min_c=4.0, rango_max_c=8.0, min_para_riesgo=30)],
+            sensores=[_sensor("S-VER-01", 4)],
+        )
+    else:
+        sesion = SesionFalsa(
+            camaras=[
+                _camara(5, rango_min_c=-22.0, rango_max_c=-18.0, min_para_riesgo=20)
+            ],
+            sensores=[_sensor("S-CON-01", 5)],
+        )
+    llamadas: list[tuple] = []
+    monkeypatch.setattr(demo_mod, "_simular_falla", lambda *args: llamadas.append(args))
+
+    with _cliente(sesion) as cliente:
+        respuesta = cliente.post("/api/demo/falla", json={"camara_id": camara_id})
+
+    assert respuesta.status_code == 202
+    _, sensor, base_real, paso_real, riesgo_real, _ = llamadas[0]
+    assert sensor == sensor_id
+    assert base_real == pytest.approx(base)
+    assert paso_real == pytest.approx(paso)
+    assert riesgo_real == min_para_riesgo
+    # La segunda lectura cruza el máximo del rango.
+    assert base_real < rango_max < base_real + paso_real
+
+
+def test_puerta_usa_la_camara_5_por_defecto_con_el_centro_del_rango(monkeypatch):
+    llamadas: list[tuple] = []
+    monkeypatch.setattr(demo_mod, "_simular_puerta", lambda *args: llamadas.append(args))
 
     with _cliente(_sesion_basica()) as cliente:
         respuesta = cliente.post("/api/demo/puerta")
 
     assert respuesta.status_code == 202
     assert respuesta.json()["camara_id"] == 5
-    assert llamadas == [(5, "S-CON-01")]
+    camara_id, sensor_id, temperatura, cancelar = llamadas[0]
+    assert (camara_id, sensor_id) == (5, "S-CON-01")
+    assert temperatura == pytest.approx(-20.0)
+    assert isinstance(cancelar, threading.Event)
+
+
+def test_puerta_en_camara_1_no_usa_la_temperatura_del_congelador(monkeypatch):
+    llamadas: list[tuple] = []
+    monkeypatch.setattr(demo_mod, "_simular_puerta", lambda *args: llamadas.append(args))
+
+    with _cliente(_sesion_basica()) as cliente:
+        respuesta = cliente.post("/api/demo/puerta", json={"camara_id": 1})
+
+    assert respuesta.status_code == 202
+    assert llamadas[0][2] == pytest.approx(1.0)
 
 
 def test_recuperar_programa_la_tarea_y_responde_202(monkeypatch):
@@ -288,6 +356,14 @@ def test_falla_con_camara_inexistente_regresa_404():
         respuesta = cliente.post("/api/demo/falla", json={"camara_id": 99})
 
     assert respuesta.status_code == 404
+
+
+def test_falla_con_camara_creada_por_api_regresa_409():
+    with _cliente(_sesion_basica()) as cliente:
+        respuesta = cliente.post("/api/demo/falla", json={"camara_id": 6})
+
+    assert respuesta.status_code == 409
+    assert "no es de la demo" in respuesta.json()["detail"]
 
 
 def test_falla_sin_sensor_regresa_409():
@@ -328,6 +404,62 @@ def test_la_reserva_se_libera_al_terminar(monkeypatch):
     assert primera.status_code == 202
     assert segunda.status_code == 202
     assert "falla" not in demo_mod._activas
+
+
+def test_el_slot_vencido_se_libera():
+    simulacion = demo_mod._reservar("falla")
+    with demo_mod._cerrojo:
+        simulacion.iniciada_en = time.monotonic() - demo_mod.EXPIRACION_SIMULACION_S - 1
+
+    nueva = demo_mod._reservar("falla")
+
+    assert nueva is not simulacion
+    assert simulacion.cancelar.is_set()
+    assert simulacion.terminada.is_set()
+
+
+def test_la_falla_se_detiene_al_cancelar(monkeypatch):
+    class EventoFalso:
+        def __init__(self) -> None:
+            self.activo = False
+
+        def is_set(self) -> bool:
+            return self.activo
+
+        def set(self) -> None:
+            self.activo = True
+
+        def wait(self, timeout: float | None = None) -> bool:
+            return self.activo
+
+    cancelar = EventoFalso()
+    enviadas: list[float] = []
+
+    def enviar(_camara_id, _sensor_id, temperatura, _puerta):
+        enviadas.append(temperatura)
+        cancelar.set()
+        return "alerta", False
+
+    monkeypatch.setattr(demo_mod, "_enviar_lectura", enviar)
+    demo_mod._simular_falla(1, "S-PES-01", 1.8, 0.4, 10, cancelar)  # type: ignore[arg-type]
+
+    assert enviadas == [1.8]
+
+
+def test_recuperar_espera_a_que_la_simulacion_cancele():
+    simulacion = demo_mod._reservar("falla")
+
+    def tarea() -> None:
+        simulacion.cancelar.wait(timeout=1)
+        simulacion.terminada.set()
+
+    hilo = threading.Thread(target=tarea)
+    hilo.start()
+    demo_mod._cancelar_simulaciones()
+    hilo.join(timeout=1)
+
+    assert simulacion.cancelar.is_set()
+    assert not hilo.is_alive()
 
 
 # --- Ataque SIEM ------------------------------------------------------------
