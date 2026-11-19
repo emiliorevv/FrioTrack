@@ -100,7 +100,7 @@ def _preparar_tick(
     monkeypatch.setattr(
         tick, "get_settings", lambda: SimpleNamespace(escala_tiempo=escala_tiempo)
     )
-    monkeypatch.setattr(tick, "_ids_de_camaras", lambda _session: sorted(camaras))
+    monkeypatch.setattr(tick, "ids_camaras_demo", lambda _session: sorted(camaras))
 
     consultas: list[tuple[int, datetime, bool]] = []
 
@@ -189,7 +189,7 @@ def test_tick_no_genera_sin_modo_demo(monkeypatch):
         raise AssertionError("Sin modo demo el tick no debe tocar la base.")
 
     monkeypatch.setattr(tick, "get_settings", lambda: SimpleNamespace(escala_tiempo=1))
-    monkeypatch.setattr(tick, "_ids_de_camaras", no_debe_consultar)
+    monkeypatch.setattr(tick, "ids_camaras_demo", no_debe_consultar)
     monkeypatch.setattr(tick, "_hay_lectura_reciente", no_debe_consultar)
     monkeypatch.setattr(tick, "procesar_lectura", no_debe_consultar)
 
@@ -240,7 +240,7 @@ def test_tick_usa_las_ventanas_exactas(monkeypatch):
 
 def test_tick_se_salta_una_camara_inexistente(monkeypatch):
     sesion, llamadas, _, _ = _preparar_tick(monkeypatch, {1: _camara(1)})
-    monkeypatch.setattr(tick, "_ids_de_camaras", lambda _session: [1, 2])
+    monkeypatch.setattr(tick, "ids_camaras_demo", lambda _session: [1, 2])
 
     generadas, saltadas = ejecutar_tick(sesion)
 
@@ -382,7 +382,7 @@ class _SesionDeIds:
 def test_tick_solo_genera_para_las_camaras_demo_del_restaurante_demo():
     sesion = _SesionDeIds()
 
-    assert tick._ids_de_camaras(sesion) == [1, 2]
+    assert tick.ids_camaras_demo(sesion) == [1, 2]
     consulta = sesion.sentencias[0]
     assert consulta.compile().params["restaurante_id_1"] == RESTAURANTE_DEMO_ID
     assert "camaras.restaurante_id" in str(consulta)

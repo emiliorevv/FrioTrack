@@ -233,6 +233,7 @@ def test_login_correcto_entrega_jwt_de_ocho_horas(monkeypatch):
     assert payload["rol"] == "jefe_cocina"
     assert payload["pwd"] == huella_password(usuario.password_hash)
     assert payload["restaurante_id"] == 1
+    assert payload["es_demo"] is True
     assert payload["exp"] - payload["iat"] == 8 * 3600
 
 
@@ -553,6 +554,16 @@ def test_crear_token_usa_el_secreto_y_la_expiracion_configurados(monkeypatch):
     assert payload["rol"] == "jefe_cocina"
     assert payload["pwd"] == huella_password("hash")
     assert payload["exp"] - payload["iat"] == 2 * 3600
+
+
+def test_crear_token_marca_es_demo_solo_para_el_tenant_demo(monkeypatch):
+    _activar_auth(monkeypatch)
+
+    demo = decodificar_token(crear_token(_usuario(restaurante_id=1)))
+    ajeno = decodificar_token(crear_token(_usuario(restaurante_id=2)))
+
+    assert demo["es_demo"] is True
+    assert ajeno["es_demo"] is False
 
 
 @pytest.mark.parametrize(

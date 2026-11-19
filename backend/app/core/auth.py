@@ -59,6 +59,7 @@ def crear_token(usuario: Usuario) -> str:
         "rol": usuario.rol,
         "pwd": huella_password(usuario.password_hash),
         "restaurante_id": usuario.restaurante_id,
+        "es_demo": usuario.restaurante_id == RESTAURANTE_DEMO_ID,
         "iat": ahora,
         "exp": ahora + timedelta(hours=get_settings().jwt_expira_horas),
     }
@@ -224,3 +225,6 @@ def require_rol(*roles: str) -> Callable[..., Usuario | None]:
         return usuario
 
     return dependencia
+
+
+DuenoOjefe = Annotated[Usuario | None, Depends(require_rol("dueno", "jefe_cocina"))]

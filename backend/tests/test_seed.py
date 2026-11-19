@@ -143,13 +143,14 @@ def test_construir_seed_arma_los_quince_lotes():
     assert papas.costo_total_mxn == Decimal("520.00")
 
 
-def test_construir_seed_arma_los_dos_usuarios_con_password_verificable():
+def test_construir_seed_arma_los_tres_usuarios_con_password_verificable():
     _, _, _, usuarios = construir_seed(sensor_tokens=TOKENS, password="demo")
 
     por_nombre = {u.usuario: u for u in usuarios}
-    assert set(por_nombre) == {"jefe", "gerente"}
+    assert set(por_nombre) == {"jefe", "gerente", "dueno"}
     assert por_nombre["jefe"].rol == "jefe_cocina"
     assert por_nombre["gerente"].rol == "gerente"
+    assert por_nombre["dueno"].rol == "dueno"
     assert all(u.password_hash.startswith("pbkdf2_sha256$") for u in usuarios)
     assert all(u.password_hash != "demo" for u in usuarios)
     assert all(u.restaurante_id == RESTAURANTE_DEMO_ID for u in usuarios)
@@ -177,9 +178,11 @@ class FakeSession:
         self,
         hay_camaras_demo: bool = False,
         restaurante: Restaurante | None = None,
+        usuarios: list[Usuario] | None = None,
     ) -> None:
         self.hay_camaras_demo = hay_camaras_demo
         self.restaurante = restaurante
+        self.usuarios = usuarios or []
         self.agregados: list[object] = []
         self.sentencias: list[object] = []
         self.camaras: list[Camara] = []
@@ -190,6 +193,12 @@ class FakeSession:
     def scalar(self, sentencia: object) -> int | None:
         self.sentencias.append(sentencia)
         return 1 if self.hay_camaras_demo else None
+
+    def scalars(self, sentencia: object) -> list[str]:
+        self.sentencias.append(sentencia)
+        if "FROM usuarios" in str(sentencia):
+            return [usuario.usuario for usuario in self.usuarios]
+        return []
 
     def execute(self, sentencia: object) -> None:
         self.sentencias.append(sentencia)
@@ -225,13 +234,13 @@ def test_cargar_seed_inserta_todo_y_hace_commit():
     assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is True
     assert sesion.flushes == 2
     assert sesion.commits == 1
-    assert len(sesion.agregados) == 1 + 5 + 5 + 15 + 2
+    assert len(sesion.agregados) == 1 + 5 + 5 + 15 + 3
     restaurantes = [fila for fila in sesion.agregados if isinstance(fila, Restaurante)]
     assert [(r.id, r.nombre) for r in restaurantes] == [(1, "FríoTrack Demo")]
     assert sum(isinstance(fila, Camara) for fila in sesion.agregados) == 5
     assert sum(isinstance(fila, Sensor) for fila in sesion.agregados) == 5
     assert sum(isinstance(fila, Lote) for fila in sesion.agregados) == 15
-    assert sum(isinstance(fila, Usuario) for fila in sesion.agregados) == 2
+    assert sum(isinstance(fila, Usuario) for fila in sesion.agregados) == 3
 
 
 def test_cargar_seed_no_duplica_el_restaurante_demo():
@@ -244,13 +253,55 @@ def test_cargar_seed_no_duplica_el_restaurante_demo():
     assert sesion.flushes == 1
 
 
-def test_cargar_seed_es_idempotente_si_el_demo_ya_tiene_camaras():
-    sesion = FakeSession(hay_camaras_demo=True)
+def test_cargar_seed_es_idempotente_si_el_demo_ya_tiene_camaras_y_usuarios():
+    sesion = FakeSession(
+        hay_camaras_demo=True,
+        usuarios=[
+            Usuario(
+                restaurante_id=RESTAURANTE_DEMO_ID,
+                usuario=nombre,
+                password_hash="hash",
+                rol=rol,
+            )
+            for nombre, rol in (
+                ("jefe", "jefe_cocina"),
+                ("gerente", "gerente"),
+                ("dueno", "dueno"),
+            )
+        ],
+    )
 
     assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is False
     assert sesion.agregados == []
     assert sesion.flushes == 0
     assert sesion.commits == 0
+
+
+def test_cargar_seed_agrega_dueno_a_base_ya_sembrada():
+    """El early return no debe impedir crear las cuentas demo que falten."""
+    sesion = FakeSession(
+        hay_camaras_demo=True,
+        usuarios=[
+            Usuario(
+                restaurante_id=RESTAURANTE_DEMO_ID,
+                usuario="jefe",
+                password_hash="hash",
+                rol="jefe_cocina",
+            ),
+            Usuario(
+                restaurante_id=RESTAURANTE_DEMO_ID,
+                usuario="gerente",
+                password_hash="hash",
+                rol="gerente",
+            ),
+        ],
+    )
+
+    assert cargar_seed(sesion, sensor_tokens=TOKENS, password="demo") is False
+    nuevos = [fila for fila in sesion.agregados if isinstance(fila, Usuario)]
+    assert [usuario.usuario for usuario in nuevos] == ["dueno"]
+    assert nuevos[0].rol == "dueno"
+    assert sesion.commits == 1
 
 
 def test_cargar_seed_solo_mira_las_camaras_del_restaurante_demo():
