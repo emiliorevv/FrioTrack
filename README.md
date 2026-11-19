@@ -145,9 +145,40 @@ npm install && npm run dev
 
 | Servicio | URL |
 |---|---|
-| API | _pendiente_ |
-| Dashboard | _pendiente_ |
-| Documentación de la API (Swagger) | _pendiente_ (`/docs` de la API) |
+| API | https://friotrack-api-sw23.onrender.com |
+| Dashboard | https://friotrack-dashboard.vercel.app |
+| Documentación de la API (Swagger) | https://friotrack-api-sw23.onrender.com/docs |
+
+## Cuentas demo
+
+Estas cuentas viven en el restaurante demo (tenant 1) y usan la contraseña `friotrack-demo`:
+
+| Usuario | Rol | Puede |
+|---|---|---|
+| `jefe` | `jefe_cocina` | Ver todo y atender alertas |
+| `dueno` | `dueno` | Ver todo, atender, configurar cámaras/sensores |
+| `gerente` | `gerente` | Solo consulta |
+
+En un despliegue real se cambian las credenciales y se apaga la demo. Con `VITE_MOSTRAR_DEMO=1`, el login muestra los usuarios demo sin la contraseña; en desarrollo también muestra la contraseña.
+
+## Panel Demo
+
+El botón **Demo** aparece en el header solo para `dueno` y `jefe_cocina` del restaurante demo. Permite mostrar la operación sin usar el simulador CLI:
+
+- **Falla de compresor:** manda lecturas fuera de rango a la cámara de pescados; abre alerta de temperatura y pone lotes en riesgo.
+- **Puerta abierta:** manda lecturas con la puerta abierta al congelador; abre alerta de puerta.
+- **Ataque SIEM:** inserta una alerta de fuerza bruta simulada (`detalle.simulado=true`) para mostrar el panel de Seguridad.
+- **Recuperar:** cancela simulaciones en curso y manda lecturas normales para cerrar alertas y volver a `en_rango`.
+
+Los endpoints `/api/demo/*` solo se registran si `DEMO_HABILITADA=1`. En producción real se pone `0` y las rutas dejan de existir. El JWT incluye el claim `es_demo` para que el panel solo se muestre en la cuenta demo.
+
+## Multi-restaurante, configuración e inventario
+
+- **Sign-up:** `POST /api/auth/registro` crea restaurante + dueño y devuelve JWT.
+- **Aislamiento:** cada recurso se filtra por `restaurante_id`; un recurso de otro tenant responde 404.
+- **Configuración:** el dueño puede crear/editar/eliminar cámaras y crear sensores con token de un solo uso, rotarlo y activarlo/desactivarlo.
+- **Inventario:** dueño y jefe de cocina pueden crear/editar/mover lotes, marcar merma manual y eliminar lotes que no estén en merma.
+- **Roles:** `dueno` y `jefe_cocina` escriben; `gerente` solo consulta.
 
 ## Prácticas del equipo
 
