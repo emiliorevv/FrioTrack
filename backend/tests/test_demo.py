@@ -322,9 +322,11 @@ def test_puerta_usa_la_camara_5_por_defecto_con_el_centro_del_rango(monkeypatch)
 
     assert respuesta.status_code == 202
     assert respuesta.json()["camara_id"] == 5
-    camara_id, sensor_id, temperatura, cancelar = llamadas[0]
+    camara_id, sensor_id, base, paso, temperatura_maxima, cancelar = llamadas[0]
     assert (camara_id, sensor_id) == (5, "S-CON-01")
-    assert temperatura == pytest.approx(-20.0)
+    assert base == pytest.approx(-20.0)
+    assert paso == pytest.approx(0.2)
+    assert temperatura_maxima == pytest.approx(-18.1)
     assert isinstance(cancelar, threading.Event)
 
 
@@ -337,6 +339,82 @@ def test_puerta_en_camara_1_no_usa_la_temperatura_del_congelador(monkeypatch):
 
     assert respuesta.status_code == 202
     assert llamadas[0][2] == pytest.approx(1.0)
+    assert llamadas[0][3] == pytest.approx(0.125)
+    assert llamadas[0][4] == pytest.approx(1.9)
+
+
+@pytest.mark.parametrize(
+    ("camara_id", "rango_min_c", "rango_max_c"),
+    [
+        (1, 0.0, 2.0),
+        (2, 0.0, 4.0),
+        (3, 1.0, 4.0),
+        (4, 4.0, 8.0),
+        (5, -22.0, -18.0),
+    ],
+    ids=["camara-1", "camara-2", "camara-3", "camara-4", "camara-5"],
+)
+def test_puerta_sube_la_temperatura_sin_salir_del_rango(
+    monkeypatch, camara_id, rango_min_c, rango_max_c
+):
+    """La secuencia es estrictamente creciente y la última queda bajo el máximo."""
+    camara = _camara(camara_id, rango_min_c=rango_min_c, rango_max_c=rango_max_c)
+    base, paso = demo_mod._base_y_paso_puerta(camara)
+    temperatura_maxima = rango_max_c - 0.1
+    lecturas: list[tuple[float, bool]] = []
+
+    class EventoSinEspera:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, timeout: float | None = None) -> bool:
+            return False
+
+    def enviar(_camara_id, _sensor_id, temperatura, puerta_abierta):
+        lecturas.append((temperatura, puerta_abierta))
+        alertas = (
+            {demo_mod.TIPO_ALERTA_PUERTA}
+            if len(lecturas) >= demo_mod.LECTURAS_PUERTA
+            else set()
+        )
+        return "alerta", alertas
+
+    monkeypatch.setattr(demo_mod, "_enviar_lectura", enviar)
+    demo_mod._simular_puerta(
+        camara_id,
+        "S-CON-01",
+        base,
+        paso,
+        temperatura_maxima,
+        EventoSinEspera(),  # type: ignore[arg-type]
+    )
+
+    temperaturas = [temperatura for temperatura, _ in lecturas]
+    assert len(temperaturas) == demo_mod.LECTURAS_PUERTA
+    assert all(a < b for a, b in zip(temperaturas, temperaturas[1:], strict=False))
+    assert temperaturas[-1] < rango_max_c
+    assert all(puerta_abierta for _, puerta_abierta in lecturas)
+
+
+def test_falla_y_puerta_en_la_misma_camara_regresan_409(monkeypatch):
+    monkeypatch.setattr(demo_mod, "_simular_puerta", lambda *_args: None)
+    demo_mod._reservar("falla", 5)
+
+    with _cliente(_sesion_basica()) as cliente:
+        respuesta = cliente.post("/api/demo/puerta", json={"camara_id": 5})
+
+    assert respuesta.status_code == 409
+    assert "simulación de falla" in respuesta.json()["detail"]
+
+
+def test_falla_en_camara_1_y_puerta_en_camara_5_conviven(monkeypatch):
+    monkeypatch.setattr(demo_mod, "_simular_puerta", lambda *_args: None)
+    demo_mod._reservar("falla", 1)
+
+    with _cliente(_sesion_basica()) as cliente:
+        respuesta = cliente.post("/api/demo/puerta", json={"camara_id": 5})
+
+    assert respuesta.status_code == 202
 
 
 def test_recuperar_programa_la_tarea_y_responde_202(monkeypatch):
@@ -385,7 +463,7 @@ def test_camara_id_invalido_regresa_422():
 
 def test_clicks_repetidos_regresan_409(monkeypatch):
     monkeypatch.setattr(demo_mod, "_simular_falla", lambda *_args: None)
-    demo_mod._reservar("falla")
+    demo_mod._reservar("falla", 1)
 
     with _cliente(_sesion_basica()) as cliente:
         respuesta = cliente.post("/api/demo/falla")
@@ -407,11 +485,11 @@ def test_la_reserva_se_libera_al_terminar(monkeypatch):
 
 
 def test_el_slot_vencido_se_libera():
-    simulacion = demo_mod._reservar("falla")
+    simulacion = demo_mod._reservar("falla", 1)
     with demo_mod._cerrojo:
         simulacion.iniciada_en = time.monotonic() - demo_mod.EXPIRACION_SIMULACION_S - 1
 
-    nueva = demo_mod._reservar("falla")
+    nueva = demo_mod._reservar("falla", 1)
 
     assert nueva is not simulacion
     assert simulacion.cancelar.is_set()
@@ -438,7 +516,7 @@ def test_la_falla_se_detiene_al_cancelar(monkeypatch):
     def enviar(_camara_id, _sensor_id, temperatura, _puerta):
         enviadas.append(temperatura)
         cancelar.set()
-        return "alerta", False
+        return "alerta", set()
 
     monkeypatch.setattr(demo_mod, "_enviar_lectura", enviar)
     demo_mod._simular_falla(1, "S-PES-01", 1.8, 0.4, 10, cancelar)  # type: ignore[arg-type]
@@ -447,7 +525,7 @@ def test_la_falla_se_detiene_al_cancelar(monkeypatch):
 
 
 def test_recuperar_espera_a_que_la_simulacion_cancele():
-    simulacion = demo_mod._reservar("falla")
+    simulacion = demo_mod._reservar("falla", 1)
 
     def tarea() -> None:
         simulacion.cancelar.wait(timeout=1)

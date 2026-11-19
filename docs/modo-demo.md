@@ -48,11 +48,11 @@ El dashboard llama a estos endpoints; todos responden `202` (o `201` en el ataqu
 | Botón | Endpoint | Qué hace | Qué se ve |
 |---|---|---|---|
 | **Falla de compresor** | `POST /api/demo/falla` | Lecturas cada ~1.8 s relativas al rango de la cámara (la segunda ya cruza el máximo), hasta que abre la alerta o se agota el máximo de 60 s (o el umbral de la cámara + 20 s) | La tarjeta pasa a amarilla, luego roja; notificación simulada, lotes en riesgo y alerta para atender |
-| **Puerta abierta** | `POST /api/demo/puerta` | ~8 lecturas con la puerta abierta a la temperatura normal de esa cámara (punto medio de su rango) | Alerta de puerta a los ~10 s, sin disparar la de temperatura |
+| **Puerta abierta** | `POST /api/demo/puerta` | Lecturas con la puerta abierta (normalmente ~8, cada ~1.5 s) y la temperatura subiendo ligeramente desde el punto medio de su rango, sin salirse del rango; sigue hasta que la alerta de puerta abre o vence el máximo | Alerta de puerta a los ~10 s (es por tiempo), sin disparar la de temperatura |
 | **Ataque SIEM** | `POST /api/demo/ataque` | Inserta un hallazgo de fuerza bruta simulado (IP de documentación) | La alerta aparece en el panel de seguridad; **no** bloquea ninguna IP real |
 | **Recuperar** | `POST /api/demo/recuperar` | Cancela falla/puerta en curso, espera a que terminen y manda una lectura normal a cada cámara demo | Las alertas se cierran, las cámaras vuelven a verde y no siguen subiendo |
 
-`falla` usa la cámara 1 por defecto y `puerta` la 5; ambos aceptan `{ "camara_id": N }`, pero solo de cámaras del seed. Si ya hay una simulación del mismo tipo en curso, el endpoint responde **409**; el registro se libera al terminar y expira a los 120 s si la tarea nunca llegó a ejecutarse. Una cámara sin sensor activo o creada por API responde **409**, y una cámara de otro restaurante **404**.
+`falla` usa la cámara 1 por defecto y `puerta` la 5; ambos aceptan `{ "camara_id": N }`, pero solo de cámaras del seed. Solo puede haber una simulación por cámara: una falla y una puerta en la misma cámara no conviven (409); en cámaras distintas sí. El registro se libera al terminar y expira a los 120 s si la tarea nunca llegó a ejecutarse. Una cámara sin sensor activo o creada por API responde **409**, y una cámara de otro restaurante **404**.
 
 ## Cómo conviven los botones y el cron
 

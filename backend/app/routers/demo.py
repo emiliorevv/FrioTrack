@@ -32,7 +32,7 @@ from app.db.models import (
 )
 from app.db.session import SessionLocal, get_db, get_engine
 from app.erp import reglas
-from app.erp.procesador import TIPO_ALERTA_TEMPERATURA
+from app.erp.procesador import TIPO_ALERTA_PUERTA, TIPO_ALERTA_TEMPERATURA
 from app.routers.camaras import camara_del_restaurante
 from app.schemas.demo import CamaraDemoEntrada, SimulacionOut
 from app.schemas.operacion import AlertaSeguridadSalida, alerta_seguridad_salida
@@ -51,9 +51,13 @@ INTERVALO_FALLA_S = 1.8
 MAX_DURACION_FALLA_S = 60.0
 MARGEN_FALLA_S = 20.0
 
-# Puerta: 8 lecturas con la puerta abierta; el umbral son 5 min / escala.
+# Puerta: la alerta es por tiempo (5 min / escala). El paso de temperatura se
+# calcula para que en LECTURAS_PUERTA lecturas la última quede bajo el máximo.
 LECTURAS_PUERTA = 8
 INTERVALO_PUERTA_S = 1.5
+MINUTOS_ALERTA_PUERTA = 5.0
+MAX_DURACION_PUERTA_S = 60.0
+MARGEN_PUERTA_S = 15.0
 
 HUMEDAD_DEMO_PCT = 80.0
 EXPIRACION_SIMULACION_S = 120.0
@@ -67,16 +71,19 @@ IP_ATAQUE = "203.0.113.66"
 
 @dataclass
 class _Simulacion:
-    """Slot de una simulación activa, con cancelación y expiración."""
+    """Slot activo: una sola simulación por cámara (o una recuperación)."""
 
+    tipo: str
+    camara_id: int | None
     cancelar: threading.Event
     terminada: threading.Event
     iniciada_en: float
 
 
-# Una simulación activa por tipo. El timestamp permite liberar slots vencidos
-# aunque Starlette no llegue a ejecutar la tarea en segundo plano.
-_activas: dict[str, _Simulacion] = {}
+# La clave es la cámara para falla/puerta y "recuperar" para la recuperación:
+# no se pueden pisar una falla y una puerta en la misma cámara. El timestamp
+# permite liberar slots vencidos aunque Starlette no ejecute la tarea.
+_activas: dict[int | str, _Simulacion] = {}
 _cerrojo = threading.Lock()
 
 
@@ -102,9 +109,18 @@ router = APIRouter(prefix="/api/demo", tags=["demo"], dependencies=[Depends(_dem
 Db = Annotated[Session, Depends(get_db)]
 
 
-def _reservar(tipo: str) -> _Simulacion:
-    """Reserva una simulación; purga slots vencidos y responde 409 si sigue activa."""
+def _clave_simulacion(tipo: str, camara_id: int | None) -> int | str:
+    return "recuperar" if tipo == "recuperar" or camara_id is None else camara_id
+
+
+def _reservar(tipo: str, camara_id: int | None) -> _Simulacion:
+    """Reserva la cámara (o la recuperación) y responde 409 si ya está ocupada.
+
+    Una sola simulación por cámara: falla y puerta no pueden correr a la vez en
+    la misma cámara. La recuperación usa su propia clave y cancela a las demás.
+    """
     ahora = time.monotonic()
+    clave = _clave_simulacion(tipo, camara_id)
     with _cerrojo:
         vencidas = [
             nombre
@@ -116,40 +132,45 @@ def _reservar(tipo: str) -> _Simulacion:
             simulacion.cancelar.set()
             simulacion.terminada.set()
 
-        if tipo in _activas:
+        activa = _activas.get(clave)
+        if activa is not None:
+            detalle = (
+                f"La cámara {camara_id} ya tiene una simulación de "
+                f"{activa.tipo} en curso."
+                if clave != "recuperar"
+                else "Ya hay una recuperación en curso."
+            )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Ya hay una simulación de {tipo} en curso.",
+                detail=detalle,
             )
 
         simulacion = _Simulacion(
+            tipo=tipo,
+            camara_id=camara_id,
             cancelar=threading.Event(),
             terminada=threading.Event(),
             iniciada_en=ahora,
         )
-        _activas[tipo] = simulacion
+        _activas[clave] = simulacion
         return simulacion
 
 
-def _liberar(tipo: str, simulacion: _Simulacion) -> None:
+def _liberar(simulacion: _Simulacion) -> None:
     """Suelta el slot solo si sigue siendo el mismo (no pisa una simulación nueva)."""
+    clave = _clave_simulacion(simulacion.tipo, simulacion.camara_id)
     with _cerrojo:
-        if _activas.get(tipo) is simulacion:
-            _activas.pop(tipo, None)
+        if _activas.get(clave) is simulacion:
+            _activas.pop(clave, None)
     simulacion.terminada.set()
 
 
-def _ejecutar(
-    tipo: str,
-    simulacion: _Simulacion,
-    tarea: Callable[..., None],
-    *args: object,
-) -> None:
+def _ejecutar(simulacion: _Simulacion, tarea: Callable[..., None], *args: object) -> None:
     """Corre la tarea en background y libera el registro pase lo que pase."""
     try:
         tarea(*args)
     finally:
-        _liberar(tipo, simulacion)
+        _liberar(simulacion)
 
 
 def _camara_entrada(datos: CamaraDemoEntrada | None, por_defecto: int) -> int:
@@ -197,8 +218,21 @@ def _base_y_paso_falla(camara: Camara) -> tuple[float, float]:
     return base, paso
 
 
+def _base_y_paso_puerta(camara: Camara) -> tuple[float, float]:
+    """Centro del rango y paso pequeño para LECTURAS_PUERTA lecturas.
+
+    La última lectura de esa secuencia queda por debajo de `rango_max_c`, así
+    que la puerta no dispara una alerta de temperatura; la alerta es por tiempo.
+    """
+    rango_min, rango_max = _rango(camara)
+    base = (rango_min + rango_max) / 2
+    margen = (rango_max - rango_min) / 2
+    paso = min(0.2, margen / LECTURAS_PUERTA)
+    return base, paso
+
+
 def _temperatura_centro(camara: Camara) -> float:
-    """Punto medio del rango; para la puerta y la recuperación."""
+    """Punto medio del rango; para la recuperación."""
     rango_min, rango_max = _rango(camara)
     return (rango_min + rango_max) / 2
 
@@ -208,17 +242,17 @@ def _enviar_lectura(
     sensor_id: str,
     temperatura_c: float,
     puerta_abierta: bool,
-) -> tuple[str | None, bool]:
+) -> tuple[str | None, set[str]]:
     """Envía una lectura con su propia sesión.
 
-    Regresa `(estado_camara, hay_alerta_temperatura_abierta)`. La alerta es lo
-    que decide si la falla ya cumplió su objetivo; el estado puede ser "alerta"
-    solo por estar fuera de rango antes de que abra la alerta.
+    Regresa `(estado_camara, tipos_de_alerta_abiertos)`. La alerta es lo que
+    decide si una simulación ya cumplió su objetivo; el estado puede ser
+    "alerta" solo por estar fuera de rango antes de que abra la alerta.
     """
     with SessionLocal(bind=get_engine()) as session:
         camara = session.get(Camara, camara_id, with_for_update=True)
         if camara is None:
-            return None, False
+            return None, set()
         datos = TelemetriaIn(
             sensor_id=sensor_id,
             camara_id=camara_id,
@@ -228,16 +262,15 @@ def _enviar_lectura(
             puerta_abierta=puerta_abierta,
         )
         _, estado = procesar_lectura(session, datos, camara)
-        alerta = session.scalar(
-            select(Alerta.id)
-            .where(
-                Alerta.camara_id == camara_id,
-                Alerta.tipo == TIPO_ALERTA_TEMPERATURA,
-                Alerta.cerrada_en.is_(None),
+        alertas = set(
+            session.scalars(
+                select(Alerta.tipo).where(
+                    Alerta.camara_id == camara_id,
+                    Alerta.cerrada_en.is_(None),
+                )
             )
-            .limit(1)
         )
-        return estado, alerta is not None
+        return estado, alertas
 
 
 def _simular_falla(
@@ -265,7 +298,7 @@ def _simular_falla(
             return
         temperatura = base + paso * indice
         try:
-            estado, alerta_abierta = _enviar_lectura(
+            estado, alertas = _enviar_lectura(
                 camara_id,
                 sensor_id,
                 temperatura,
@@ -279,7 +312,7 @@ def _simular_falla(
             if cancelar.wait(0.2):
                 return
             try:
-                estado, alerta_abierta = _enviar_lectura(
+                estado, alertas = _enviar_lectura(
                     camara_id,
                     sensor_id,
                     temperatura,
@@ -297,7 +330,7 @@ def _simular_falla(
 
         if estado is None:
             return
-        if alerta_abierta:
+        if TIPO_ALERTA_TEMPERATURA in alertas:
             return
         indice += 1
         if cancelar.wait(INTERVALO_FALLA_S):
@@ -307,20 +340,52 @@ def _simular_falla(
 def _simular_puerta(
     camara_id: int,
     sensor_id: str,
-    temperatura: float,
+    temperatura_inicial: float,
+    paso: float,
+    temperatura_maxima: float,
     cancelar: threading.Event,
 ) -> None:
-    """Mantiene la puerta abierta con la temperatura normal de la cámara."""
-    for indice in range(LECTURAS_PUERTA):
+    """Mantiene la puerta abierta hasta que abra su alerta o venza el máximo.
+
+    La temperatura sube poco a poco y se topa en `temperatura_maxima` (0.1 °C
+    bajo el máximo): la alerta protagonista es la de puerta, que es por tiempo.
+    El loop deja margen para reintentar si una lectura falla.
+    """
+    escala = get_settings().escala_tiempo
+    umbral = reglas.segundos_efectivos(MINUTOS_ALERTA_PUERTA, escala)
+    limite = min(MAX_DURACION_PUERTA_S, umbral + MARGEN_PUERTA_S)
+    inicio = time.monotonic()
+    indice = 0
+
+    while time.monotonic() - inicio < limite:
         if cancelar.is_set():
             return
+        temperatura = min(
+            round(temperatura_inicial + paso * indice, 1),
+            temperatura_maxima,
+        )
         try:
-            _enviar_lectura(camara_id, sensor_id, temperatura, True)
+            estado, alertas = _enviar_lectura(
+                camara_id,
+                sensor_id,
+                temperatura,
+                True,
+            )
         except Exception:
             logger.exception(
-                "La simulación de puerta no pudo enviar la lectura %s", indice
+                "La simulación de puerta no pudo enviar la lectura %s; reintenta",
+                indice,
             )
-        if indice < LECTURAS_PUERTA - 1 and cancelar.wait(INTERVALO_PUERTA_S):
+            if cancelar.wait(0.2):
+                return
+            continue
+
+        if estado is None:
+            return
+        if TIPO_ALERTA_PUERTA in alertas:
+            return
+        indice += 1
+        if cancelar.wait(INTERVALO_PUERTA_S):
             return
 
 
@@ -329,8 +394,8 @@ def _cancelar_simulaciones() -> None:
     with _cerrojo:
         activas = [
             simulacion
-            for tipo in ("falla", "puerta")
-            if (simulacion := _activas.get(tipo)) is not None
+            for simulacion in _activas.values()
+            if simulacion.tipo in ("falla", "puerta")
         ]
         for simulacion in activas:
             simulacion.cancelar.set()
@@ -381,10 +446,9 @@ def simular_falla(
     """Programa una falla de compresor en una cámara demo (default 1)."""
     camara, sensor = _camara_y_sensor(db, _camara_entrada(datos, 1))
     base, paso = _base_y_paso_falla(camara)
-    simulacion = _reservar("falla")
+    simulacion = _reservar("falla", camara.id)
     tareas.add_task(
         _ejecutar,
-        "falla",
         simulacion,
         _simular_falla,
         camara.id,
@@ -406,17 +470,24 @@ def simular_puerta(
     db: Db,
     datos: CamaraDemoEntrada | None = None,
 ) -> SimulacionOut:
-    """Programa una puerta abierta en una cámara demo (default 5)."""
+    """Programa una puerta abierta en una cámara demo (default 5).
+
+    La temperatura sube desde el centro del rango con un paso pequeño para que
+    se note, pero la última lectura queda por debajo del máximo: la alerta que
+    abre es la de puerta, no una de temperatura.
+    """
     camara, sensor = _camara_y_sensor(db, _camara_entrada(datos, 5))
-    simulacion = _reservar("puerta")
+    base, paso = _base_y_paso_puerta(camara)
+    simulacion = _reservar("puerta", camara.id)
     tareas.add_task(
         _ejecutar,
-        "puerta",
         simulacion,
         _simular_puerta,
         camara.id,
         sensor.id,
-        _temperatura_centro(camara),
+        base,
+        paso,
+        float(camara.rango_max_c) - 0.1,
         simulacion.cancelar,
     )
     return SimulacionOut(
@@ -451,6 +522,6 @@ def simular_ataque(db: Db) -> AlertaSeguridadSalida:
 @router.post("/recuperar", response_model=SimulacionOut, status_code=status.HTTP_202_ACCEPTED)
 def recuperar_demo(tareas: BackgroundTasks) -> SimulacionOut:
     """Cancela falla/puerta y manda lecturas normales a las cámaras demo."""
-    simulacion = _reservar("recuperar")
-    tareas.add_task(_ejecutar, "recuperar", simulacion, _simular_recuperacion)
+    simulacion = _reservar("recuperar", None)
+    tareas.add_task(_ejecutar, simulacion, _simular_recuperacion)
     return SimulacionOut(mensaje="Recuperación en curso.")
