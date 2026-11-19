@@ -282,7 +282,7 @@ Body opcional `{ "camara_id": 1 }` (default `1`). Simula una falla de compresor 
 `404` si la cámara no es del tenant demo; `409` si no tiene sensor activo o ya hay una falla en curso.
 
 #### `POST /demo/puerta`
-Body opcional `{ "camara_id": 5 }` (default `5`, congelador). Mantiene la puerta abierta durante ~8 lecturas cada ~1.5 s y sube la temperatura ligeramente desde el punto medio de su rango, con un paso que deja la última lectura por debajo de `rango_max_c`; así no dispara una alerta de temperatura. Con `ESCALA_TIEMPO=30` la alerta de puerta (por tiempo) abre a los ~10 s. Respuesta `202` con el mismo shape. Mismos `404`/`409` que `falla`; una cámara creada por API (`es_demo=false`) responde `409`.
+Body opcional `{ "camara_id": 5 }` (default `5`, congelador). Mantiene la puerta abierta y sube la temperatura ligeramente desde el punto medio de su rango, con un paso que deja la secuencia por debajo de `rango_max_c`; así no dispara una alerta de temperatura. Sigue enviando lecturas (normalmente ~8, cada ~1.5 s) hasta que la alerta de puerta abre o se agota el máximo (`min(60 s, umbral + 15 s)`). Con `ESCALA_TIEMPO=30` la alerta de puerta (por tiempo) abre a los ~10 s. Respuesta `202` con el mismo shape. Mismos `404`/`409` que `falla`; una cámara creada por API (`es_demo=false`) responde `409`.
 
 #### `POST /demo/ataque`
 Sin body. Inserta una `AlertaSeguridad` simulada de la regla real de fuerza bruta:
