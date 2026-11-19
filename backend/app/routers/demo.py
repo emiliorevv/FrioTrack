@@ -307,13 +307,20 @@ def _simular_falla(
 def _simular_puerta(
     camara_id: int,
     sensor_id: str,
-    temperatura: float,
+    temperatura_inicial: float,
+    paso: float,
     cancelar: threading.Event,
 ) -> None:
-    """Mantiene la puerta abierta con la temperatura normal de la cámara."""
+    """Mantiene la puerta abierta y sube la temperatura sin salir del rango.
+
+    El aumento es pequeño a propósito: la alerta que debe abrir es la de
+    puerta (por tiempo), no una de temperatura. El endpoint calcula el paso
+    para que la última lectura quede por debajo de `rango_max_c`.
+    """
     for indice in range(LECTURAS_PUERTA):
         if cancelar.is_set():
             return
+        temperatura = temperatura_inicial + paso * indice
         try:
             _enviar_lectura(camara_id, sensor_id, temperatura, True)
         except Exception:
@@ -406,8 +413,16 @@ def simular_puerta(
     db: Db,
     datos: CamaraDemoEntrada | None = None,
 ) -> SimulacionOut:
-    """Programa una puerta abierta en una cámara demo (default 5)."""
+    """Programa una puerta abierta en una cámara demo (default 5).
+
+    La temperatura sube desde el centro del rango con un paso pequeño para que
+    se note, pero la última lectura queda por debajo del máximo: la alerta que
+    abre es la de puerta, no una de temperatura.
+    """
     camara, sensor = _camara_y_sensor(db, _camara_entrada(datos, 5))
+    base = _temperatura_centro(camara)
+    margen = float(camara.rango_max_c) - base
+    paso = min(0.2, max(0.0, margen) / (LECTURAS_PUERTA + 1))
     simulacion = _reservar("puerta")
     tareas.add_task(
         _ejecutar,
@@ -416,7 +431,8 @@ def simular_puerta(
         _simular_puerta,
         camara.id,
         sensor.id,
-        _temperatura_centro(camara),
+        base,
+        paso,
         simulacion.cancelar,
     )
     return SimulacionOut(

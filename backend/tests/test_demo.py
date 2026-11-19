@@ -322,9 +322,10 @@ def test_puerta_usa_la_camara_5_por_defecto_con_el_centro_del_rango(monkeypatch)
 
     assert respuesta.status_code == 202
     assert respuesta.json()["camara_id"] == 5
-    camara_id, sensor_id, temperatura, cancelar = llamadas[0]
+    camara_id, sensor_id, base, paso, cancelar = llamadas[0]
     assert (camara_id, sensor_id) == (5, "S-CON-01")
-    assert temperatura == pytest.approx(-20.0)
+    assert base == pytest.approx(-20.0)
+    assert paso == pytest.approx(0.2)
     assert isinstance(cancelar, threading.Event)
 
 
@@ -337,6 +338,34 @@ def test_puerta_en_camara_1_no_usa_la_temperatura_del_congelador(monkeypatch):
 
     assert respuesta.status_code == 202
     assert llamadas[0][2] == pytest.approx(1.0)
+    assert llamadas[0][3] == pytest.approx(1.0 / 9)
+
+
+def test_puerta_sube_la_temperatura_sin_salir_del_rango(monkeypatch):
+    """La secuencia es creciente, la última queda bajo el máximo y la puerta va abierta."""
+    lecturas: list[tuple[float, bool]] = []
+
+    class EventoSinEspera:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, timeout: float | None = None) -> bool:
+            return False
+
+    def enviar(_camara_id, _sensor_id, temperatura, puerta_abierta):
+        lecturas.append((temperatura, puerta_abierta))
+        return "alerta", False
+
+    monkeypatch.setattr(demo_mod, "_enviar_lectura", enviar)
+    demo_mod._simular_puerta(
+        5, "S-CON-01", -20.0, 0.2, EventoSinEspera()  # type: ignore[arg-type]
+    )
+
+    temperaturas = [temperatura for temperatura, _ in lecturas]
+    assert len(temperaturas) == demo_mod.LECTURAS_PUERTA
+    assert temperaturas == sorted(temperaturas)
+    assert temperaturas[-1] < -18.0
+    assert all(puerta_abierta for _, puerta_abierta in lecturas)
 
 
 def test_recuperar_programa_la_tarea_y_responde_202(monkeypatch):

@@ -48,7 +48,7 @@ El dashboard llama a estos endpoints; todos responden `202` (o `201` en el ataqu
 | Botón | Endpoint | Qué hace | Qué se ve |
 |---|---|---|---|
 | **Falla de compresor** | `POST /api/demo/falla` | Lecturas cada ~1.8 s relativas al rango de la cámara (la segunda ya cruza el máximo), hasta que abre la alerta o se agota el máximo de 60 s (o el umbral de la cámara + 20 s) | La tarjeta pasa a amarilla, luego roja; notificación simulada, lotes en riesgo y alerta para atender |
-| **Puerta abierta** | `POST /api/demo/puerta` | ~8 lecturas con la puerta abierta a la temperatura normal de esa cámara (punto medio de su rango) | Alerta de puerta a los ~10 s, sin disparar la de temperatura |
+| **Puerta abierta** | `POST /api/demo/puerta` | ~8 lecturas con la puerta abierta y la temperatura subiendo ligeramente desde el punto medio de su rango, sin salirse del rango | Alerta de puerta a los ~10 s (es por tiempo), sin disparar la de temperatura |
 | **Ataque SIEM** | `POST /api/demo/ataque` | Inserta un hallazgo de fuerza bruta simulado (IP de documentación) | La alerta aparece en el panel de seguridad; **no** bloquea ninguna IP real |
 | **Recuperar** | `POST /api/demo/recuperar` | Cancela falla/puerta en curso, espera a que terminen y manda una lectura normal a cada cámara demo | Las alertas se cierran, las cámaras vuelven a verde y no siguen subiendo |
 
