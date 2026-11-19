@@ -40,11 +40,18 @@ function crearToken(payload: Record<string, unknown>): string {
   return `cabecera.${codificado}.firma`
 }
 
-function tokenVigente(usuario = 'jefe', rol = 'jefe_cocina'): string {
+function tokenVigente(
+  usuario = 'jefe',
+  rol = 'jefe_cocina',
+  restauranteId = 1,
+  esDemo = restauranteId === 1,
+): string {
   return crearToken({
     sub: usuario,
     uid: 1,
     rol,
+    restaurante_id: restauranteId,
+    es_demo: esDemo,
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + 3600,
     pwd: 'hash',
@@ -56,6 +63,8 @@ function tokenQueExpiraEn(segundos: number): string {
     sub: 'jefe',
     uid: 1,
     rol: 'jefe_cocina',
+    restaurante_id: 1,
+    es_demo: true,
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + segundos,
     pwd: 'hash',
@@ -98,6 +107,8 @@ describe('AuthProvider', () => {
     expect(result.current.token).toBe(token)
     expect(result.current.usuario).toBe('jefe')
     expect(result.current.rol).toBe('jefe_cocina')
+    expect(result.current.restauranteId).toBe(1)
+    expect(result.current.esDemo).toBe(true)
     expect(result.current.error).toBeNull()
     expect(result.current.cargando).toBe(false)
     expect(getToken()).toBe(token)
@@ -187,7 +198,27 @@ describe('AuthProvider', () => {
     expect(result.current.token).toBe(token)
     expect(result.current.usuario).toBe('gerente')
     expect(result.current.rol).toBe('gerente')
+    expect(result.current.restauranteId).toBe(1)
+    expect(result.current.esDemo).toBe(true)
     expect(iniciarSesion).not.toHaveBeenCalled()
+  })
+
+  it('marca esDemo=false para un tenant que no es el demo', () => {
+    setToken(tokenVigente('jefe-otro', 'jefe_cocina', 2, false))
+
+    const { result } = montar()
+
+    expect(result.current.restauranteId).toBe(2)
+    expect(result.current.esDemo).toBe(false)
+  })
+
+  it('respeta es_demo=false aunque el tenant sea el 1', () => {
+    setToken(tokenVigente('jefe-real', 'jefe_cocina', 1, false))
+
+    const { result } = montar()
+
+    expect(result.current.restauranteId).toBe(1)
+    expect(result.current.esDemo).toBe(false)
   })
 
   it('limpia un token expirado al restaurar', () => {
@@ -195,6 +226,8 @@ describe('AuthProvider', () => {
       crearToken({
         sub: 'jefe',
         rol: 'jefe_cocina',
+        restaurante_id: 1,
+        es_demo: true,
         exp: Math.floor(Date.now() / 1000) - 10,
       }),
     )

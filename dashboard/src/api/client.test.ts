@@ -23,7 +23,11 @@ import {
   obtenerLecturas,
   obtenerLotes,
   pedir,
+  recuperarDemo,
   registrar,
+  simularAtaque,
+  simularFalla,
+  simularPuerta,
 } from './client'
 import { setToken, suscribirNoAutorizado } from '../auth/token'
 import { resolverApiUrl } from './url'
@@ -41,12 +45,22 @@ function respuesta(
   texto = 'OK',
   cabeceras: Record<string, string> = {},
 ): Response {
+  const cabecerasFinales = new Headers(cabeceras)
+  if (datos !== undefined && !cabecerasFinales.has('Content-Type')) {
+    cabecerasFinales.set('Content-Type', 'application/json')
+  }
   return {
     ok: estado >= 200 && estado < 300,
     status: estado,
     statusText: texto,
-    headers: new Headers(cabeceras),
+    headers: cabecerasFinales,
     json: async () => datos,
+    text: async () =>
+      datos === undefined
+        ? ''
+        : typeof datos === 'string'
+          ? datos
+          : JSON.stringify(datos),
   } as unknown as Response
 }
 
@@ -214,6 +228,22 @@ describe('pedir', () => {
       detalle: 'min_para_merma debe ser mayor que min_para_riesgo',
     })
     expect((fallo as Error).message).toContain('min_para_merma')
+  })
+
+  it('devuelve undefined para un 2xx que no es JSON', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta('<html>ok</html>', 200, 'OK', {
+        'Content-Type': 'text/html',
+      }),
+    )
+
+    await expect(pedir('/demo/falla')).resolves.toBeUndefined()
+  })
+
+  it('devuelve undefined para un 2xx JSON vacío', async () => {
+    fetchFalso.mockResolvedValue(respuesta(undefined, 202, 'Accepted'))
+
+    await expect(pedir('/demo/recuperar')).resolves.toBeUndefined()
   })
 
   it('usa el status cuando el cuerpo del error no trae detail', async () => {
@@ -964,5 +994,89 @@ describe('inventario', () => {
     expect(url).toBe(`${BASE}/lotes/4/merma`)
     expect(init.method).toBe('POST')
     expect(init.body).toBeUndefined()
+  })
+})
+
+describe('panel de demo', () => {
+  const alerta = {
+    id: 77,
+    regla_id: 'demo-ataque',
+    regla: 'Ataque simulado',
+    severidad: 'high',
+    ts: '2026-11-17T00:00:00+00:00',
+    ip_origen: '203.0.113.9',
+    detalle: { simulado: true },
+    accion: 'bloquear_ip',
+  }
+
+  it('simula la falla con POST y acepta un 202 sin cuerpo', async () => {
+    fetchFalso.mockResolvedValue(respuesta(undefined, 202, 'Accepted'))
+
+    await expect(simularFalla()).resolves.toBeUndefined()
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/demo/falla`)
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeUndefined()
+  })
+
+  it('simula la puerta en la cámara 5', async () => {
+    fetchFalso.mockResolvedValue(respuesta(undefined, 202, 'Accepted'))
+
+    await expect(simularPuerta()).resolves.toBeUndefined()
+
+    const [, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeUndefined()
+  })
+
+  it('simula el ataque y valida la alerta SIEM', async () => {
+    fetchFalso.mockResolvedValue(respuesta(alerta, 201, 'Created'))
+
+    await expect(simularAtaque()).resolves.toBeUndefined()
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/demo/ataque`)
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeUndefined()
+  })
+
+  it('recupera las cámaras con POST sin body', async () => {
+    fetchFalso.mockResolvedValue(respuesta(undefined, 202, 'Accepted'))
+
+    await expect(recuperarDemo()).resolves.toBeUndefined()
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE}/demo/recuperar`)
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeUndefined()
+  })
+
+  it('adjunta el JWT de la sesión', async () => {
+    setToken('jwt-demo')
+    fetchFalso.mockResolvedValue(respuesta(undefined, 202, 'Accepted'))
+
+    await simularFalla()
+
+    const [, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
+    expect(new Headers(init.headers).get('Authorization')).toBe(
+      'Bearer jwt-demo',
+    )
+  })
+
+  it.each([403, 404, 409])('conserva el ErrorApi %s', async (status) => {
+    const detalle =
+      status === 409
+        ? 'Ya hay una simulación en curso.'
+        : 'La simulación no está disponible.'
+    fetchFalso.mockResolvedValue(
+      respuesta({ detail: detalle }, status, 'Error'),
+    )
+
+    await expect(simularFalla()).rejects.toMatchObject({
+      name: 'ErrorApi',
+      status,
+      detalle,
+    })
   })
 })

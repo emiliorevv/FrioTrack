@@ -3,6 +3,7 @@ import {
   etiquetaRol,
   puedeAtenderAlertas,
   puedeEditarInventario,
+  puedeSimularDemo,
 } from './roles'
 
 describe('puedeAtenderAlertas', () => {
@@ -34,5 +35,19 @@ describe('puedeEditarInventario', () => {
     expect(puedeEditarInventario('gerente')).toBe(false)
     expect(puedeEditarInventario('admin')).toBe(false)
     expect(puedeEditarInventario('')).toBe(false)
+  })
+})
+
+describe('puedeSimularDemo', () => {
+  it('solo permite dueño y jefe de cocina en el tenant demo', () => {
+    expect(puedeSimularDemo(true, 'dueno')).toBe(true)
+    expect(puedeSimularDemo(true, 'jefe_cocina')).toBe(true)
+    expect(puedeSimularDemo(true, 'gerente')).toBe(false)
+    expect(puedeSimularDemo(true, 'admin')).toBe(false)
+  })
+
+  it('nunca habilita el panel fuera del tenant demo', () => {
+    expect(puedeSimularDemo(false, 'dueno')).toBe(false)
+    expect(puedeSimularDemo(false, 'jefe_cocina')).toBe(false)
   })
 })

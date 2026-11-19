@@ -181,7 +181,19 @@ export async function pedir<T>(
     return undefined as T
   }
 
-  return (await respuesta.json()) as T
+  const texto = await respuesta.text()
+  if (!texto.trim()) {
+    return undefined as T
+  }
+
+  // Un 2xx con HTML/texto no es un JSON válido; los llamadores que no esperan
+  // cuerpo (p. ej. demo) reciben `undefined` en vez de un SyntaxError.
+  const tipo = (respuesta.headers.get('Content-Type') ?? '').toLowerCase()
+  if (!tipo.includes('json')) {
+    return undefined as T
+  }
+
+  return JSON.parse(texto) as T
 }
 
 /** Respuesta de `POST /auth/login`. */
@@ -817,4 +829,32 @@ export async function actualizarSensor(
 /** `DELETE /sensores/{id}`: 204, o 409 si el sensor ya tiene lecturas. */
 export async function eliminarSensor(id: string): Promise<void> {
   await pedir<void>(`/sensores/${id}`, { method: 'DELETE' })
+}
+
+/* ------------------------------------------------------------------ */
+/* Panel de simulación de la demo                                      */
+/* ------------------------------------------------------------------ */
+
+async function pedirDemo(ruta: string): Promise<void> {
+  await pedir<unknown>(ruta, { method: 'POST' })
+}
+
+/** `POST /demo/falla`: el backend usa la cámara demo por defecto. */
+export async function simularFalla(): Promise<void> {
+  await pedirDemo('/demo/falla')
+}
+
+/** `POST /demo/puerta`: el backend usa el congelador demo por defecto. */
+export async function simularPuerta(): Promise<void> {
+  await pedirDemo('/demo/puerta')
+}
+
+/** `POST /demo/ataque`: publica una alerta SIEM simulada. */
+export async function simularAtaque(): Promise<void> {
+  await pedirDemo('/demo/ataque')
+}
+
+/** `POST /demo/recuperar`: devuelve las cámaras demo a su estado normal. */
+export async function recuperarDemo(): Promise<void> {
+  await pedirDemo('/demo/recuperar')
 }

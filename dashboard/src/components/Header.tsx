@@ -14,6 +14,9 @@ interface HeaderProps {
   onLogout: () => void
   /** Abre Configuración; solo se muestra para el rol dueño. */
   onAbrirConfiguracion?: () => void
+  /** Muestra el acceso al panel solo en el tenant demo autorizado. */
+  mostrarDemo?: boolean
+  onAbrirDemo?: () => void
 }
 
 function inicialesDe(usuario: string): string {
@@ -28,6 +31,8 @@ export function Header({
   rol,
   onLogout,
   onAbrirConfiguracion,
+  mostrarDemo = false,
+  onAbrirDemo,
 }: HeaderProps) {
   const mostrarModoDemo = escalaTiempo !== undefined && escalaTiempo !== 1
   const nombreRol = etiquetaRol(rol)
@@ -53,6 +58,32 @@ export function Header({
             <ActualizadoHace actualizadoEn={actualizadoEn} />
           ) : (
             <span className="updated">Sin datos</span>
+          )}
+
+          {mostrarDemo && onAbrirDemo && (
+            <button
+              type="button"
+              className="header-demo"
+              onClick={onAbrirDemo}
+              aria-label="Abrir panel de demo"
+              title="Panel de demo"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9 3h6M10 3v5.2L5.6 16a2 2 0 0 0 1.7 3h9.4a2 2 0 0 0 1.7-3L14 8.2V3" />
+                <path d="M8 15h8" />
+              </svg>
+              <span className="header-demo__texto">Demo</span>
+            </button>
           )}
 
           {rol === 'dueno' && onAbrirConfiguracion && (
