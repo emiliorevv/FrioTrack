@@ -272,7 +272,9 @@ describe('vista general', () => {
   it('muestra la etiqueta de modo demo con la escala de /health', async () => {
     renderizarApp()
 
-    expect(await screen.findByText('MODO DEMO ×30')).toBeInTheDocument()
+    expect(
+      await screen.findByText('MODO DEMO ×30 · 1 min de regla = 2 s reales'),
+    ).toBeInTheDocument()
   })
 
   it('explica qué es el resumen de hoy al abrir el detalle', async () => {

@@ -24,6 +24,14 @@ function inicialesDe(usuario: string): string {
   return limpio ? limpio.slice(0, 2).toUpperCase() : 'US'
 }
 
+/** Segundos reales de un minuto de regla; entero o un decimal. */
+function segundosDeRegla(escala: number): string {
+  const segundos = 60 / escala
+  return Number.isInteger(segundos)
+    ? String(segundos)
+    : segundos.toFixed(1).replace(/\.0$/, '')
+}
+
 export function Header({
   actualizadoEn,
   escalaTiempo,
@@ -34,7 +42,14 @@ export function Header({
   mostrarDemo = false,
   onAbrirDemo,
 }: HeaderProps) {
-  const mostrarModoDemo = escalaTiempo !== undefined && escalaTiempo !== 1
+  const escalaValida =
+    typeof escalaTiempo === 'number' &&
+    Number.isFinite(escalaTiempo) &&
+    escalaTiempo > 1
+  const segundosRegla = escalaValida ? segundosDeRegla(escalaTiempo) : null
+  const detalleDemo = escalaValida
+    ? `Los tiempos de las reglas se aceleran ×${escalaTiempo}: 1 minuto de regla equivale a ${segundosRegla} ${segundosRegla === '1' ? 'segundo' : 'segundos'} reales.`
+    : null
   const nombreRol = etiquetaRol(rol)
 
   return (
@@ -51,8 +66,15 @@ export function Header({
         </div>
 
         <div className="site-header__meta">
-          {mostrarModoDemo && (
-            <span className="demo-pill">MODO DEMO ×{escalaTiempo}</span>
+          {escalaValida && (
+            <span
+              className="demo-pill"
+              title={detalleDemo ?? undefined}
+              aria-label={detalleDemo ?? undefined}
+            >
+              MODO DEMO ×{escalaTiempo} · 1 min de regla = {segundosRegla} s
+              reales
+            </span>
           )}
           {actualizadoEn ? (
             <ActualizadoHace actualizadoEn={actualizadoEn} />

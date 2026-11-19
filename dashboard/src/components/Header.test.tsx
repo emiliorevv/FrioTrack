@@ -25,11 +25,43 @@ describe('Header', () => {
     expect(screen.queryByText(/MODO DEMO/)).not.toBeInTheDocument()
   })
 
-  it('muestra la pill con la escala cuando es distinta de 1', () => {
+  it('explica la escala en la pill cuando es distinta de 1', () => {
     render(<Header actualizadoEn={null} escalaTiempo={30} {...sesion} />)
 
-    expect(screen.getByText('MODO DEMO ×30')).toBeInTheDocument()
+    const pill = screen.getByText('MODO DEMO ×30 · 1 min de regla = 2 s reales')
+    expect(pill).toBeInTheDocument()
+    expect(pill).toHaveAttribute(
+      'title',
+      'Los tiempos de las reglas se aceleran ×30: 1 minuto de regla equivale a 2 segundos reales.',
+    )
+    expect(pill).toHaveAttribute(
+      'aria-label',
+      'Los tiempos de las reglas se aceleran ×30: 1 minuto de regla equivale a 2 segundos reales.',
+    )
   })
+
+  it('formatea con un decimal cuando los segundos no son enteros', () => {
+    const { rerender } = render(
+      <Header actualizadoEn={null} escalaTiempo={24} {...sesion} />,
+    )
+    expect(
+      screen.getByText('MODO DEMO ×24 · 1 min de regla = 2.5 s reales'),
+    ).toBeInTheDocument()
+
+    rerender(<Header actualizadoEn={null} escalaTiempo={2} {...sesion} />)
+    expect(
+      screen.getByText('MODO DEMO ×2 · 1 min de regla = 30 s reales'),
+    ).toBeInTheDocument()
+  })
+
+  it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'no muestra la pill para una escala inválida (%s)',
+    (escala) => {
+      render(<Header actualizadoEn={null} escalaTiempo={escala} {...sesion} />)
+
+      expect(screen.queryByText(/MODO DEMO/)).not.toBeInTheDocument()
+    },
+  )
 
   it('sin datos no inventa "Actualizado hace 0 s"', () => {
     render(<Header actualizadoEn={null} {...sesion} />)
