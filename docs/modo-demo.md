@@ -26,7 +26,7 @@ Con **`ESCALA_TIEMPO=30`** (cada minuto de las reglas dura 2 segundos):
 Reglas para que no se rompa nada:
 - Los rangos de temperatura **no** se escalan, solo los tiempos.
 - Lo que se configura en la base sigue siendo el valor real (10, 60, etc.); la escala solo se aplica al calcular. Así, para volver a "producción" basta con `ESCALA_TIEMPO=1`.
-- El dashboard muestra una etiqueta "MODO DEMO ×30" cuando la escala es distinta de 1 (`GET /health` regresa `{ "escala_tiempo": 30 }`).
+- El dashboard muestra la etiqueta `MODO DEMO ×30 · 1 min de regla = 2 s reales` cuando `GET /health` regresa una escala válida (`> 0` y distinta de 1). En pantallas angostas (hasta 639 px) se muestra solo `MODO DEMO ×30`; la explicación completa queda en el texto accesible y en el `title`.
 - El detector SIEM **no** se escala: sus ventanas (5 minutos para fuerza bruta) ya caben en la demo.
 
 ## Cómo se activa

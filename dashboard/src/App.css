@@ -147,19 +147,21 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 0 0 auto;
   padding: 6px 10px;
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 0.66rem;
+  font-size: 0.64rem;
   font-weight: 600;
   line-height: 1;
-  letter-spacing: 0.045em;
+  letter-spacing: 0.025em;
   white-space: nowrap;
 }
 
 .demo-pill::before {
   content: '';
+  flex: 0 0 auto;
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -1765,6 +1767,18 @@
   }
 }
 
+@media (max-width: 639px) {
+  .demo-pill__detalle {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .updated {
+    display: none;
+  }
+}
+
 @media (max-width: 420px) {
   .site-header__inner {
     gap: 8px;
@@ -1778,10 +1792,6 @@
   .demo-pill {
     padding: 5px 8px;
     font-size: 0.63rem;
-  }
-
-  .updated {
-    font-size: 0.65rem;
   }
 
   .avatar {

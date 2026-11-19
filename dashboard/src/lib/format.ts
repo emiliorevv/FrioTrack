@@ -24,6 +24,10 @@ const formatoCantidad = new Intl.NumberFormat('es-MX', {
   maximumFractionDigits: 2,
 })
 
+const formatoEscala = new Intl.NumberFormat('es-MX', {
+  maximumFractionDigits: 1,
+})
+
 const formatoFecha = new Intl.DateTimeFormat('es-MX', {
   day: '2-digit',
   month: 'short',
@@ -90,4 +94,53 @@ export function formatearHace(ts: string, ahora: Date): string {
   }
 
   return `hace ${Math.round(segundos / 60)} min`
+}
+
+interface TiempoRegla {
+  valor: number
+  unidad: 's' | 'ms'
+}
+
+function medirTiempoRegla(segundos: number): TiempoRegla {
+  if (segundos < 1) {
+    return {
+      valor: Math.max(1, Math.round(segundos * 1000)),
+      unidad: 'ms',
+    }
+  }
+  return { valor: segundos, unidad: 's' }
+}
+
+/** "2 s", "2.5 s", "17 ms"; nunca "0 s" para escalas muy grandes. */
+export function formatearSegundosRegla(segundos: number): string {
+  if (!Number.isFinite(segundos) || segundos <= 0) {
+    return '—'
+  }
+  const { valor, unidad } = medirTiempoRegla(segundos)
+  return `${formatoEscala.format(valor)} ${unidad}`
+}
+
+/** "2 segundos", "1 segundo", "17 milisegundos" para el tooltip. */
+export function formatearSegundosReglaLarga(segundos: number): string {
+  if (!Number.isFinite(segundos) || segundos <= 0) {
+    return '—'
+  }
+  const { valor, unidad } = medirTiempoRegla(segundos)
+  const etiqueta =
+    unidad === 's'
+      ? valor === 1
+        ? 'segundo'
+        : 'segundos'
+      : valor === 1
+        ? 'milisegundo'
+        : 'milisegundos'
+  return `${formatoEscala.format(valor)} ${etiqueta}`
+}
+
+/** Singular/plural por número real, no por el texto ya formateado. */
+export function esTiempoReglaSingular(segundos: number): boolean {
+  if (!Number.isFinite(segundos) || segundos <= 0) {
+    return false
+  }
+  return medirTiempoRegla(segundos).valor === 1
 }
