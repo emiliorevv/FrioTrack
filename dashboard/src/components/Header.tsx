@@ -1,5 +1,10 @@
 import { etiquetaRol } from '../auth/roles'
 import { useReloj } from '../hooks/useReloj'
+import {
+  esTiempoReglaSingular,
+  formatearSegundosRegla,
+  formatearSegundosReglaLarga,
+} from '../lib/format'
 
 interface HeaderProps {
   /** Última actualización con datos; `null` = todavía no hay datos. */
@@ -24,12 +29,29 @@ function inicialesDe(usuario: string): string {
   return limpio ? limpio.slice(0, 2).toUpperCase() : 'US'
 }
 
-/** Segundos reales de un minuto de regla; entero o un decimal. */
-function segundosDeRegla(escala: number): string {
+interface DemoPill {
+  escala: number
+  equivalencia: string
+  detalle: string
+}
+
+function describirModoDemo(escala: number | undefined): DemoPill | null {
+  if (
+    typeof escala !== 'number' ||
+    !Number.isFinite(escala) ||
+    escala <= 0 ||
+    escala === 1
+  ) {
+    return null
+  }
+
   const segundos = 60 / escala
-  return Number.isInteger(segundos)
-    ? String(segundos)
-    : segundos.toFixed(1).replace(/\.0$/, '')
+  const concordancia = esTiempoReglaSingular(segundos) ? 'real' : 'reales'
+  return {
+    escala,
+    equivalencia: `1 min de regla = ${formatearSegundosRegla(segundos)} ${concordancia}`,
+    detalle: `Los tiempos de las reglas se aceleran ×${escala}: 1 minuto de regla equivale a ${formatearSegundosReglaLarga(segundos)} ${concordancia}.`,
+  }
 }
 
 export function Header({
@@ -42,14 +64,7 @@ export function Header({
   mostrarDemo = false,
   onAbrirDemo,
 }: HeaderProps) {
-  const escalaValida =
-    typeof escalaTiempo === 'number' &&
-    Number.isFinite(escalaTiempo) &&
-    escalaTiempo > 1
-  const segundosRegla = escalaValida ? segundosDeRegla(escalaTiempo) : null
-  const detalleDemo = escalaValida
-    ? `Los tiempos de las reglas se aceleran ×${escalaTiempo}: 1 minuto de regla equivale a ${segundosRegla} ${segundosRegla === '1' ? 'segundo' : 'segundos'} reales.`
-    : null
+  const demo = describirModoDemo(escalaTiempo)
   const nombreRol = etiquetaRol(rol)
 
   return (
@@ -66,14 +81,11 @@ export function Header({
         </div>
 
         <div className="site-header__meta">
-          {escalaValida && (
-            <span
-              className="demo-pill"
-              title={detalleDemo ?? undefined}
-              aria-label={detalleDemo ?? undefined}
-            >
-              MODO DEMO ×{escalaTiempo} · 1 min de regla = {segundosRegla} s
-              reales
+          {demo && (
+            <span className="demo-pill" title={demo.detalle}>
+              <span className="visually-hidden">{demo.detalle}</span>
+              MODO DEMO ×{demo.escala}
+              <span className="demo-pill__detalle"> · {demo.equivalencia}</span>
             </span>
           )}
           {actualizadoEn ? (

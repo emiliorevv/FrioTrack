@@ -273,7 +273,9 @@ describe('vista general', () => {
     renderizarApp()
 
     expect(
-      await screen.findByText('MODO DEMO ×30 · 1 min de regla = 2 s reales'),
+      await screen.findByTitle(
+        'Los tiempos de las reglas se aceleran ×30: 1 minuto de regla equivale a 2 segundos reales.',
+      ),
     ).toBeInTheDocument()
   })
 

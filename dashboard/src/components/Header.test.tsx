@@ -25,33 +25,66 @@ describe('Header', () => {
     expect(screen.queryByText(/MODO DEMO/)).not.toBeInTheDocument()
   })
 
-  it('explica la escala en la pill cuando es distinta de 1', () => {
+  it('explica la escala en la pill y en el texto accesible', () => {
     render(<Header actualizadoEn={null} escalaTiempo={30} {...sesion} />)
 
-    const pill = screen.getByText('MODO DEMO ×30 · 1 min de regla = 2 s reales')
-    expect(pill).toBeInTheDocument()
-    expect(pill).toHaveAttribute(
-      'title',
+    const pill = screen.getByTitle(
       'Los tiempos de las reglas se aceleran ×30: 1 minuto de regla equivale a 2 segundos reales.',
     )
-    expect(pill).toHaveAttribute(
-      'aria-label',
-      'Los tiempos de las reglas se aceleran ×30: 1 minuto de regla equivale a 2 segundos reales.',
+    expect(pill).toHaveTextContent(
+      'MODO DEMO ×30 · 1 min de regla = 2 s reales',
+    )
+    expect(pill).not.toHaveAttribute('aria-label')
+    expect(
+      screen.getByText(
+        'Los tiempos de las reglas se aceleran ×30: 1 minuto de regla equivale a 2 segundos reales.',
+      ),
+    ).toHaveClass('visually-hidden')
+    expect(pill.querySelector('.demo-pill__detalle')).toHaveTextContent(
+      '· 1 min de regla = 2 s reales',
     )
   })
 
-  it('formatea con un decimal cuando los segundos no son enteros', () => {
+  it('formatea decimales, segundos y milisegundos', () => {
     const { rerender } = render(
       <Header actualizadoEn={null} escalaTiempo={24} {...sesion} />,
     )
     expect(
-      screen.getByText('MODO DEMO ×24 · 1 min de regla = 2.5 s reales'),
-    ).toBeInTheDocument()
+      screen.getByTitle(
+        'Los tiempos de las reglas se aceleran ×24: 1 minuto de regla equivale a 2.5 segundos reales.',
+      ),
+    ).toHaveTextContent('MODO DEMO ×24 · 1 min de regla = 2.5 s reales')
+
+    rerender(<Header actualizadoEn={null} escalaTiempo={60} {...sesion} />)
+    expect(
+      screen.getByTitle(
+        'Los tiempos de las reglas se aceleran ×60: 1 minuto de regla equivale a 1 segundo real.',
+      ),
+    ).toHaveTextContent('MODO DEMO ×60 · 1 min de regla = 1 s real')
 
     rerender(<Header actualizadoEn={null} escalaTiempo={2} {...sesion} />)
     expect(
-      screen.getByText('MODO DEMO ×2 · 1 min de regla = 30 s reales'),
-    ).toBeInTheDocument()
+      screen.getByTitle(
+        'Los tiempos de las reglas se aceleran ×2: 1 minuto de regla equivale a 30 segundos reales.',
+      ),
+    ).toHaveTextContent('MODO DEMO ×2 · 1 min de regla = 30 s reales')
+
+    rerender(<Header actualizadoEn={null} escalaTiempo={3600} {...sesion} />)
+    expect(
+      screen.getByTitle(
+        'Los tiempos de las reglas se aceleran ×3600: 1 minuto de regla equivale a 17 milisegundos reales.',
+      ),
+    ).toHaveTextContent('MODO DEMO ×3600 · 1 min de regla = 17 ms reales')
+  })
+
+  it('mantiene una escala válida menor que 1', () => {
+    render(<Header actualizadoEn={null} escalaTiempo={0.5} {...sesion} />)
+
+    expect(
+      screen.getByTitle(
+        'Los tiempos de las reglas se aceleran ×0.5: 1 minuto de regla equivale a 120 segundos reales.',
+      ),
+    ).toHaveTextContent('MODO DEMO ×0.5 · 1 min de regla = 120 s reales')
   })
 
   it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])(
