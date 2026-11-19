@@ -274,8 +274,6 @@ function App({ usuario, rol, esDemo = false, onLogout }: AppProps) {
 
       {demoAbierta && mostrarDemo && (
         <PanelDemo
-          esDemo={esDemo}
-          rol={rol}
           onCerrar={() => setDemoAbierta(false)}
           onCambio={refrescar}
         />

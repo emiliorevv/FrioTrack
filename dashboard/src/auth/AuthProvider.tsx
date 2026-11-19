@@ -28,6 +28,7 @@ interface Sesion {
   usuario: string
   rol: string
   restauranteId: number
+  esDemo: boolean
   /** Segundos desde epoch, igual que el `exp` del JWT. */
   exp: number
 }
@@ -86,6 +87,7 @@ function restaurarSesion(): Sesion | null {
     usuario: payload.usuario,
     rol: payload.rol,
     restauranteId: payload.restaurante_id,
+    esDemo: payload.es_demo,
     exp: payload.exp,
   }
 }
@@ -116,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       usuario: payload.usuario,
       rol: payload.rol,
       restauranteId: payload.restaurante_id,
+      esDemo: payload.es_demo,
       exp: payload.exp,
     })
     return true
@@ -210,7 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           usuario: sesion.usuario,
           rol: sesion.rol,
           restauranteId: sesion.restauranteId,
-          esDemo: sesion.restauranteId === 1,
+          esDemo: sesion.esDemo,
         }
       : {
           ...base,

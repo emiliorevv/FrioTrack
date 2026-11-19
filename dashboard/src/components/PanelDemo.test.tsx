@@ -1,11 +1,12 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
   waitFor,
   within,
 } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ErrorApi,
   recuperarDemo,
@@ -33,33 +34,26 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(simularFalla).mockResolvedValue(undefined)
   vi.mocked(simularPuerta).mockResolvedValue(undefined)
-  vi.mocked(simularAtaque).mockResolvedValue(null)
+  vi.mocked(simularAtaque).mockResolvedValue(undefined)
   vi.mocked(recuperarDemo).mockResolvedValue(undefined)
 })
 
-function renderizar(props: { esDemo?: boolean; rol?: string } = {}) {
-  return render(
-    <PanelDemo
-      esDemo={props.esDemo ?? true}
-      rol={props.rol ?? 'dueno'}
-      onCerrar={onCerrar}
-      onCambio={onCambio}
-    />,
-  )
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+function renderizar() {
+  return render(<PanelDemo onCerrar={onCerrar} onCambio={onCambio} />)
+}
+
+async function clickAccion(nombre: string) {
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: nombre }))
+  })
 }
 
 describe('PanelDemo', () => {
-  it('no se muestra fuera del tenant demo', () => {
-    const { container } = renderizar({ esDemo: false, rol: 'dueno' })
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it.each(['gerente', 'otro'])('no se muestra para el rol %s', (rol) => {
-    const { container } = renderizar({ esDemo: true, rol })
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('muestra las cuatro acciones al dueño del tenant demo', () => {
+  it('muestra las cuatro acciones', () => {
     renderizar()
 
     expect(
@@ -79,52 +73,88 @@ describe('PanelDemo', () => {
     ).toBeInTheDocument()
   })
 
-  it('simula la falla, avisa y refresca el dashboard', async () => {
+  it('simula la falla sin cámara explícita y refresca a los 2 s y 30 s', async () => {
+    vi.useFakeTimers()
     renderizar()
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Simular falla de compresor' }),
-    )
+    await clickAccion('Simular falla de compresor')
 
-    await waitFor(() => expect(simularFalla).toHaveBeenCalledWith(1))
-    expect(onCambio).toHaveBeenCalledTimes(1)
+    expect(simularFalla).toHaveBeenCalledWith()
+    expect(onCambio).not.toHaveBeenCalled()
     expect(
-      screen.getByText('Simulación iniciada; observa la cámara de pescados.'),
+      screen.getByText('Simulación iniciada; observa las cámaras.'),
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      vi.advanceTimersByTime(1_999)
+    })
+    expect(onCambio).not.toHaveBeenCalled()
+
+    await act(async () => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(onCambio).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(28_000)
+    })
+    expect(onCambio).toHaveBeenCalledTimes(2)
+  })
+
+  it('simula la puerta sin cámara explícita', async () => {
+    renderizar()
+
+    await clickAccion('Simular puerta abierta')
+
+    expect(simularPuerta).toHaveBeenCalledWith()
+    expect(
+      screen.getByText('Simulación iniciada; observa la alerta de puerta.'),
     ).toBeInTheDocument()
   })
 
-  it('simula la puerta en la cámara 5', async () => {
+  it('refresca el ataque a los 500 ms', async () => {
+    vi.useFakeTimers()
     renderizar()
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Simular puerta abierta' }),
-    )
+    await clickAccion('Simular ataque SIEM')
+    expect(simularAtaque).toHaveBeenCalledWith()
 
-    await waitFor(() => expect(simularPuerta).toHaveBeenCalledWith(5))
+    await act(async () => {
+      vi.advanceTimersByTime(499)
+    })
+    expect(onCambio).not.toHaveBeenCalled()
+
+    await act(async () => {
+      vi.advanceTimersByTime(1)
+    })
     expect(onCambio).toHaveBeenCalledTimes(1)
   })
 
-  it('simula el ataque y refresca también seguridad', async () => {
+  it('refresca la recuperación a los 2 s', async () => {
+    vi.useFakeTimers()
     renderizar()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Simular ataque SIEM' }))
+    await clickAccion('Recuperar cámaras')
+    expect(recuperarDemo).toHaveBeenCalledWith()
+    expect(onCambio).not.toHaveBeenCalled()
 
-    await waitFor(() => expect(simularAtaque).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      vi.advanceTimersByTime(2_000)
+    })
     expect(onCambio).toHaveBeenCalledTimes(1)
-    expect(
-      screen.getByText('Ataque simulado; revisa el panel de Seguridad.'),
-    ).toBeInTheDocument()
   })
 
-  it('recupera las cámaras', async () => {
-    renderizar()
+  it('limpia los timers al desmontar', async () => {
+    vi.useFakeTimers()
+    const { unmount } = renderizar()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Recuperar cámaras' }))
+    await clickAccion('Simular falla de compresor')
+    unmount()
 
-    await waitFor(() => expect(recuperarDemo).toHaveBeenCalledTimes(1))
-    expect(
-      screen.getByText('Cámaras recuperadas; el dashboard se actualizará.'),
-    ).toBeInTheDocument()
+    await act(async () => {
+      vi.advanceTimersByTime(30_000)
+    })
+    expect(onCambio).not.toHaveBeenCalled()
   })
 
   it('bloquea los botones mientras hay una simulación en vuelo', async () => {
@@ -164,14 +194,10 @@ describe('PanelDemo', () => {
     vi.mocked(simularFalla).mockRejectedValue(new ErrorApi('Not Found', 404))
     renderizar()
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Simular falla de compresor' }),
-    )
+    await clickAccion('Simular falla de compresor')
 
     expect(
-      await screen.findByText(
-        'La simulación no está disponible en este entorno.',
-      ),
+      screen.getByText('La simulación no está disponible en este entorno.'),
     ).toBeInTheDocument()
     expect(onCambio).not.toHaveBeenCalled()
   })
@@ -180,27 +206,23 @@ describe('PanelDemo', () => {
     vi.mocked(simularFalla).mockRejectedValue(new ErrorApi('Prohibido', 403))
     renderizar()
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Simular falla de compresor' }),
-    )
+    await clickAccion('Simular falla de compresor')
 
     expect(
-      await screen.findByText('Tu rol no permite usar la simulación.'),
+      screen.getByText('Tu rol no permite usar la simulación.'),
     ).toBeInTheDocument()
   })
 
   it('muestra el detalle de un 409 de simulación repetida', async () => {
-    const detalle = 'Ya hay una simulación en curso.'
+    const detalle = 'Ya hay una simulación de falla en curso.'
     vi.mocked(simularFalla).mockRejectedValue(
       new ErrorApi(detalle, 409, null, detalle),
     )
     renderizar()
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Simular falla de compresor' }),
-    )
+    await clickAccion('Simular falla de compresor')
 
-    expect(await screen.findByText(detalle)).toBeInTheDocument()
+    expect(screen.getByText(detalle)).toBeInTheDocument()
     expect(onCambio).not.toHaveBeenCalled()
   })
 

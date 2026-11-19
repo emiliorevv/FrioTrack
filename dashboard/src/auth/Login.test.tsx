@@ -25,6 +25,7 @@ function sesionNueva(usuario = 'dueno-nuevo', rol = 'dueno') {
       uid: 7,
       rol,
       restaurante_id: 1,
+      es_demo: true,
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 3600,
       pwd: 'hash',

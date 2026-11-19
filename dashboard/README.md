@@ -1,22 +1,66 @@
 # Módulo 3 — Dashboard e Informática Móvil
 
-Tema 3.4. Responsable: _por definir_.
+Dashboard web en React + Vite, pensado primero para celular. Habla con la API de FríoTrack mediante [docs/contrato-api.md](../docs/contrato-api.md).
 
-Dashboard web en React + Vite, pensado primero para celular, desplegado en Vercel. Solo habla con la API a través de [docs/contrato-api.md](../docs/contrato-api.md). Mientras el backend no esté listo, se puede trabajar con datos de ejemplo que sigan exactamente los JSON del contrato.
+## Despliegue
 
-## Tareas
-- [ ] Proyecto React + Vite desplegado en Vercel.
-- [ ] Login (JWT) y guardar el token.
-- [ ] Vista general: una tarjeta por cámara con temperatura, puerta y color según estado (`en_rango`, `alerta`, `critica`).
-- [ ] Fila de KPIs: % en rango 24 h, alertas activas, tiempo de respuesta, valor en riesgo, merma del día y del mes.
-- [ ] Detalle de cámara: gráfica de las últimas 2 horas con el rango marcado y sus lotes.
-- [ ] Lista de alertas con botón "Atender" (rol `jefe_cocina`).
-- [ ] Conexión a `GET /api/stream` con `EventSource` para actualizar todo sin recargar — ver ADR-0004.
-- [ ] Probar en celular real (Android y iPhone) y en laptop.
-- [ ] Etiqueta "MODO DEMO ×N" cuando `GET /api/health` regrese `escala_tiempo` distinto de 1.
-- [ ] Lista corta de alertas de seguridad (`GET /api/seguridad/alertas`) para la demo del SIEM.
-- [ ] QR a la URL para la exposición.
+- API: https://friotrack-api-sw23.onrender.com
+- Dashboard: https://friotrack-dashboard.vercel.app
+- Swagger: https://friotrack-api-sw23.onrender.com/docs
+
+## Cuentas demo
+
+Todas usan la contraseña `friotrack-demo` y pertenecen al restaurante demo:
+
+| Usuario | Rol | Uso |
+| --- | --- | --- |
+| `jefe` | Jefe de cocina | Operación y atención de alertas |
+| `dueno` | Dueño | Configuración, inventario y demo |
+| `gerente` | Gerente | Solo lectura |
+
+## Funcionalidades
+
+- Login JWT con sesión persistida y protección de rutas.
+- Registro de restaurante + dueño (sign-up multi-tenant).
+- Vista general por cámara: temperatura, puerta, estado y tendencia.
+- KPIs de las últimas 24 h, alertas activas, valor en riesgo y merma.
+- Alertas operativas con acción “Atender” para jefe de cocina/dueño.
+- Panel SIEM con las alertas de seguridad del detector.
+- Configuración de cámaras y sensores por el dueño: rangos, tiempos, tokens de un solo uso.
+- Inventario y merma: alta, edición, movimiento entre cámaras, merma y borrado.
+- Actualización en vivo por SSE y respaldo por polling.
+- Panel de simulación para la demo.
+
+## Panel Demo
+
+Visible solo para `dueno` y `jefe_cocina` del restaurante demo. Desde el botón **Demo** del header se pueden lanzar simulaciones y recuperar el estado:
+
+- **Simular falla de compresor**: sube la temperatura de una cámara demo hasta abrir una alerta.
+- **Simular puerta abierta**: mantiene la puerta abierta en el congelador para abrir su alerta.
+- **Simular ataque SIEM**: inserta una alerta de seguridad simulada (`detalle.simulado=true`).
+- **Recuperar cámaras**: envía lecturas normales y cierra las alertas abiertas.
+
+Los endpoints `/api/demo/*` solo existen con `DEMO_HABILITADA=1` y en el tenant demo. En una instalación real se apaga esa variable: el panel y las rutas responden 404, y el frontend muestra “La simulación no está disponible en este entorno.”.
 
 ## Variables de entorno
-`VITE_API_URL` con la URL de la API en Render.
-`VITE_MOSTRAR_DEMO=1` muestra la pista de cuentas demo también en builds de producción.
+
+- `VITE_API_URL`: URL base de la API, por ejemplo `https://friotrack-api-sw23.onrender.com/api`.
+- `VITE_MOSTRAR_DEMO=1`: muestra los usuarios demo en el login fuera de desarrollo. Sin esta variable, producción solo muestra la pista en DEV; nunca se publica la contraseña fuera de DEV. Las credenciales están en este README.
+
+## Desarrollo local
+
+```bash
+npm install
+VITE_API_URL=http://127.0.0.1:8000/api npm run dev
+```
+
+El backend debe correr con `AUTH_REQUERIDA=1` y el seed cargado (`SEED_PASSWORD=friotrack-demo`). Para probar el panel demo, agrega `DEMO_HABILITADA=1` en el backend.
+
+## Calidad
+
+```bash
+npm run lint
+npm test
+npm run build
+npm run format:check
+```

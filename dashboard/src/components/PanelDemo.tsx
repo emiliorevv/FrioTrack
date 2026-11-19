@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { puedeSimularDemo } from '../auth/roles'
+import { useEffect, useRef, useState } from 'react'
 import {
   ErrorApi,
   recuperarDemo,
@@ -15,46 +14,47 @@ interface AccionPanel {
   id: AccionDemo
   etiqueta: string
   descripcion: string
-  ejecutar: () => Promise<unknown>
+  ejecutar: () => Promise<void>
   exito: string
-  etiquetaOcupado: string
+  /** Refrescos posteriores al 202; el backend aplica el cambio en background. */
+  refrescosMs: number[]
+  etiquetaOcupado?: string
 }
 
 const ACCIONES: AccionPanel[] = [
   {
     id: 'falla',
     etiqueta: 'Simular falla de compresor',
-    descripcion:
-      'La cámara 1 (Pescados y mariscos) saldrá de su rango de temperatura.',
-    ejecutar: () => simularFalla(1),
-    exito: 'Simulación iniciada; observa la cámara de pescados.',
-    etiquetaOcupado: 'Simulando…',
+    descripcion: 'Una cámara demo saldrá de su rango de temperatura.',
+    ejecutar: simularFalla,
+    exito: 'Simulación iniciada; observa las cámaras.',
+    refrescosMs: [2_000, 30_000],
   },
   {
     id: 'puerta',
     etiqueta: 'Simular puerta abierta',
-    descripcion:
-      'El congelador (cámara 5) quedará con la puerta abierta unos minutos.',
-    ejecutar: () => simularPuerta(5),
-    exito: 'Simulación iniciada; observa el congelador.',
-    etiquetaOcupado: 'Simulando…',
+    descripcion: 'Una cámara demo quedará con la puerta abierta unos minutos.',
+    ejecutar: simularPuerta,
+    exito: 'Simulación iniciada; observa la alerta de puerta.',
+    refrescosMs: [2_000, 30_000],
   },
   {
     id: 'ataque',
     etiqueta: 'Simular ataque SIEM',
     descripcion:
       'Se generará una alerta de seguridad simulada en el panel de Seguridad.',
-    ejecutar: () => simularAtaque(),
+    ejecutar: simularAtaque,
     exito: 'Ataque simulado; revisa el panel de Seguridad.',
-    etiquetaOcupado: 'Simulando…',
+    refrescosMs: [500],
   },
   {
     id: 'recuperar',
     etiqueta: 'Recuperar cámaras',
     descripcion:
       'Limpia la simulación y devuelve las cámaras demo a su estado normal.',
-    ejecutar: () => recuperarDemo(),
+    ejecutar: recuperarDemo,
     exito: 'Cámaras recuperadas; el dashboard se actualizará.',
+    refrescosMs: [2_000],
     etiquetaOcupado: 'Recuperando…',
   },
 ]
@@ -82,25 +82,46 @@ function mensajeDemo(fallo: unknown): string {
 }
 
 interface PanelDemoProps {
-  esDemo?: boolean
-  rol?: string
   onCerrar: () => void
   /** Refresca cámaras/KPIs y el carril de seguridad del dashboard. */
   onCambio?: () => void
 }
 
-export function PanelDemo({
-  esDemo = false,
-  rol = '',
-  onCerrar,
-  onCambio,
-}: PanelDemoProps) {
+export function PanelDemo({ onCerrar, onCambio }: PanelDemoProps) {
   const [ocupado, setOcupado] = useState<AccionDemo | null>(null)
   const [mensaje, setMensaje] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const timersRef = useRef<number[]>([])
+  const onCambioRef = useRef(onCambio)
 
-  if (!puedeSimularDemo(esDemo, rol)) {
-    return null
+  useEffect(() => {
+    onCambioRef.current = onCambio
+  }, [onCambio])
+
+  useEffect(
+    () => () => {
+      for (const timer of timersRef.current) {
+        window.clearTimeout(timer)
+      }
+      timersRef.current = []
+    },
+    [],
+  )
+
+  function limpiarTimers() {
+    for (const timer of timersRef.current) {
+      window.clearTimeout(timer)
+    }
+    timersRef.current = []
+  }
+
+  function programarRefrescos(delays: number[]) {
+    limpiarTimers()
+    for (const delay of delays) {
+      timersRef.current.push(
+        window.setTimeout(() => onCambioRef.current?.(), delay),
+      )
+    }
   }
 
   async function ejecutar(accion: AccionPanel) {
@@ -113,7 +134,7 @@ export function PanelDemo({
     try {
       await accion.ejecutar()
       setMensaje(accion.exito)
-      onCambio?.()
+      programarRefrescos(accion.refrescosMs)
     } catch (fallo) {
       setError(mensajeDemo(fallo))
     } finally {
@@ -131,7 +152,7 @@ export function PanelDemo({
     >
       <p className="config__nota">
         Atajos para la exposición. Solo afectan al restaurante demo y el
-        dashboard se refresca al terminar.
+        dashboard se refresca unos segundos después.
       </p>
 
       {mensaje && (
@@ -165,7 +186,9 @@ export function PanelDemo({
                 aria-busy={enCurso}
                 disabled={ocupado !== null}
               >
-                {enCurso ? accion.etiquetaOcupado : accion.etiqueta}
+                {enCurso
+                  ? (accion.etiquetaOcupado ?? 'Simulando…')
+                  : accion.etiqueta}
               </button>
             </li>
           )

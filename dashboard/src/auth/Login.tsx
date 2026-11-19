@@ -19,8 +19,8 @@ export function Login() {
   const [errorLocal, setErrorLocal] = useState<string | null>(null)
 
   const mensajeError = errorLocal ?? error
-  const mostrarDemo =
-    import.meta.env.DEV || import.meta.env.VITE_MOSTRAR_DEMO === '1'
+  const esDev = import.meta.env.DEV
+  const mostrarDemo = esDev || import.meta.env.VITE_MOSTRAR_DEMO === '1'
   const [textoNormal, textoCargando] = TEXTOS_BOTON[modo]
   const textoBoton = cargando ? textoCargando : textoNormal
 
@@ -185,7 +185,9 @@ export function Login() {
 
         {mostrarDemo && (
           <p className="auth-demo">
-            Demo: jefe / dueno / gerente · friotrack-demo
+            {esDev
+              ? 'Demo: jefe / dueno / gerente · friotrack-demo'
+              : 'Demo: usuarios jefe / dueno / gerente. Credenciales en el README.'}
           </p>
         )}
       </div>

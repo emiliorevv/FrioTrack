@@ -45,11 +45,15 @@ function respuesta(
   texto = 'OK',
   cabeceras: Record<string, string> = {},
 ): Response {
+  const cabecerasFinales = new Headers(cabeceras)
+  if (datos !== undefined && !cabecerasFinales.has('Content-Type')) {
+    cabecerasFinales.set('Content-Type', 'application/json')
+  }
   return {
     ok: estado >= 200 && estado < 300,
     status: estado,
     statusText: texto,
-    headers: new Headers(cabeceras),
+    headers: cabecerasFinales,
     json: async () => datos,
     text: async () =>
       datos === undefined
@@ -224,6 +228,22 @@ describe('pedir', () => {
       detalle: 'min_para_merma debe ser mayor que min_para_riesgo',
     })
     expect((fallo as Error).message).toContain('min_para_merma')
+  })
+
+  it('devuelve undefined para un 2xx que no es JSON', async () => {
+    fetchFalso.mockResolvedValue(
+      respuesta('<html>ok</html>', 200, 'OK', {
+        'Content-Type': 'text/html',
+      }),
+    )
+
+    await expect(pedir('/demo/falla')).resolves.toBeUndefined()
+  })
+
+  it('devuelve undefined para un 2xx JSON vacío', async () => {
+    fetchFalso.mockResolvedValue(respuesta(undefined, 202, 'Accepted'))
+
+    await expect(pedir('/demo/recuperar')).resolves.toBeUndefined()
   })
 
   it('usa el status cuando el cuerpo del error no trae detail', async () => {
@@ -997,7 +1017,7 @@ describe('panel de demo', () => {
     const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
     expect(url).toBe(`${BASE}/demo/falla`)
     expect(init.method).toBe('POST')
-    expect(JSON.parse(String(init.body))).toEqual({ camara_id: 1 })
+    expect(init.body).toBeUndefined()
   })
 
   it('simula la puerta en la cámara 5', async () => {
@@ -1006,13 +1026,14 @@ describe('panel de demo', () => {
     await expect(simularPuerta()).resolves.toBeUndefined()
 
     const [, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(String(init.body))).toEqual({ camara_id: 5 })
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeUndefined()
   })
 
   it('simula el ataque y valida la alerta SIEM', async () => {
     fetchFalso.mockResolvedValue(respuesta(alerta, 201, 'Created'))
 
-    await expect(simularAtaque()).resolves.toEqual(alerta)
+    await expect(simularAtaque()).resolves.toBeUndefined()
 
     const [url, init] = fetchFalso.mock.calls[0] as [string, RequestInit]
     expect(url).toBe(`${BASE}/demo/ataque`)

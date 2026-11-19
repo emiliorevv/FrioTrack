@@ -44,12 +44,14 @@ function tokenVigente(
   usuario = 'jefe',
   rol = 'jefe_cocina',
   restauranteId = 1,
+  esDemo = restauranteId === 1,
 ): string {
   return crearToken({
     sub: usuario,
     uid: 1,
     rol,
     restaurante_id: restauranteId,
+    es_demo: esDemo,
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + 3600,
     pwd: 'hash',
@@ -62,6 +64,7 @@ function tokenQueExpiraEn(segundos: number): string {
     uid: 1,
     rol: 'jefe_cocina',
     restaurante_id: 1,
+    es_demo: true,
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + segundos,
     pwd: 'hash',
@@ -201,11 +204,20 @@ describe('AuthProvider', () => {
   })
 
   it('marca esDemo=false para un tenant que no es el demo', () => {
-    setToken(tokenVigente('jefe-otro', 'jefe_cocina', 2))
+    setToken(tokenVigente('jefe-otro', 'jefe_cocina', 2, false))
 
     const { result } = montar()
 
     expect(result.current.restauranteId).toBe(2)
+    expect(result.current.esDemo).toBe(false)
+  })
+
+  it('respeta es_demo=false aunque el tenant sea el 1', () => {
+    setToken(tokenVigente('jefe-real', 'jefe_cocina', 1, false))
+
+    const { result } = montar()
+
+    expect(result.current.restauranteId).toBe(1)
     expect(result.current.esDemo).toBe(false)
   })
 
@@ -215,6 +227,7 @@ describe('AuthProvider', () => {
         sub: 'jefe',
         rol: 'jefe_cocina',
         restaurante_id: 1,
+        es_demo: true,
         exp: Math.floor(Date.now() / 1000) - 10,
       }),
     )
